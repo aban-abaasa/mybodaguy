@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Bike, MapPin, Clock, Star, LogOut, Package, ShoppingBag } from 'lucide-react';
+import { Bike, MapPin, Clock, Star, LogOut, Package, ShoppingBag, History } from 'lucide-react';
+import EnhancedRideRequest from '../components/EnhancedRideRequest';
 
 interface CustomerDashboardProps {
   user: any;
@@ -7,7 +8,7 @@ interface CustomerDashboardProps {
 }
 
 export default function CustomerDashboard({ user, onSignOut }: CustomerDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'rides' | 'deliveries'>('rides');
+  const [activeTab, setActiveTab] = useState<'rides' | 'deliveries' | 'history'>('rides');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50">
@@ -73,46 +74,22 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               <Package className="inline-block mr-2" size={20} />
               Order Delivery
             </button>
+            <button
+              onClick={() => setActiveTab('history')}
+              className={`flex-1 py-3 px-6 rounded-xl font-semibold transition-all ${
+                activeTab === 'history'
+                  ? 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <History className="inline-block mr-2" size={20} />
+              History
+            </button>
           </div>
 
           {/* Rides Tab */}
           {activeTab === 'rides' && (
-            <div className="space-y-4">
-              <div className="grid md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Pickup Location
-                  </label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                    <input
-                      type="text"
-                      placeholder="Enter pickup location"
-                      className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Drop-off Location
-                  </label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-                    <input
-                      type="text"
-                      placeholder="Enter drop-off location"
-                      className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-              <button className="w-full py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold text-lg rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg">
-                Request Ride Now
-              </button>
-              <p className="text-sm text-center text-slate-500">
-                Estimated fare will be calculated based on distance
-              </p>
-            </div>
+            <EnhancedRideRequest customerId={user.id} />
           )}
 
           {/* Deliveries Tab */}
@@ -135,19 +112,19 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
                   <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-2">
                     <ShoppingBag className="text-orange-500" size={24} />
                   </div>
-                  <p className="text-sm font-semibold text-slate-700">Supermarket 1</p>
+                  <p className="text-sm font-semibold text-slate-700">Shoprite</p>
                 </div>
                 <div className="bg-white border-2 border-slate-200 rounded-lg p-4 text-center hover:border-orange-500 transition-all cursor-pointer">
                   <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-2">
                     <ShoppingBag className="text-orange-500" size={24} />
                   </div>
-                  <p className="text-sm font-semibold text-slate-700">Supermarket 2</p>
+                  <p className="text-sm font-semibold text-slate-700">Carrefour</p>
                 </div>
                 <div className="bg-white border-2 border-slate-200 rounded-lg p-4 text-center hover:border-orange-500 transition-all cursor-pointer">
                   <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-2">
                     <ShoppingBag className="text-orange-500" size={24} />
                   </div>
-                  <p className="text-sm font-semibold text-slate-700">Supermarket 3</p>
+                  <p className="text-sm font-semibold text-slate-700">Quality</p>
                 </div>
                 <div className="bg-white border-2 border-slate-200 rounded-lg p-4 text-center hover:border-orange-500 transition-all cursor-pointer">
                   <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-2">
@@ -158,19 +135,18 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               </div>
             </div>
           )}
+
+          {/* History Tab */}
+          {activeTab === 'history' && (
+            <div className="text-center py-12 bg-slate-50 rounded-lg">
+              <Clock className="w-12 h-12 text-slate-400 mx-auto mb-4" />
+              <h4 className="text-lg font-semibold text-slate-800 mb-2">No Ride History</h4>
+              <p className="text-slate-600">Your completed rides will appear here</p>
+            </div>
+          )}
         </div>
 
-        {/* Recent Activity */}
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <h3 className="text-xl font-bold text-slate-800 mb-6">Recent Activity</h3>
-          <div className="text-center py-12 bg-slate-50 rounded-lg">
-            <Clock className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-            <h4 className="text-lg font-semibold text-slate-800 mb-2">No Recent Activity</h4>
-            <p className="text-slate-600">Your rides and deliveries will appear here</p>
-          </div>
-        </div>
-
-        {/* Info Cards */}
+        {/* Info Cards - Removed Recent Activity section */}
         <div className="grid md:grid-cols-3 gap-6 mt-8">
           <div className="bg-white rounded-xl shadow-md p-6 text-center">
             <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
