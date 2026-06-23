@@ -6,7 +6,8 @@
   "scripts": {
     "init": "node initialize_db.js",
     "init:clean": "node initialize_db.js --clean",
-    "init:verbose": "node initialize_db.js --verbose"
+    "init:verbose": "node initialize_db.js --verbose",
+    "init:mybodaguy": "node initialize_mybodaguy.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",

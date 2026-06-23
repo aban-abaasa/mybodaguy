@@ -1,256 +1,122 @@
-# Google OAuth Sign-In Setup Guide
-
-This guide walks you through enabling Google OAuth sign-in for your CyberLearn application.
-
-## Prerequisites
-
-- Supabase project already set up and running
-- Google Cloud Console access
-- Frontend and backend properly connected
+# Google OAuth Setup Guide for MyBodaGuy
 
 ## Step 1: Create Google OAuth Credentials
 
-### 1.1 Go to Google Cloud Console
-1. Visit [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project or select an existing one
-3. Go to **APIs & Services** > **Credentials**
+### 1. Go to Google Cloud Console
+Visit: https://console.cloud.google.com/
 
-### 1.2 Create OAuth 2.0 Client ID
-1. Click **+ Create Credentials** > **OAuth client ID**
-2. If prompted, configure the OAuth consent screen first:
-   - Choose **External** for user type
-   - Fill in required app information (app name, user support email, developer contact)
-   - Add scopes: `email`, `profile`, `openid`
-   - Save and continue
+### 2. Create or Select a Project
+- Click on the project dropdown at the top
+- Click "NEW PROJECT"
+- Name it: "MyBodaGuy" or similar
+- Click "CREATE"
 
-### 1.3 Create Web Application Credentials
-1. Application type: **Web application**
-2. Add **Authorized redirect URIs** (for local + production):
-   ```
-   http://localhost:5173/auth/callback
-   https://yourdomain.com/auth/callback
-   https://<project-ref>.supabase.co/auth/v1/callback?provider=google
-   ```
-3. Download the credentials JSON (you'll need the Client ID and Client Secret)
+### 3. Enable Google+ API
+- Go to "APIs & Services" → "Library"
+- Search for "Google+ API"
+- Click on it and click "ENABLE"
+
+### 4. Create OAuth Consent Screen
+- Go to "APIs & Services" → "OAuth consent screen"
+- Select "External" (for testing)
+- Click "CREATE"
+- Fill in the required fields:
+  - App name: **MyBodaGuy**
+  - User support email: **Your email**
+  - Developer contact: **Your email**
+- Click "SAVE AND CONTINUE"
+- Skip Scopes (click "SAVE AND CONTINUE")
+- Add test users if needed (your own email)
+- Click "SAVE AND CONTINUE"
+
+### 5. Create OAuth Client ID
+- Go to "APIs & Services" → "Credentials"
+- Click "+ CREATE CREDENTIALS" → "OAuth client ID"
+- Application type: **Web application**
+- Name: **MyBodaGuy Web Client**
+- Authorized JavaScript origins:
+  ```
+  http://localhost:5173
+  http://localhost:5174
+  http://localhost:3000
+  ```
+- Authorized redirect URIs:
+  ```
+  https://hswxazpxcgtqbxeqcxxw.supabase.co/auth/v1/callback
+  http://localhost:5173
+  http://localhost:5174
+  ```
+- Click "CREATE"
+
+### 6. Copy Your Credentials
+You'll see a popup with:
+- **Client ID** (looks like: xxxxx.apps.googleusercontent.com)
+- **Client Secret** (looks like: GOCSPX-xxxxx)
+
+**Save these securely!**
+
+---
 
 ## Step 2: Configure Supabase
 
-### 2.1 In Supabase Dashboard
-1. Go to **Authentication** > **Providers**
-2. Find **Google** and click to configure
-3. Enable the provider
-4. Paste your **Client ID** and **Client Secret** from Google Cloud Console
-5. Set the **Redirect URL** (Supabase provides this)
-6. Save
+### 1. Go to Supabase Dashboard
+Visit: https://app.supabase.com/project/hswxazpxcgtqbxeqcxxw
 
-### 2.2 Configure Authentication Settings
-In Supabase Dashboard, go to **Authentication** > **URL Configuration**:
-- **Site URL**: `http://localhost:5173` (dev) or your production domain
-- **Redirect URLs** (add these):
-  ```
-  http://localhost:5173/auth/callback
-  https://yourdomain.com/auth/callback
-  ```
+### 2. Enable Google Provider
+- Go to **Authentication** → **Providers**
+- Find **Google** in the list
+- Toggle it to **Enabled**
+- Paste your **Client ID**
+- Paste your **Client Secret**
+- Site URL should be: `http://localhost:5173` (for development)
+- Redirect URLs: Add `http://localhost:5173/**`
 
-## Step 3: Environment Configuration
+### 3. Save Configuration
+Click **Save** at the bottom
 
-Your `.env.local` already has Supabase configured:
-```env
-VITE_SUPABASE_URL=https://hswxazpxcgtqbxeqcxxw.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+---
 
-SUPABASE_URL=https://hswxazpxcgtqbxeqcxxw.supabase.co
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-```
+## Step 3: Test the Integration
 
-✅ **No changes needed** - Supabase OAuth is handled automatically
+1. Start your development server:
+   ```bash
+   cd frontend
+   npm run dev
+   ```
 
-## Step 4: Frontend Integration (Already Implemented)
+2. Open your app: http://localhost:5173
 
-### 4.1 Auth Service
-The `signInWithGoogle()` function is already implemented in `src/services/authService.js`:
+3. Click "Get Started" → Click "Continue with Google"
 
-```javascript
-export async function signInWithGoogle() {
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: {
-      redirectTo: `${window.location.origin}/auth/callback`,
-    },
-  });
+4. You should be redirected to Google sign-in
 
-  if (error) {
-    console.error('Google sign in error:', error.message);
-    throw new Error(error.message);
-  }
+5. After signing in with Google, you should be redirected back to your app
 
-  return {
-    success: true,
-    message: 'Google sign in initiated',
-  };
-}
-```
+---
 
-### 4.2 Sign-In Form Button
-The "Sign in with Gmail" button is already in `src/SignInForm.tsx`:
+## Troubleshooting
 
-```tsx
-<button
-  className="auth-button bg-blue-600 hover:bg-blue-700"
-  type="button"
-  disabled={submitting}
-  onClick={() => {
-    setSubmitting(true);
-    authService
-      .signInWithGoogle()
-      .catch((error: Error) => {
-        toast.error(error.message);
-        setSubmitting(false);
-      });
-  }}
->
-  {submitting ? "Redirecting to Google..." : "Sign in with Gmail"}
-</button>
-```
+### Error: "redirect_uri_mismatch"
+- Make sure the redirect URI in Google Console matches exactly:
+  `https://hswxazpxcgtqbxeqcxxw.supabase.co/auth/v1/callback`
 
-## Step 5: Create Auth Callback Handler
+### Error: "Access blocked: This app's request is invalid"
+- Make sure OAuth consent screen is configured
+- Add your email as a test user if in testing mode
 
-Create a new file `src/pages/AuthCallback.tsx` to handle OAuth redirects:
+### User signs in but no dashboard appears
+- Check browser console for errors
+- Verify database tables are created (run COMPLETE_MYBODAGUY_SETUP.sql)
+- Check that the user_profiles table has the new user
 
-```typescript
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { supabase } from "../services/supabaseClient";
+---
 
-export default function AuthCallback() {
-  const navigate = useNavigate();
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+## Development Credentials (Keep Secure!)
 
-  useEffect(() => {
-    const handleAuthCallback = async () => {
-      try {
-        // Supabase automatically handles the callback
-        const { data, error } = await supabase.auth.getSession();
+After setup, your credentials will be:
+- **Google Client ID**: [Your Client ID]
+- **Google Client Secret**: [Your Client Secret]
+- **Supabase URL**: https://hswxazpxcgtqbxeqcxxw.supabase.co
+- **Supabase Anon Key**: (already in .env.local)
 
-        if (error) throw error;
-
-        if (data.session) {
-          // User is authenticated
-          setTimeout(() => {
-            navigate("/dashboard");
-          }, 1000);
-        } else {
-          setError("Authentication failed");
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    handleAuthCallback();
-  }, [navigate]);
-
-  if (loading) {
-    return <div className="flex items-center justify-center h-screen">Processing authentication...</div>;
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center h-screen text-red-600">
-        {error}
-      </div>
-    );
-  }
-
-  return null;
-}
-```
-
-## Step 6: Update Your Routes
-
-Add the callback route to your router configuration (e.g., in `src/App.tsx` or your routing setup):
-
-```typescript
-import AuthCallback from './pages/AuthCallback';
-
-// In your route definitions:
-{
-  path: '/auth/callback',
-  element: <AuthCallback />
-}
-```
-
-## Step 7: Database Integration
-
-Your database schema already supports OAuth users automatically:
-
-### 7.1 Users Table
-The `public.users` table mirrors `auth.users`:
-- Google users are automatically created in `auth.users` by Supabase
-- The `handle_new_auth_user()` trigger creates corresponding records in `public.users`
-- Email is extracted from Google profile automatically
-
-### 7.2 User Profile Table
-Located in `02_user_profiles.sql`, automatically links to users
-
-## Step 8: Testing
-
-### Local Testing
-1. Start your frontend: `npm run dev`
-2. Navigate to the sign-in page
-3. Click "Sign in with Gmail"
-4. You should be redirected to Google's login
-5. After authentication, you'll be redirected back to your app
-
-### Troubleshooting
-
-**Issue: "Redirect URI mismatch"**
-- Solution: Ensure your redirect URLs exactly match in both Google Cloud Console and Supabase
-
-**Issue: "OAuth provider not configured"**
-- Solution: Verify Google provider is enabled in Supabase > Authentication > Providers
-
-**Issue: User not created in public.users table**
-- Solution: Check that the `handle_new_auth_user()` trigger is enabled in your database
-
-**Issue: CORS errors**
-- Solution: Add your domain to allowed origins in Supabase dashboard
-
-## Step 9: Production Deployment
-
-Before deploying to production:
-
-1. **Update redirect URLs** in:
-   - Google Cloud Console (OAuth credentials)
-   - Supabase Dashboard (URL Configuration)
-
-2. **Set Site URL** in Supabase to your production domain
-
-3. **Environment Variables**: Update `VITE_SUPABASE_URL` if using a production Supabase instance
-
-Example production config:
-```env
-VITE_SUPABASE_URL=https://your-prod-instance.supabase.co
-VITE_SUPABASE_ANON_KEY=your-prod-anon-key
-```
-
-## Useful Links
-
-- [Supabase Google OAuth Setup](https://supabase.com/docs/guides/auth/social-login/auth-google)
-- [Google Cloud Console](https://console.cloud.google.com/)
-- [Supabase Auth Documentation](https://supabase.com/docs/guides/auth)
-
-## Checklist
-
-- [ ] Google OAuth credentials created
-- [ ] Google Client ID and Secret added to Supabase
-- [ ] Redirect URLs configured in Google Cloud Console
-- [ ] Redirect URLs configured in Supabase
-- [ ] Site URL set in Supabase
-- [ ] Auth callback route created
-- [ ] Frontend routes updated
-- [ ] Tested locally
-- [ ] Production URLs configured
+**Never commit these to git!**
