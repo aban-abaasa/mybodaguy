@@ -13,7 +13,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5177,
+    port: 5173,
     proxy: {
       // If you need to proxy API calls to a backend, add them here
     },
