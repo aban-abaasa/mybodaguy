@@ -50,14 +50,20 @@ export default function App() {
     // Subscribe to auth changes
     const { data: authListener } = authService.onAuthStateChange(async (event, session) => {
       console.log('[MyBodaGuy] Auth state changed:', event, session);
-      if (session?.user) {
+      
+      // Only handle SIGNED_OUT event to prevent false logouts
+      if (event === 'SIGNED_OUT') {
+        setUser(null);
+        setUserRole(null);
+        return;
+      }
+      
+      // For SIGNED_IN and TOKEN_REFRESHED, update the session
+      if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')) {
         setUser(session.user);
         const role = await userService.getUserRole(session.user.id);
         console.log('[MyBodaGuy] Role after auth change:', role);
         setUserRole(role);
-      } else {
-        setUser(null);
-        setUserRole(null);
       }
     });
 

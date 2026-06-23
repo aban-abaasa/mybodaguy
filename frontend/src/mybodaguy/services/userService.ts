@@ -80,16 +80,42 @@ export const userService = {
 
   // Get all users (developer only)
   async getAllUsers() {
-    const { data, error } = await supabase
-      .from('mbg_users')
-      .select(`
-        *,
-        mbg_user_profiles (*)
-      `)
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-    return data;
+    // First try to get users from the database function that queries auth.users
+    try {
+      const { data, error } = await supabase.rpc('get_all_auth_users');
+      
+      if (error) {
+        console.error('[UserService] Error calling get_all_auth_users:', error);
+        // Fallback to mbg_users table if function doesn't exist
+        const fallbackResult = await supabase
+          .from('mbg_users')
+          .select(`
+            *,
+            mbg_user_profiles (*)
+          `)
+          .order('created_at', { ascending: false });
+        
+        if (fallbackResult.error) throw fallbackResult.error;
+        return fallbackResult.data;
+      }
+      
+      // Transform the RPC result to match expected format
+      return data?.map((user: any) => ({
+        id: user.id,
+        email: user.email,
+        phone: user.phone,
+        role_type: user.role_type,
+        is_active: user.is_active,
+        created_at: user.created_at,
+        mbg_user_profiles: user.full_name ? [{ full_name: user.full_name }] : [],
+        user_metadata: {
+          full_name: user.full_name
+        }
+      })) || [];
+    } catch (err) {
+      console.error('[UserService] Error in getAllUsers:', err);
+      throw err;
+    }
   },
 
   // Update user role (developer only)

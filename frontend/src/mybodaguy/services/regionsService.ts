@@ -220,11 +220,14 @@ export const regionsService = {
   // Get chairperson for a specific region
   async getRegionChairperson(regionType: string, regionId: string) {
     const { data, error } = await supabase
-      .from('committee_members')
+      .from('mbg_committee_members')
       .select(`
         *,
-        mbg_users!inner(email, phone),
-        mbg_user_profiles!inner(full_name)
+        mbg_users!user_id(
+          email,
+          phone,
+          mbg_user_profiles(full_name)
+        )
       `)
       .eq('region_type', regionType)
       .eq('region_id', regionId)

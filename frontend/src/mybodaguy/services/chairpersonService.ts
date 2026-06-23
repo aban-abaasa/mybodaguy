@@ -56,11 +56,11 @@ export const chairpersonService = {
   // Get current user's committee member info
   async getMyCommitteeInfo(userId: string): Promise<CommitteeMember | null> {
     const { data, error } = await supabase
-      .from('committee_members')
+      .from('mbg_committee_members')
       .select('*')
       .eq('user_id', userId)
       .eq('is_active', true)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('[ChairpersonService] Error fetching committee info:', error);
@@ -93,28 +93,66 @@ export const chairpersonService = {
     notes?: string;
   }): Promise<{ success: boolean; error?: string; committeeId?: string }> {
     try {
-      // First, look up or create the target user
+      // First, check if user exists in mbg_users
       const { data: existingUser, error: userLookupError } = await supabase
         .from('mbg_users')
         .select('id')
         .eq('email', params.targetUserEmail)
-        .single();
+        .maybeSingle();
 
-      let targetUserId: string;
-
-      if (userLookupError || !existingUser) {
-        // User doesn't exist, need to invite them
+      if (userLookupError) {
+        console.error('Error looking up user:', userLookupError);
         return {
           success: false,
-          error: 'User not found. They need to sign up first or you need to send them an invitation.'
+          error: `Error looking up user: ${userLookupError.message}`
         };
       }
 
-      targetUserId = existingUser.id;
+      let targetUserId: string;
 
-      // Call the assign_chairperson function
+      if (!existingUser) {
+        // User not in mbg_users yet, sync from auth.users using database function
+        console.log('[ChairpersonService] User not in mbg_users, syncing from auth.users...');
+        
+        // Get user ID from auth.users
+        const { data: authUsers, error: authError } = await supabase.rpc('get_all_auth_users');
+        
+        if (authError) {
+          return {
+            success: false,
+            error: 'Could not verify user exists. Please ensure they have signed up.'
+          };
+        }
+
+        const authUser = authUsers?.find((u: any) => u.email === params.targetUserEmail);
+        
+        if (!authUser) {
+          return {
+            success: false,
+            error: 'User not found. They need to sign up first.'
+          };
+        }
+
+        // Sync user using database function (bypasses RLS)
+        const { data: syncResult, error: syncError } = await supabase
+          .rpc('sync_user_from_auth', { target_user_id: authUser.id });
+
+        if (syncError || !syncResult?.success) {
+          console.error('[ChairpersonService] Error syncing user:', syncError || syncResult?.error);
+          return {
+            success: false,
+            error: `Could not sync user: ${syncError?.message || syncResult?.error || 'Unknown error'}`
+          };
+        }
+
+        targetUserId = authUser.id;
+      } else {
+        targetUserId = existingUser.id;
+      }
+
+      // Call the mbg_assign_chairperson function (MyBodaGuy specific)
       const { data, error } = await supabase
-        .rpc('assign_chairperson', {
+        .rpc('mbg_assign_chairperson', {
           target_user_id: targetUserId,
           target_role: params.targetRole,
           target_region_type: params.targetRegionType,
@@ -147,7 +185,7 @@ export const chairpersonService = {
   // Update subordinate chairperson status
   async updateSubordinateStatus(committeeId: string, isActive: boolean): Promise<boolean> {
     const { error } = await supabase
-      .from('committee_members')
+      .from('mbg_committee_members')
       .update({ is_active: isActive, updated_at: new Date().toISOString() })
       .eq('id', committeeId);
 
