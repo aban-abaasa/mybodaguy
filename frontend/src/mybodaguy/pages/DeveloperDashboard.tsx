@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '../services/userService';
+import RegionsManagement from '../components/RegionsManagement';
 
 interface DeveloperDashboardProps {
   user: any;
@@ -98,9 +99,9 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
 
         {/* Tab Content */}
         <div className="bg-white rounded-xl shadow-lg p-6">
-          {activeTab === 'overview' && <OverviewTab />}
+          {activeTab === 'overview' && <OverviewTab onSwitchToRegions={() => setActiveTab('regions')} />}
           {activeTab === 'users' && <UsersTab users={users} loading={loading} onReload={loadUsers} />}
-          {activeTab === 'regions' && <RegionsTab />}
+          {activeTab === 'regions' && <RegionsManagement />}
           {activeTab === 'commissions' && <CommissionsTab />}
           {activeTab === 'settings' && <SettingsTab />}
         </div>
@@ -109,7 +110,7 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
   );
 }
 
-function OverviewTab() {
+function OverviewTab({ onSwitchToRegions }: { onSwitchToRegions: () => void }) {
   return (
     <div>
       <h2 className="text-2xl font-bold text-slate-800 mb-6">Platform Overview</h2>
@@ -129,7 +130,10 @@ function OverviewTab() {
           and assigning chairpersons.
         </p>
         <div className="flex flex-wrap gap-4 justify-center">
-          <button className="px-6 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all shadow-md">
+          <button 
+            onClick={onSwitchToRegions}
+            className="px-6 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all shadow-md"
+          >
             Setup Regions
           </button>
           <button className="px-6 py-2 bg-white text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-all shadow-md border border-slate-200">
@@ -240,19 +244,6 @@ function UsersTab({ users, loading, onReload }: { users: any[]; loading: boolean
           </table>
         </div>
       )}
-    </div>
-  );
-}
-
-function RegionsTab() {
-  return (
-    <div>
-      <h2 className="text-2xl font-bold text-slate-800 mb-6">Geographic Regions</h2>
-      <div className="bg-slate-50 rounded-lg p-8 text-center">
-        <MapPin className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-        <p className="text-slate-600 mb-4">Region management coming soon</p>
-        <p className="text-sm text-slate-500">You'll be able to add districts, divisions, subcounties, parishes, and stages here.</p>
-      </div>
     </div>
   );
 }

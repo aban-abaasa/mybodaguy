@@ -5,25 +5,52 @@ export const userService = {
   async getUserRole(userId: string): Promise<string | null> {
     console.log('[UserService] Fetching role for user:', userId);
     
-    const { data, error } = await supabase
-      .from('mbg_users')
-      .select('role_type')
-      .eq('id', userId)
-      .single();
-
-    if (error) {
-      console.error('[UserService] Error fetching user role:', error);
-      console.error('[UserService] Error details:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint
+    try {
+      // Add timeout wrapper to detect hanging queries
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Query timeout after 10 seconds')), 10000);
       });
+
+      const queryPromise = supabase
+        .from('mbg_users')
+        .select('role_type')
+        .eq('id', userId)
+        .single();
+
+      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
+
+      if (error) {
+        console.error('[UserService] Error fetching user role:', error);
+        console.error('[UserService] Error details:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        });
+        return null;
+      }
+
+      console.log('[UserService] User role data:', data);
+      return data?.role_type || null;
+    } catch (err) {
+      console.error('[UserService] Query failed or timed out:', err);
+      
+      // Check if Supabase is reachable
+      console.log('[UserService] Testing Supabase connection...');
+      try {
+        const testResponse = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/`, {
+          method: 'HEAD',
+          headers: {
+            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
+          }
+        });
+        console.log('[UserService] Supabase REST endpoint status:', testResponse.status);
+      } catch (fetchErr) {
+        console.error('[UserService] Cannot reach Supabase:', fetchErr);
+      }
+      
       return null;
     }
-
-    console.log('[UserService] User role data:', data);
-    return data?.role_type || null;
   },
 
   // Get user profile

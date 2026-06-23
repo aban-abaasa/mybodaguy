@@ -12,11 +12,11 @@ CREATE TYPE chairperson_role AS ENUM (
 
 CREATE TABLE IF NOT EXISTS public.committee_members (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.mbg_users(id) ON DELETE CASCADE,
   role chairperson_role NOT NULL,
   region_type region_type NOT NULL,
   region_id UUID NOT NULL,
-  assigned_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  assigned_by UUID REFERENCES public.mbg_users(id) ON DELETE SET NULL,
   is_active BOOLEAN NOT NULL DEFAULT true,
   appointed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
