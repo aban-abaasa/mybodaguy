@@ -6,50 +6,147 @@ export const userService = {
     console.log('[UserService] Fetching role for user:', userId);
     
     try {
-      // Add timeout wrapper to detect hanging queries
-      const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('Query timeout after 10 seconds')), 10000);
-      });
+      // Add a reasonable timeout (30 seconds) with proper fallback
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      const queryPromise = supabase
+      const { data, error } = await supabase
         .from('mbg_users')
-        .select('role_type')
+        .select('role_type, user_roles')
         .eq('id', userId)
-        .single();
+        .abortSignal(controller.signal)
+        .maybeSingle();
 
-      const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
+      clearTimeout(timeoutId);
 
       if (error) {
         console.error('[UserService] Error fetching user role:', error);
-        console.error('[UserService] Error details:', {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-          hint: error.hint
-        });
-        return null;
+        // Return 'customer' as default instead of null to prevent logout
+        return 'customer';
+      }
+
+      if (!data) {
+        console.warn('[UserService] No user record found for:', userId);
+        console.log('[UserService] This user may need to be synced from auth.users');
+        // Try to sync the user first
+        try {
+          const { data: syncResult } = await supabase.rpc('sync_user_from_auth', {
+            target_user_id: userId
+          });
+          if (syncResult?.success) {
+            console.log('[UserService] User synced successfully, retrying...');
+            // Retry once after sync
+            const { data: retryData } = await supabase
+              .from('mbg_users')
+              .select('role_type, user_roles')
+              .eq('id', userId)
+              .maybeSingle();
+            return retryData?.role_type || retryData?.user_roles?.[0] || 'customer';
+          }
+        } catch (syncErr) {
+          console.error('[UserService] Sync failed:', syncErr);
+        }
+        // Return 'customer' as default
+        return 'customer';
       }
 
       console.log('[UserService] User role data:', data);
-      return data?.role_type || null;
-    } catch (err) {
-      console.error('[UserService] Query failed or timed out:', err);
-      
-      // Check if Supabase is reachable
-      console.log('[UserService] Testing Supabase connection...');
-      try {
-        const testResponse = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/rest/v1/`, {
-          method: 'HEAD',
-          headers: {
-            'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY
-          }
-        });
-        console.log('[UserService] Supabase REST endpoint status:', testResponse.status);
-      } catch (fetchErr) {
-        console.error('[UserService] Cannot reach Supabase:', fetchErr);
+      // Fall back to user_roles array if role_type is not set
+      return data?.role_type || data?.user_roles?.[0] || 'customer';
+    } catch (err: any) {
+      if (err.name === 'AbortError') {
+        console.error('[UserService] Query timed out after 30 seconds');
+      } else {
+        console.error('[UserService] Query failed:', err);
       }
-      
-      return null;
+      // Return 'customer' as default to prevent logout on errors
+      return 'customer';
+    }
+  },
+
+  // Get all roles for a user (NEW - Multi-role support)
+  async getUserRoles(userId: string): Promise<string[]> {
+    console.log('[UserService] Fetching all roles for user:', userId);
+    
+    try {
+      const { data, error } = await supabase.rpc('get_user_roles', {
+        target_user_id: userId
+      });
+
+      if (error) {
+        console.error('[UserService] Error fetching user roles:', error);
+        // Fallback to single role
+        const singleRole = await this.getUserRole(userId);
+        return singleRole ? [singleRole] : ['customer'];
+      }
+
+      console.log('[UserService] User roles:', data);
+      return data || ['customer'];
+    } catch (err) {
+      console.error('[UserService] getUserRoles failed:', err);
+      // Fallback to single role
+      const singleRole = await this.getUserRole(userId);
+      return singleRole ? [singleRole] : ['customer'];
+    }
+  },
+
+  // Add role to user
+  async addUserRole(userId: string, role: string): Promise<boolean> {
+    try {
+      const { data, error } = await supabase.rpc('add_user_role', {
+        target_user_id: userId,
+        new_role: role
+      });
+
+      if (error) {
+        console.error('[UserService] Error adding user role:', error);
+        return false;
+      }
+
+      return data;
+    } catch (err) {
+      console.error('[UserService] addUserRole failed:', err);
+      return false;
+    }
+  },
+
+  // Remove role from user
+  async removeUserRole(userId: string, role: string): Promise<boolean> {
+    try {
+      const { data, error } = await supabase.rpc('remove_user_role', {
+        target_user_id: userId,
+        role_to_remove: role
+      });
+
+      if (error) {
+        console.error('[UserService] Error removing user role:', error);
+        return false;
+      }
+
+      return data;
+    } catch (err) {
+      console.error('[UserService] removeUserRole failed:', err);
+      return false;
+    }
+  },
+
+  // Check if user has specific role
+  async userHasRole(userId: string, role: string): Promise<boolean> {
+    try {
+      const { data, error} = await supabase.rpc('user_has_role', {
+        target_user_id: userId,
+        role_to_check: role
+      });
+
+      if (error) {
+        console.error('[UserService] Error checking user role:', error);
+        return false;
+      }
+
+      return data || false;
+    } catch (err) {
+      console.error('[UserService] userHasRole failed:', err);
+      return false;
     }
   },
 

@@ -20,17 +20,27 @@ export default function MyBodaGuyApp() {
   useEffect(() => {
     // Initialize auth state
     const initAuth = async () => {
+      console.log('[MyBodaGuy] Initializing auth...');
       try {
         const session = await authService.getSession();
+        console.log('[MyBodaGuy] Session:', session ? 'Found' : 'null');
+        
         if (session?.user) {
           setUser(session.user);
           // Fetch user role
-          const role = await userService.getUserRole(session.user.id);
-          setUserRole(role);
+          try {
+            const role = await userService.getUserRole(session.user.id);
+            console.log('[MyBodaGuy] User role:', role);
+            setUserRole(role || 'customer'); // Default to customer instead of null
+          } catch (err) {
+            console.error('[MyBodaGuy] Error fetching role:', err);
+            setUserRole('customer'); // Default to customer on error
+          }
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
       } finally {
+        console.log('[MyBodaGuy] Setting loading to false');
         setLoading(false);
       }
     };
@@ -39,13 +49,26 @@ export default function MyBodaGuyApp() {
 
     // Subscribe to auth changes
     const { data: authListener } = authService.onAuthStateChange(async (event, session) => {
+      console.log('[MyBodaGuy] Auth state changed:', event, session ? 'Session exists' : 'No session');
+      
       if (session?.user) {
         setUser(session.user);
-        const role = await userService.getUserRole(session.user.id);
-        setUserRole(role);
+        try {
+          const role = await userService.getUserRole(session.user.id);
+          console.log('[MyBodaGuy] Role after auth change:', role);
+          setUserRole(role || 'customer'); // Default to customer instead of null
+        } catch (err) {
+          console.error('[MyBodaGuy] Error fetching role after auth change:', err);
+          setUserRole('customer'); // Default to customer on error
+        }
       } else {
-        setUser(null);
-        setUserRole(null);
+        // Only clear user state if this is an actual SIGNED_OUT event
+        // Don't logout on token refresh or other transient events
+        if (event === 'SIGNED_OUT') {
+          console.log('[MyBodaGuy] User signed out');
+          setUser(null);
+          setUserRole(null);
+        }
       }
     });
 

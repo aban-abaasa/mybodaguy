@@ -6,6 +6,9 @@ module.exports = {
   purge: ["./index.html", "./src/**/*.{vue,js,ts,jsx,tsx}"],
   theme: {
     extend: {
+      screens: {
+        'xs': '475px', // Extra small devices (small phones)
+      },
       fontFamily: {
         sans: ["Inter var", ...fontFamily.sans],
       },

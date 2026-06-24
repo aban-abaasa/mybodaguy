@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag } from 'lucide-react';
+import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User } from 'lucide-react';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
 import SupermarketPartnership from '../components/SupermarketPartnership';
+import ProfileModal from '../components/ProfileModal';
+import RiderICANEarnings from '../components/RiderICANEarnings';
 
 interface RiderDashboardProps {
   user: any;
@@ -13,127 +15,196 @@ type TabType = 'overview' | 'mode' | 'locations' | 'partnerships';
 
 export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg sticky top-0 z-50">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <Bike size={28} />
-              <div>
-                <h1 className="text-xl font-bold">My Boda Guy</h1>
-                <p className="text-xs opacity-90">Rider Dashboard</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-2 bg-white/20 px-3 py-1 rounded-full">
-                <span className="text-sm font-medium">{user.email}</span>
-              </div>
-              <button
-                onClick={onSignOut}
-                className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
-              >
-                <LogOut size={18} />
-                <span className="hidden sm:inline">Sign Out</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Navigation Tabs */}
-      <div className="bg-white border-b border-slate-200 sticky top-16 z-40">
-        <div className="container mx-auto px-4">
-          <div className="flex gap-1 overflow-x-auto">
+    <div>
+      {/* Content without header - header is in UnifiedDashboard */}
+      
+      {/* Navigation Tabs - Desktop Only */}
+      <div className="hidden md:block bg-white border-b border-slate-200 sticky top-12 xs:top-14 sm:top-16 z-40">
+        <div className="container mx-auto px-1 xs:px-2 sm:px-4">
+          <div className="flex gap-0.5 overflow-x-auto scrollbar-hide">
             <TabButton
               active={activeTab === 'overview'}
               onClick={() => setActiveTab('overview')}
-              icon={<TrendingUp size={18} />}
+              icon={<TrendingUp size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
               label="Overview"
             />
             <TabButton
               active={activeTab === 'mode'}
               onClick={() => setActiveTab('mode')}
-              icon={<Settings size={18} />}
+              icon={<Settings size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
               label="Work Mode"
             />
             <TabButton
               active={activeTab === 'locations'}
               onClick={() => setActiveTab('locations')}
-              icon={<Map size={18} />}
-              label="My Areas"
+              icon={<Map size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
+              label="Areas"
             />
             <TabButton
               active={activeTab === 'partnerships'}
               onClick={() => setActiveTab('partnerships')}
-              icon={<ShoppingBag size={18} />}
-              label="Supermarkets"
+              icon={<ShoppingBag size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
+              label="Markets"
             />
           </div>
         </div>
       </div>
 
+      {/* Mobile: Current Tab Indicator with Dropdown */}
+      <div className="md:hidden bg-white border-b border-slate-200 sticky top-12 xs:top-14 z-40">
+        <div className="container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {activeTab === 'overview' && <><TrendingUp size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Overview</span></>}
+            {activeTab === 'mode' && <><Settings size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Work Mode</span></>}
+            {activeTab === 'locations' && <><Map size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Areas</span></>}
+            {activeTab === 'partnerships' && <><ShoppingBag size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Markets</span></>}
+          </div>
+          
+          {/* Mobile Menu Button */}
+          <button
+            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+          >
+            {showMobileMenu ? <X size={16} /> : <Menu size={16} />}
+          </button>
+        </div>
+
+        {/* Mobile Dropdown Menu */}
+        {showMobileMenu && (
+          <div className="absolute right-2 xs:right-3 top-14 bg-white rounded-lg shadow-xl py-2 min-w-[180px] xs:min-w-[200px] z-50">
+            {/* Navigation Items */}
+            <div className="py-1 border-b border-slate-200">
+              <button
+                onClick={() => {
+                  setActiveTab('overview');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'overview' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <TrendingUp size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Overview</span>
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab('mode');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'mode' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Settings size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Work Mode</span>
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab('locations');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'locations' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Map size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Areas</span>
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab('partnerships');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'partnerships' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <ShoppingBag size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Markets</span>
+              </button>
+            </div>
+            
+            {/* Profile */}
+            <button
+              onClick={() => {
+                setShowMobileMenu(false);
+                setShowProfileModal(true);
+              }}
+              className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+            >
+              <User size={14} className="xs:w-4 xs:h-4" />
+              <span className="text-xs xs:text-sm font-medium">My Profile</span>
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-2 xs:px-3 sm:px-4 py-3 xs:py-4 sm:py-8">
         {activeTab === 'overview' && (
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             {/* Stats Cards */}
-            <div className="grid md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
               <StatCard
                 title="Today's Earnings"
-                value="UGX 45,000"
-                icon={<DollarSign size={24} />}
+                value="UGX 45k"
+                icon={<DollarSign size={20} className="sm:w-6 sm:h-6" />}
                 color="green"
               />
               <StatCard
-                title="Rides Completed"
+                title="Rides Done"
                 value="8"
-                icon={<Bike size={24} />}
+                icon={<Bike size={20} className="sm:w-6 sm:h-6" />}
                 color="blue"
               />
               <StatCard
                 title="Rating"
                 value="4.8 ⭐"
-                icon={<TrendingUp size={24} />}
+                icon={<TrendingUp size={20} className="sm:w-6 sm:h-6" />}
                 color="yellow"
               />
               <StatCard
-                title="Active Mode"
+                title="Mode"
                 value="Normal"
-                icon={<Settings size={24} />}
+                icon={<Settings size={20} className="sm:w-6 sm:h-6" />}
                 color="purple"
               />
             </div>
 
+            {/* ICAN Wallet Earnings */}
+            <RiderICANEarnings user={user} />
+
             {/* Quick Actions */}
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <h3 className="text-xl font-bold text-slate-800 mb-4">Quick Start</h3>
-              <div className="grid md:grid-cols-3 gap-4">
+            <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-800 mb-3 sm:mb-4">Quick Start</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
                 <button
                   onClick={() => setActiveTab('mode')}
-                  className="p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border-2 border-purple-200 hover:border-purple-400 transition-all text-left"
+                  className="p-4 sm:p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border-2 border-purple-200 hover:border-purple-400 transition-all text-left"
                 >
-                  <Settings className="text-purple-500 mb-3" size={32} />
-                  <h4 className="font-bold text-slate-800 mb-1">Set Work Mode</h4>
-                  <p className="text-sm text-slate-600">Choose VIP, Normal, or Return mode</p>
+                  <Settings className="text-purple-500 mb-2 sm:mb-3" size={24} />
+                  <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Set Work Mode</h4>
+                  <p className="text-xs text-slate-600">VIP, Normal, Discount, or Return</p>
                 </button>
                 <button
                   onClick={() => setActiveTab('locations')}
-                  className="p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border-2 border-blue-200 hover:border-blue-400 transition-all text-left"
+                  className="p-4 sm:p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border-2 border-blue-200 hover:border-blue-400 transition-all text-left"
                 >
-                  <Map className="text-blue-500 mb-3" size={32} />
-                  <h4 className="font-bold text-slate-800 mb-1">Manage Areas</h4>
-                  <p className="text-sm text-slate-600">Mark locations you know well</p>
+                  <Map className="text-blue-500 mb-2 sm:mb-3" size={24} />
+                  <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Manage Areas</h4>
+                  <p className="text-xs text-slate-600">Mark locations you know well</p>
                 </button>
                 <button
                   onClick={() => setActiveTab('partnerships')}
-                  className="p-6 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border-2 border-orange-200 hover:border-orange-400 transition-all text-left"
+                  className="p-4 sm:p-6 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border-2 border-orange-200 hover:border-orange-400 transition-all text-left"
                 >
-                  <ShoppingBag className="text-orange-500 mb-3" size={32} />
-                  <h4 className="font-bold text-slate-800 mb-1">Partnerships</h4>
-                  <p className="text-sm text-slate-600">Apply to work for supermarkets</p>
+                  <ShoppingBag className="text-orange-500 mb-2 sm:mb-3" size={24} />
+                  <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Partnerships</h4>
+                  <p className="text-xs text-slate-600">Work for supermarkets</p>
                 </button>
               </div>
             </div>
@@ -152,6 +223,17 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
           <SupermarketPartnership riderId={user.id} />
         )}
       </div>
+
+      {/* Profile Modal */}
+      <ProfileModal
+        user={user}
+        userRole="rider"
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        onSaved={() => {
+          // Optional: Reload rider data if needed
+        }}
+      />
     </div>
   );
 }
@@ -170,14 +252,14 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-3 font-medium transition-all relative whitespace-nowrap ${
+      className={`flex items-center gap-1 sm:gap-2 px-2 xs:px-2.5 sm:px-4 py-1.5 xs:py-2 sm:py-3 font-medium transition-all relative whitespace-nowrap text-[10px] xs:text-xs sm:text-sm ${
         active
           ? 'text-orange-500'
           : 'text-slate-600 hover:text-slate-800'
       }`}
     >
       {icon}
-      <span>{label}</span>
+      <span className="hidden xs:inline">{label}</span>
       {active && (
         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
       )}
@@ -197,14 +279,14 @@ function StatCard({
   color: string; 
 }) {
   return (
-    <div className="bg-white rounded-xl shadow-md p-6">
-      <div className="flex items-center justify-between mb-3">
-        <div className={`w-12 h-12 rounded-full bg-${color}-100 flex items-center justify-center text-${color}-600`}>
+    <div className="bg-white rounded-lg xs:rounded-xl shadow-md p-2.5 xs:p-3 sm:p-6">
+      <div className="flex items-center justify-between mb-1.5 xs:mb-2 sm:mb-3">
+        <div className={`w-7 h-7 xs:w-8 xs:h-8 sm:w-12 sm:h-12 rounded-full bg-${color}-100 flex items-center justify-center text-${color}-600`}>
           {icon}
         </div>
       </div>
-      <h4 className="text-sm text-slate-600 mb-1">{title}</h4>
-      <p className="text-2xl font-bold text-slate-800">{value}</p>
+      <h4 className="text-[9px] xs:text-[10px] sm:text-sm text-slate-600 mb-0.5 truncate leading-tight">{title}</h4>
+      <p className="text-base xs:text-lg sm:text-2xl font-bold text-slate-800 truncate">{value}</p>
     </div>
   );
 }

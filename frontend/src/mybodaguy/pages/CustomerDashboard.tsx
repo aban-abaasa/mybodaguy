@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Bike, MapPin, Clock, Star, LogOut, Package, ShoppingBag, History } from 'lucide-react';
+import { Bike, Clock, Star, LogOut, Package, ShoppingBag, History, ShoppingCart } from 'lucide-react';
 import EnhancedRideRequest from '../components/EnhancedRideRequest';
+import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
 
 interface CustomerDashboardProps {
   user: any;
@@ -8,7 +9,7 @@ interface CustomerDashboardProps {
 }
 
 export default function CustomerDashboard({ user, onSignOut }: CustomerDashboardProps) {
-  const [activeTab, setActiveTab] = useState<'rides' | 'deliveries' | 'history'>('rides');
+  const [activeTab, setActiveTab] = useState<'rides' | 'deliveries' | 'shop' | 'history'>('rides');
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50">
@@ -51,38 +52,49 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
           </p>
 
           {/* Service Type Selector */}
-          <div className="flex gap-4 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-6">
             <button
               onClick={() => setActiveTab('rides')}
-              className={`flex-1 py-3 px-6 rounded-xl font-semibold transition-all ${
+              className={`py-3 px-4 rounded-xl font-semibold transition-all text-sm ${
                 activeTab === 'rides'
                   ? 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              <Bike className="inline-block mr-2" size={20} />
-              Book a Ride
+              <Bike className="inline-block mr-1.5" size={18} />
+              Book Ride
             </button>
             <button
               onClick={() => setActiveTab('deliveries')}
-              className={`flex-1 py-3 px-6 rounded-xl font-semibold transition-all ${
+              className={`py-3 px-4 rounded-xl font-semibold transition-all text-sm ${
                 activeTab === 'deliveries'
                   ? 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              <Package className="inline-block mr-2" size={20} />
-              Order Delivery
+              <Package className="inline-block mr-1.5" size={18} />
+              Delivery
+            </button>
+            <button
+              onClick={() => setActiveTab('shop')}
+              className={`py-3 px-4 rounded-xl font-semibold transition-all text-sm ${
+                activeTab === 'shop'
+                  ? 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              <ShoppingCart className="inline-block mr-1.5" size={18} />
+              Shop
             </button>
             <button
               onClick={() => setActiveTab('history')}
-              className={`flex-1 py-3 px-6 rounded-xl font-semibold transition-all ${
+              className={`py-3 px-4 rounded-xl font-semibold transition-all text-sm ${
                 activeTab === 'history'
                   ? 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg'
                   : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
               }`}
             >
-              <History className="inline-block mr-2" size={20} />
+              <History className="inline-block mr-1.5" size={18} />
               History
             </button>
           </div>
@@ -136,6 +148,11 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
             </div>
           )}
 
+          {/* Shop Tab — self-checkout POS */}
+          {activeTab === 'shop' && (
+            <CustomerSelfCheckout user={user} />
+          )}
+
           {/* History Tab */}
           {activeTab === 'history' && (
             <div className="text-center py-12 bg-slate-50 rounded-lg">
@@ -146,28 +163,35 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
           )}
         </div>
 
-        {/* Info Cards - Removed Recent Activity section */}
-        <div className="grid md:grid-cols-3 gap-6 mt-8">
-          <div className="bg-white rounded-xl shadow-md p-6 text-center">
-            <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <Bike className="text-orange-500" size={24} />
+        {/* Info Cards */}
+        <div className="grid md:grid-cols-4 gap-4 mt-8">
+          <div className="bg-white rounded-xl shadow-md p-5 text-center">
+            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Bike className="text-orange-500" size={20} />
             </div>
-            <h4 className="font-semibold text-slate-800 mb-2">Fast Rides</h4>
-            <p className="text-sm text-slate-600">Get a ride in minutes</p>
+            <h4 className="font-semibold text-slate-800 mb-1 text-sm">Fast Rides</h4>
+            <p className="text-xs text-slate-500">Get a ride in minutes</p>
           </div>
-          <div className="bg-white rounded-xl shadow-md p-6 text-center">
-            <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <Package className="text-orange-500" size={24} />
+          <div className="bg-white rounded-xl shadow-md p-5 text-center">
+            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Package className="text-orange-500" size={20} />
             </div>
-            <h4 className="font-semibold text-slate-800 mb-2">Quick Delivery</h4>
-            <p className="text-sm text-slate-600">Supermarket items delivered</p>
+            <h4 className="font-semibold text-slate-800 mb-1 text-sm">Quick Delivery</h4>
+            <p className="text-xs text-slate-500">Supermarket items delivered</p>
           </div>
-          <div className="bg-white rounded-xl shadow-md p-6 text-center">
-            <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
-              <Star className="text-orange-500" size={24} />
+          <div className="bg-white rounded-xl shadow-md p-5 text-center">
+            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <ShoppingCart className="text-orange-500" size={20} />
             </div>
-            <h4 className="font-semibold text-slate-800 mb-2">Safe & Rated</h4>
-            <p className="text-sm text-slate-600">Verified riders only</p>
+            <h4 className="font-semibold text-slate-800 mb-1 text-sm">Self-Checkout</h4>
+            <p className="text-xs text-slate-500">Scan &amp; pay with ICAN</p>
+          </div>
+          <div className="bg-white rounded-xl shadow-md p-5 text-center">
+            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-3">
+              <Star className="text-orange-500" size={20} />
+            </div>
+            <h4 className="font-semibold text-slate-800 mb-1 text-sm">Safe &amp; Rated</h4>
+            <p className="text-xs text-slate-500">Verified riders only</p>
           </div>
         </div>
       </div>

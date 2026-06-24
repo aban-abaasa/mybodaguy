@@ -5,10 +5,7 @@ import { authService } from "./mybodaguy/services/authService";
 import { userService } from "./mybodaguy/services/userService";
 import SignInPage from "./mybodaguy/pages/SignInPage";
 import LandingPage from "./mybodaguy/pages/LandingPage";
-import DeveloperDashboard from "./mybodaguy/pages/DeveloperDashboard";
-import ChairpersonDashboard from "./mybodaguy/pages/ChairpersonDashboard";
-import RiderDashboard from "./mybodaguy/pages/RiderDashboard";
-import CustomerDashboard from "./mybodaguy/pages/CustomerDashboard";
+import UnifiedDashboard from "./mybodaguy/pages/UnifiedDashboard";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -141,37 +138,10 @@ export default function App() {
     );
   }
 
-  // Render role-specific dashboard
-  const renderDashboard = () => {
-    switch (userRole) {
-      case 'developer':
-        return <DeveloperDashboard user={user} onSignOut={handleSignOut} />;
-      case 'chairperson':
-        return <ChairpersonDashboard user={user} onSignOut={handleSignOut} />;
-      case 'rider':
-        return <RiderDashboard user={user} onSignOut={handleSignOut} />;
-      case 'customer':
-        return <CustomerDashboard user={user} onSignOut={handleSignOut} />;
-      default:
-        return (
-          <div className="min-h-screen bg-white flex items-center justify-center">
-            <div className="text-center">
-              <h2 className="text-2xl font-bold text-slate-800 mb-4">Unknown Role</h2>
-              <button
-                onClick={handleSignOut}
-                className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
-              >
-                Sign Out
-              </button>
-            </div>
-          </div>
-        );
-    }
-  };
-
+  // Render unified dashboard that handles all roles
   return (
     <>
-      {renderDashboard()}
+      <UnifiedDashboard user={user} onSignOut={handleSignOut} />
       <Toaster position="top-right" theme="light" />
     </>
   );

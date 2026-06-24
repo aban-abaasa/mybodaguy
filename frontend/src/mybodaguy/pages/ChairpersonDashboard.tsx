@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, TrendingUp, User, X, Check, Search, Calendar, CreditCard } from 'lucide-react';
+import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, TrendingUp, User, X, Check, Search, Calendar, CreditCard, Menu } from 'lucide-react';
 import { chairpersonService, SubordinateChairperson, CommitteeMember } from '../services/chairpersonService';
 import { riderService, Rider } from '../services/riderService';
 import { supabase } from '../services/supabaseClient';
@@ -14,17 +14,21 @@ interface ChairpersonDashboardProps {
 
 export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDashboardProps) {
   const [myCommitteeInfo, setMyCommitteeInfo] = useState<CommitteeMember | null>(null);
+  const [allAssignments, setAllAssignments] = useState<CommitteeMember[]>([]);
   const [subordinates, setSubordinates] = useState<SubordinateChairperson[]>([]);
   const [riders, setRiders] = useState<Rider[]>([]);
   const [loading, setLoading] = useState(true);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showAssignRiderModal, setShowAssignRiderModal] = useState(false);
+  const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [selectedAssignment, setSelectedAssignment] = useState<CommitteeMember | null>(null);
   const [stats, setStats] = useState({
     totalSubordinates: 0,
     activeSubordinates: 0,
     totalCommission: 0,
-    monthlyRides: 0
+    monthlyRides: 0,
+    totalAssignments: 0
   });
 
   useEffect(() => {
@@ -34,12 +38,15 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      // Load committee info
-      let committeeInfo = await chairpersonService.getMyCommitteeInfo(user.id);
+      // Load ALL committee assignments for this user
+      const assignments = await chairpersonService.getAllMyCommitteeAssignments(user.id);
+      console.log('[ChairpersonDashboard] All assignments:', assignments);
       
-      // If no committee info exists, auto-setup the chairperson
-      if (!committeeInfo) {
-        console.log('[ChairpersonDashboard] No committee info found, auto-setting up...');
+      setAllAssignments(assignments);
+      
+      // If no assignments exist, try auto-setup
+      if (assignments.length === 0) {
+        console.log('[ChairpersonDashboard] No committee assignments found, auto-setting up...');
         const { data: setupResult, error: setupError } = await supabase
           .rpc('auto_setup_chairperson', { target_user_id: user.id });
         
@@ -47,35 +54,54 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
           console.error('[ChairpersonDashboard] Auto-setup error:', setupError);
         } else if (setupResult?.success) {
           console.log('[ChairpersonDashboard] Auto-setup successful, reloading...');
-          // Reload committee info after setup
-          committeeInfo = await chairpersonService.getMyCommitteeInfo(user.id);
+          // Reload assignments after setup
+          const newAssignments = await chairpersonService.getAllMyCommitteeAssignments(user.id);
+          setAllAssignments(newAssignments);
+          if (newAssignments.length > 0) {
+            setMyCommitteeInfo(newAssignments[0]);
+            setSelectedAssignment(newAssignments[0]);
+          }
+        }
+      } else {
+        // Pick highest-level assignment as primary (district > division > subcounty > parish > stage)
+        const levelOrder: Record<string, number> = {
+          district: 0, division: 1, subcounty: 2, parish: 3, stage: 4
+        };
+        const primary = [...assignments].sort(
+          (a, b) => (levelOrder[a.region_type] ?? 5) - (levelOrder[b.region_type] ?? 5)
+        )[0];
+        setMyCommitteeInfo(primary);
+        setSelectedAssignment(primary);
+      }
+
+      // Load subordinates for ALL assignments
+      const allSubordinates = await chairpersonService.getSubordinates(user.id);
+      setSubordinates(allSubordinates);
+
+      // Load riders from ALL stage assignments
+      const allRiders: Rider[] = [];
+      for (const assignment of assignments) {
+        if (assignment.region_type === 'stage') {
+          const stageRiders = await riderService.getStageRiders(assignment.region_id);
+          allRiders.push(...stageRiders);
         }
       }
+      setRiders(allRiders);
+
+      // Calculate stats
+      const activeSubs = allSubordinates.filter(s => s.is_active);
+      const activeRiders = allRiders.filter(r => r.status === 'active');
+      const avgCommission = assignments.length > 0
+        ? assignments.reduce((sum, a) => sum + (a.commission_rate || 0), 0) / assignments.length
+        : 0;
       
-      setMyCommitteeInfo(committeeInfo);
-
-      if (committeeInfo) {
-        // Load subordinates
-        const subs = await chairpersonService.getSubordinates(user.id);
-        setSubordinates(subs);
-
-        // Load riders if stage chairperson
-        if (committeeInfo.region_type === 'stage') {
-          const stageRiders = await riderService.getStageRiders(committeeInfo.region_id);
-          setRiders(stageRiders);
-        }
-
-        // Calculate stats
-        const activeSubs = subs.filter(s => s.is_active);
-        const activeRiders = riders.filter(r => r.status === 'active');
-        
-        setStats({
-          totalSubordinates: subs.length,
-          activeSubordinates: activeSubs.length,
-          totalCommission: committeeInfo.commission_rate || 0,
-          monthlyRides: activeRiders.reduce((sum, r) => sum + r.total_rides, 0)
-        });
-      }
+      setStats({
+        totalSubordinates: allSubordinates.length,
+        activeSubordinates: activeSubs.length,
+        totalCommission: avgCommission,
+        monthlyRides: activeRiders.reduce((sum, r) => sum + (r.total_rides || 0), 0),
+        totalAssignments: assignments.length
+      });
     } catch (error) {
       console.error('Error loading dashboard:', error);
     } finally {
@@ -105,34 +131,76 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
   if (!myCommitteeInfo) {
     return (
       <div className="min-h-screen bg-slate-50">
-        <header className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg">
-          <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center gap-3">
-                <Bike size={28} />
+        <header className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg sticky top-0 z-50">
+          <div className="container mx-auto px-2 xs:px-3 sm:px-4">
+            <div className="flex items-center justify-between h-12 xs:h-14 sm:h-16">
+              <div className="flex items-center gap-1.5 xs:gap-2 sm:gap-3">
+                <Bike size={18} className="xs:w-5 xs:h-5 sm:w-7 sm:h-7" />
                 <div>
-                  <h1 className="text-xl font-bold">My Boda Guy</h1>
-                  <p className="text-xs opacity-90">Chairperson Dashboard</p>
+                  <h1 className="text-sm xs:text-base sm:text-xl font-bold leading-tight">My Boda Guy</h1>
+                  <p className="text-[9px] xs:text-[10px] sm:text-xs opacity-90 hidden xs:block">Chairperson Dashboard</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
-                {/* Profile Avatar */}
+              <div className="flex items-center gap-2 sm:gap-3">
+                {/* Desktop View */}
                 <button
                   onClick={() => setShowProfileModal(true)}
-                  className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
+                  className="hidden md:flex w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 items-center justify-center transition-colors"
                   title="Edit Profile"
                 >
                   <User size={20} />
                 </button>
                 <button
                   onClick={onSignOut}
-                  className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
+                  className="hidden md:flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
                 >
                   <LogOut size={18} />
-                  <span className="hidden sm:inline">Sign Out</span>
+                  <span>Sign Out</span>
+                </button>
+
+                {/* Mobile View - 3 Dots Menu */}
+                <button
+                  onClick={() => setShowMobileMenu(!showMobileMenu)}
+                  className="md:hidden p-1.5 xs:p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
+                >
+                  {showMobileMenu ? <X size={18} className="xs:w-5 xs:h-5" /> : <Menu size={18} className="xs:w-5 xs:h-5" />}
                 </button>
               </div>
             </div>
+
+            {/* Mobile Dropdown Menu */}
+            {showMobileMenu && (
+              <div className="md:hidden absolute right-2 xs:right-3 top-14 xs:top-16 bg-white rounded-lg shadow-xl py-2 min-w-[180px] xs:min-w-[200px] z-50">
+                <div className="px-3 xs:px-4 py-2 border-b border-slate-200">
+                  <p className="text-[9px] xs:text-xs text-slate-500">Logged in as</p>
+                  <p className="text-xs xs:text-sm font-medium text-slate-800 truncate">{user.email}</p>
+                </div>
+                
+                {/* Profile */}
+                <button
+                  onClick={() => {
+                    setShowMobileMenu(false);
+                    setShowProfileModal(true);
+                  }}
+                  className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                >
+                  <User size={14} className="xs:w-4 xs:h-4" />
+                  <span className="text-xs xs:text-sm font-medium">My Profile</span>
+                </button>
+                
+                {/* Sign Out */}
+                <button
+                  onClick={() => {
+                    setShowMobileMenu(false);
+                    onSignOut();
+                  }}
+                  className="w-full px-3 xs:px-4 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2"
+                >
+                  <LogOut size={14} className="xs:w-4 xs:h-4" />
+                  <span className="text-xs xs:text-sm font-medium">Sign Out</span>
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -144,60 +212,87 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
             <p className="text-sm text-slate-500 mt-2">Contact your administrator for assistance.</p>
           </div>
         </div>
+
+        {/* Profile Modal */}
+        <ProfileModal
+          user={user}
+          userRole="chairperson"
+          isOpen={showProfileModal}
+          onClose={() => setShowProfileModal(false)}
+          onSaved={() => {
+            loadDashboardData();
+          }}
+        />
       </div>
     );
   }
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <Bike size={28} />
-              <div>
-                <h1 className="text-xl font-bold">My Boda Guy</h1>
-                <p className="text-xs opacity-90">Chairperson Dashboard</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              {/* Profile Avatar */}
-              <button
-                onClick={() => setShowProfileModal(true)}
-                className="w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 flex items-center justify-center transition-colors"
-                title="Edit Profile"
-              >
-                <User size={20} />
-              </button>
-              <button
-                onClick={onSignOut}
-                className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
-              >
-                <LogOut size={18} />
-                <span className="hidden sm:inline">Sign Out</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
+      {/* Content without header - header is in UnifiedDashboard */}
       <div className="container mx-auto px-4 py-8">
-        {/* Welcome Section */}
+        {/* Welcome Section - Clean and Simple */}
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
           <h2 className="text-2xl font-bold text-slate-800 mb-2">
-            Welcome, {formatRole(myCommitteeInfo.role)}!
+            Welcome, Chairperson!
           </h2>
-          <div className="flex items-center gap-2 text-slate-600">
+          <div className="flex items-center gap-2 text-slate-600 mb-4">
             <MapPin size={18} />
-            <span>{formatRegionType(myCommitteeInfo.region_type)} Level</span>
+            <span>{allAssignments.length} Active Role{allAssignments.length !== 1 ? 's' : ''}</span>
             <span className="text-slate-400">•</span>
-            <span>Commission Rate: {myCommitteeInfo.commission_rate}%</span>
+            <span>Managing {stats.totalSubordinates} Chairperson{stats.totalSubordinates !== 1 ? 's' : ''}</span>
+            {riders.length > 0 && (
+              <>
+                <span className="text-slate-400">•</span>
+                <span>{riders.length} Rider{riders.length !== 1 ? 's' : ''}</span>
+              </>
+            )}
           </div>
+
+          {/* Role Selector */}
+          {allAssignments.length > 1 && (
+            <div className="border-t pt-4">
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Active Role
+              </label>
+              <select
+                value={selectedAssignment?.id || ''}
+                onChange={(e) => {
+                  const assignment = allAssignments.find(a => a.id === e.target.value);
+                  if (assignment) {
+                    setSelectedAssignment(assignment);
+                    setMyCommitteeInfo(assignment);
+                  }
+                }}
+                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white"
+              >
+                {allAssignments.map((assignment) => (
+                  <option key={assignment.id} value={assignment.id}>
+                    {formatRole(assignment.role)} - {formatRegionType(assignment.region_type)}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 mt-1">
+                Select a role to manage its subordinates and riders
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+          {/* Total Assignments */}
+          <div className="bg-white rounded-xl shadow p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm text-slate-600 mb-1">My Roles</p>
+                <p className="text-3xl font-bold text-slate-800">{stats.totalAssignments}</p>
+              </div>
+              <div className="bg-purple-100 p-3 rounded-lg">
+                <MapPin className="text-purple-600" size={24} />
+              </div>
+            </div>
+          </div>
           {/* Total Subordinates */}
           <div className="bg-white rounded-xl shadow p-6">
             <div className="flex items-center justify-between">
@@ -251,28 +346,77 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
           </div>
         </div>
 
-        {/* Subordinate Chairpersons */}
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex items-center justify-between mb-6">
-            <h3 className="text-xl font-bold text-slate-800">Your Chairpersons</h3>
-            <button 
-              onClick={() => setShowAssignModal(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
-            >
-              <UserPlus size={18} />
-              <span>Assign New</span>
-            </button>
-          </div>
-
-          {subordinates.length === 0 ? (
-            <div className="text-center py-12">
-              <Users className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-              <p className="text-slate-600 mb-2">No chairpersons assigned yet</p>
-              <p className="text-sm text-slate-500">Click "Assign New" to add your first chairperson</p>
+        {/* Subordinate Chairpersons or Riders - depends on selected role */}
+        {selectedAssignment?.region_type === 'stage' ? (
+          /* Stage Chairperson - Manage Riders */
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-slate-800">Your Riders</h3>
+              <button 
+                onClick={() => setShowAssignRiderModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+              >
+                <UserPlus size={18} />
+                <span>Assign Rider</span>
+              </button>
             </div>
-          ) : (
-            <div className="space-y-3">
-              {subordinates.map((subordinate) => (
+
+            {riders.length === 0 ? (
+              <div className="text-center py-12">
+                <Bike className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                <p className="text-slate-600 mb-2">No riders assigned yet</p>
+                <p className="text-sm text-slate-500">Click "Assign Rider" to add your first rider</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {riders.map((rider) => (
+                  <div
+                    key={rider.id}
+                    className="flex items-center justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-lg">
+                        {rider.full_name?.charAt(0).toUpperCase() || 'R'}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-slate-800">{rider.full_name}</p>
+                        <p className="text-sm text-slate-500">{rider.phone || 'No phone'}</p>
+                        <p className="text-xs text-slate-400">
+                          Status: <span className={rider.status === 'active' ? 'text-green-600' : 'text-slate-600'}>{rider.status}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm text-slate-600">Rides: {rider.total_rides || 0}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Higher-level Chairperson - Manage Subordinates */
+          <div className="bg-white rounded-xl shadow-lg p-6">
+            <div className="flex items-center justify-between mb-6">
+              <h3 className="text-xl font-bold text-slate-800">Your Chairpersons</h3>
+              <button 
+                onClick={() => setShowAssignModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+              >
+                <UserPlus size={18} />
+                <span>Assign Chairperson</span>
+              </button>
+            </div>
+
+            {subordinates.length === 0 ? (
+              <div className="text-center py-12">
+                <Users className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                <p className="text-slate-600 mb-2">No chairpersons assigned yet</p>
+                <p className="text-sm text-slate-500">Click "Assign Chairperson" to add your first subordinate</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {subordinates.map((subordinate) => (
                 <div
                   key={subordinate.id}
                   className="flex items-center justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
@@ -311,26 +455,38 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
             </div>
           )}
         </div>
+        )}
 
-        {/* Riders Section (Stage Chairpersons Only) */}
-        {myCommitteeInfo.region_type === 'stage' && (
+        {/* Riders Section (For ALL Stage Assignments) */}
+        {allAssignments.some(a => a.region_type === 'stage') && (
           <div className="bg-white rounded-xl shadow-lg p-6 mt-6">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-slate-800">Your Riders</h3>
-              <button 
-                onClick={() => setShowAssignRiderModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
-              >
-                <UserPlus size={18} />
-                <span>Assign Rider</span>
-              </button>
+              <div>
+                <h3 className="text-xl font-bold text-slate-800">Your Riders</h3>
+                <p className="text-sm text-slate-600">
+                  From {allAssignments.filter(a => a.region_type === 'stage').length} stage assignment{allAssignments.filter(a => a.region_type === 'stage').length !== 1 ? 's' : ''}
+                </p>
+              </div>
+              {selectedAssignment?.region_type === 'stage' && (
+                <button 
+                  onClick={() => setShowAssignRiderModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                >
+                  <UserPlus size={18} />
+                  <span>Assign Rider</span>
+                </button>
+              )}
             </div>
 
             {riders.length === 0 ? (
               <div className="text-center py-12">
                 <Bike className="w-16 h-16 text-slate-300 mx-auto mb-4" />
                 <p className="text-slate-600 mb-2">No riders assigned yet</p>
-                <p className="text-sm text-slate-500">Click "Assign Rider" to add your first rider</p>
+                <p className="text-sm text-slate-500">
+                  {selectedAssignment?.region_type === 'stage' 
+                    ? 'Click "Assign Rider" to add your first rider' 
+                    : 'Select a stage assignment to assign riders'}
+                </p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -443,10 +599,10 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
       )}
 
       {/* Assign Rider Modal */}
-      {showAssignRiderModal && myCommitteeInfo && myCommitteeInfo.region_type === 'stage' && (
+      {showAssignRiderModal && selectedAssignment && selectedAssignment.region_type === 'stage' && (
         <AssignRiderModal
-          stageId={myCommitteeInfo.region_id}
-          stageName={formatRegionType(myCommitteeInfo.region_type)}
+          stageId={selectedAssignment.region_id}
+          stageName={formatRegionType(selectedAssignment.region_type)}
           onClose={() => setShowAssignRiderModal(false)}
           onSuccess={() => {
             setShowAssignRiderModal(false);

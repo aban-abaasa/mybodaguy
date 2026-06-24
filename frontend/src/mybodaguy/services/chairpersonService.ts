@@ -70,17 +70,118 @@ export const chairpersonService = {
     return data;
   },
 
-  // Get subordinate chairpersons
-  async getSubordinates(userId: string): Promise<SubordinateChairperson[]> {
+  // Get ALL committee assignments for a user (multi-role support)
+  async getAllMyCommitteeAssignments(userId: string): Promise<CommitteeMember[]> {
     const { data, error } = await supabase
-      .rpc('get_subordinate_chairpersons', { chairperson_user_id: userId });
+      .from('mbg_committee_members')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .order('appointed_at', { ascending: false });
 
     if (error) {
-      console.error('[ChairpersonService] Error fetching subordinates:', error);
+      console.error('[ChairpersonService] Error fetching all committee assignments:', error);
       return [];
     }
 
     return data || [];
+  },
+
+  // Get subordinate chairpersons
+  async getSubordinates(userId: string): Promise<SubordinateChairperson[]> {
+    // Try RPC first
+    const { data: rpcData, error: rpcError } = await supabase
+      .rpc('get_subordinate_chairpersons', { chairperson_user_id: userId });
+    if (!rpcError && rpcData && rpcData.length > 0) return rpcData;
+    if (rpcError) console.error('[ChairpersonService] RPC error:', rpcError);
+
+    // Fallback: region hierarchy — find committee members in sub-regions of this user's regions
+    const myAssignments = await this.getAllMyCommitteeAssignments(userId);
+
+    // Map each region level to its sub-region table and FK column
+    const subRegionConfig: Record<string, { table: string; fk: string; childType: string }> = {
+      district:  { table: 'mbg_divisions',   fk: 'district_id',  childType: 'division' },
+      division:  { table: 'mbg_subcounties', fk: 'division_id',  childType: 'subcounty' },
+      subcounty: { table: 'mbg_parishes',    fk: 'subcounty_id', childType: 'parish' },
+      parish:    { table: 'mbg_stages',      fk: 'parish_id',    childType: 'stage' },
+    };
+
+    const seenIds = new Set<string>();
+    const allMembers: any[] = [];
+
+    for (const assignment of myAssignments) {
+      const cfg = subRegionConfig[assignment.region_type];
+      if (!cfg) continue;
+
+      // Get IDs of immediate sub-regions
+      const { data: subRegions } = await supabase
+        .from(cfg.table)
+        .select('id')
+        .eq(cfg.fk, assignment.region_id);
+
+      const subIds = (subRegions || []).map((r: any) => r.id);
+      if (subIds.length === 0) continue;
+
+      // Find committee members in those sub-regions (exclude self)
+      const { data: members } = await supabase
+        .from('mbg_committee_members')
+        .select('id, user_id, role, region_type, region_id, commission_rate, is_active, appointed_at')
+        .eq('region_type', cfg.childType)
+        .in('region_id', subIds)
+        .eq('is_active', true)
+        .neq('user_id', userId);
+
+      for (const m of members || []) {
+        if (!seenIds.has(m.id)) {
+          seenIds.add(m.id);
+          allMembers.push(m);
+        }
+      }
+    }
+
+    return this._enrichMembers(allMembers);
+  },
+
+  // Attach user email + full_name to raw committee member rows
+  async _enrichMembers(members: any[]): Promise<SubordinateChairperson[]> {
+    if (!members.length) return [];
+    return Promise.all(
+      members.map(async (cm) => {
+        const { data: u } = await supabase
+          .from('mbg_users')
+          .select('email, mbg_user_profiles(full_name, phone)')
+          .eq('id', cm.user_id)
+          .maybeSingle();
+        return {
+          id: cm.id,
+          user_id: cm.user_id,
+          full_name: (u as any)?.mbg_user_profiles?.[0]?.full_name || u?.email?.split('@')[0] || 'Unknown',
+          email: u?.email || '',
+          phone: (u as any)?.mbg_user_profiles?.[0]?.phone || null,
+          role: cm.role,
+          region_type: cm.region_type,
+          region_id: cm.region_id,
+          region_name: '',
+          commission_rate: cm.commission_rate,
+          is_active: cm.is_active,
+          appointed_at: cm.appointed_at,
+        } as SubordinateChairperson;
+      })
+    );
+  },
+
+  // Get subordinates for specific committee assignment
+  async getSubordinatesForAssignment(committeeId: string): Promise<SubordinateChairperson[]> {
+    // This would need a new RPC function, for now use existing and filter by region
+    const { data: assignment } = await supabase
+      .from('mbg_committee_members')
+      .select('user_id')
+      .eq('id', committeeId)
+      .single();
+
+    if (!assignment) return [];
+
+    return this.getSubordinates(assignment.user_id);
   },
 
   // Assign a new chairperson
@@ -157,8 +258,7 @@ export const chairpersonService = {
           target_role: params.targetRole,
           target_region_type: params.targetRegionType,
           target_region_id: params.targetRegionId,
-          commission_rate: params.commissionRate || 5.0,
-          notes: params.notes || null
+          commission_rate: params.commissionRate || 5.0
         });
 
       if (error) {
