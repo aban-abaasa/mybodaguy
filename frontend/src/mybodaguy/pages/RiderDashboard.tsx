@@ -1,17 +1,18 @@
 import { useState } from 'react';
-import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User } from 'lucide-react';
+import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User, Package } from 'lucide-react';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
 import RiderICANEarnings from '../components/RiderICANEarnings';
+import SupermarketDeliveryPool from '../components/SupermarketDeliveryPool';
 
 interface RiderDashboardProps {
   user: any;
   onSignOut: () => void;
 }
 
-type TabType = 'overview' | 'mode' | 'locations' | 'partnerships';
+type TabType = 'overview' | 'mode' | 'locations' | 'partnerships' | 'deliveries';
 
 export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
@@ -126,8 +127,20 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
                 <ShoppingBag size={14} className="xs:w-4 xs:h-4" />
                 <span className="text-xs xs:text-sm font-medium">Markets</span>
               </button>
+              <button
+                onClick={() => {
+                  setActiveTab('deliveries');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'deliveries' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Package size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Deliveries</span>
+              </button>
             </div>
-            
+
             {/* Profile */}
             <button
               onClick={() => {
@@ -221,6 +234,10 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
 
         {activeTab === 'partnerships' && (
           <SupermarketPartnership riderId={user.id} />
+        )}
+
+        {activeTab === 'deliveries' && (
+          <SupermarketDeliveryPool user={user} />
         )}
       </div>
 
