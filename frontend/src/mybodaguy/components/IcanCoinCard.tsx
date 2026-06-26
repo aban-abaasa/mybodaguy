@@ -22,20 +22,20 @@ export default function IcanCoinCard({ userId, onGoToWallet }: Props) {
   return (
     <div
       onClick={onGoToWallet}
-      className={`bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl shadow p-4 sm:p-6 text-white ${onGoToWallet ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''}`}
+      className={`bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl shadow p-3 sm:p-5 text-white ${onGoToWallet ? 'cursor-pointer hover:opacity-90 transition-opacity' : ''}`}
     >
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm text-violet-200 mb-1">ICAN Coins</p>
-          <p className="text-3xl font-bold">
+          <p className="text-[10px] sm:text-sm text-violet-200 mb-0.5 sm:mb-1">ICAN Coins</p>
+          <p className="text-2xl sm:text-3xl font-bold leading-tight">
             {balance === null ? '…' : balance.toFixed(2)}
           </p>
-          <p className="text-xs text-violet-200 mt-1">₡ coins</p>
+          <p className="text-[9px] sm:text-xs text-violet-200 mt-0.5 sm:mt-1">₡ coins</p>
         </div>
-        <div className="bg-white/20 p-3 rounded-lg text-2xl select-none">₡</div>
+        <div className="bg-white/20 p-2 sm:p-3 rounded-lg text-xl sm:text-2xl select-none">₡</div>
       </div>
       {onGoToWallet && (
-        <p className="text-xs text-violet-200 mt-3">Tap to open wallet →</p>
+        <p className="text-[9px] sm:text-xs text-violet-200 mt-2 sm:mt-3">Tap to open wallet →</p>
       )}
     </div>
   );

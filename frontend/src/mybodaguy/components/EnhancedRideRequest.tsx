@@ -344,137 +344,159 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3 p-2 bg-gradient-to-br from-orange-50 via-yellow-50 to-red-50 min-h-screen">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-orange-500 to-red-600 rounded-xl shadow-xl p-3 text-white">
+        <div className="flex items-center gap-2">
+          <div className="w-10 h-10 bg-white/20 backdrop-blur rounded-lg flex items-center justify-center">
+            <MapPin size={20} />
+          </div>
+          <div>
+            <h3 className="text-base font-bold">Book Your Ride</h3>
+            <p className="text-[10px] text-white/80">Fast, safe & affordable</p>
+          </div>
+        </div>
+      </div>
+
       {/* Search Form */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-slate-800">Request a Ride</h3>
-          {(pickup || dropoff) && (
-            <button
-              onClick={handleClearSearch}
-              className="text-sm text-slate-600 hover:text-orange-600 flex items-center gap-1"
-            >
-              <X size={16} />
-              Clear
-            </button>
+      <div className="bg-white rounded-xl shadow-lg p-3 space-y-3">
+        {/* Pickup Location */}
+        <div ref={pickupRef} className="relative">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-1.5">
+            <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center">
+              <MapPin className="text-green-600" size={12} />
+            </div>
+            Pickup
+          </label>
+          <div className="relative">
+            <input
+              type="text"
+              value={pickup}
+              onChange={(e) => handlePickupChange(e.target.value)}
+              onFocus={() => pickup && setShowPickupSuggestions(true)}
+              placeholder="Where are you?"
+              className="w-full pl-3 pr-3 py-2 border-2 border-green-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-green-500 outline-none text-slate-800 placeholder-slate-400 text-sm"
+            />
+            {selectedPickup && (
+              <CheckCircle className="absolute right-2 top-1/2 -translate-y-1/2 text-green-500" size={16} />
+            )}
+          </div>
+          
+          {/* Pickup Suggestions */}
+          {showPickupSuggestions && pickupSuggestions.length > 0 && (
+            <div className="absolute z-10 w-full mt-1 bg-white border-2 border-slate-200 rounded-lg shadow-2xl max-h-48 overflow-y-auto">
+              {pickupSuggestions.map((location) => (
+                <button
+                  key={location.id}
+                  onClick={() => selectPickupLocation(location)}
+                  className="w-full text-left px-3 py-2 hover:bg-green-50 border-b border-slate-100 last:border-b-0 transition-colors"
+                >
+                  <div className="flex items-start gap-2">
+                    <MapPin className="text-green-500 mt-0.5 flex-shrink-0" size={14} />
+                    <div>
+                      <div className="font-semibold text-slate-800 text-xs">{location.name}</div>
+                      <div className="text-[10px] text-slate-500 truncate">{location.fullAddress}</div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
           )}
         </div>
-        
-        <div className="space-y-4">
-          {/* Pickup Location */}
-          <div ref={pickupRef} className="relative">
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Pickup Location
-            </label>
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-green-500" size={20} />
-              <input
-                type="text"
-                value={pickup}
-                onChange={(e) => handlePickupChange(e.target.value)}
-                onFocus={() => pickup && setShowPickupSuggestions(true)}
-                placeholder="Where are you now? (e.g., Kampala Road, Acacia Mall)"
-                className="w-full pl-11 pr-4 py-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none text-slate-800 placeholder-slate-400"
-              />
-              {selectedPickup && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 bg-green-500 rounded-full" />
-              )}
-            </div>
-            
-            {/* Pickup Suggestions */}
-            {showPickupSuggestions && pickupSuggestions.length > 0 && (
-              <div className="absolute z-10 w-full mt-2 bg-white border-2 border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
-                {pickupSuggestions.map((location) => (
-                  <button
-                    key={location.id}
-                    onClick={() => selectPickupLocation(location)}
-                    className="w-full text-left px-4 py-3 hover:bg-orange-50 border-b border-slate-100 last:border-b-0 transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      <MapPin className="text-orange-500 mt-1 flex-shrink-0" size={18} />
-                      <div>
-                        <div className="font-semibold text-slate-800">{location.name}</div>
-                        <div className="text-sm text-slate-600">{location.fullAddress}</div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
 
-          {/* Dropoff Location */}
-          <div ref={dropoffRef} className="relative">
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Drop-off Location
-            </label>
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-red-500" size={20} />
-              <input
-                type="text"
-                value={dropoff}
-                onChange={(e) => handleDropoffChange(e.target.value)}
-                onFocus={() => dropoff && setShowDropoffSuggestions(true)}
-                placeholder="Where do you want to go? (e.g., Ntinda, Garden City)"
-                className="w-full pl-11 pr-4 py-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none text-slate-800 placeholder-slate-400"
-              />
-              {selectedDropoff && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 bg-red-500 rounded-full" />
-              )}
-            </div>
-            
-            {/* Dropoff Suggestions */}
-            {showDropoffSuggestions && dropoffSuggestions.length > 0 && (
-              <div className="absolute z-10 w-full mt-2 bg-white border-2 border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
-                {dropoffSuggestions.map((location) => (
-                  <button
-                    key={location.id}
-                    onClick={() => selectDropoffLocation(location)}
-                    className="w-full text-left px-4 py-3 hover:bg-orange-50 border-b border-slate-100 last:border-b-0 transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      <MapPin className="text-orange-500 mt-1 flex-shrink-0" size={18} />
-                      <div>
-                        <div className="font-semibold text-slate-800">{location.name}</div>
-                        <div className="text-sm text-slate-600">{location.fullAddress}</div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+        {/* Visual Connector */}
+        <div className="flex justify-center">
+          <div className="flex flex-col items-center gap-0.5">
+            <div className="w-0.5 h-3 bg-gradient-to-b from-green-400 to-red-400 rounded-full"></div>
+            <div className="w-0.5 h-3 bg-gradient-to-b from-green-400 to-red-400 rounded-full"></div>
           </div>
-
-          <button
-            onClick={handleSearchRiders}
-            disabled={searching || !selectedPickup || !selectedDropoff}
-            className="w-full py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold text-lg rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {searching ? (
-              <>
-                <div className="animate-spin w-5 h-5 border-3 border-white border-t-transparent rounded-full" />
-                Searching for riders...
-              </>
-            ) : (
-              <>
-                <Search size={20} />
-                Find Available Riders
-              </>
-            )}
-          </button>
         </div>
+
+        {/* Dropoff Location */}
+        <div ref={dropoffRef} className="relative">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 mb-1.5">
+            <div className="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center">
+              <MapPin className="text-red-600" size={12} />
+            </div>
+            Drop-off
+          </label>
+          <div className="relative">
+            <input
+              type="text"
+              value={dropoff}
+              onChange={(e) => handleDropoffChange(e.target.value)}
+              onFocus={() => dropoff && setShowDropoffSuggestions(true)}
+              placeholder="Where to?"
+              className="w-full pl-3 pr-3 py-2 border-2 border-red-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none text-slate-800 placeholder-slate-400 text-sm"
+            />
+            {selectedDropoff && (
+              <CheckCircle className="absolute right-2 top-1/2 -translate-y-1/2 text-red-500" size={16} />
+            )}
+          </div>
+          
+          {/* Dropoff Suggestions */}
+          {showDropoffSuggestions && dropoffSuggestions.length > 0 && (
+            <div className="absolute z-10 w-full mt-1 bg-white border-2 border-slate-200 rounded-lg shadow-2xl max-h-48 overflow-y-auto">
+              {dropoffSuggestions.map((location) => (
+                <button
+                  key={location.id}
+                  onClick={() => selectDropoffLocation(location)}
+                  className="w-full text-left px-3 py-2 hover:bg-red-50 border-b border-slate-100 last:border-b-0 transition-colors"
+                >
+                  <div className="flex items-start gap-2">
+                    <MapPin className="text-red-500 mt-0.5 flex-shrink-0" size={14} />
+                    <div>
+                      <div className="font-semibold text-slate-800 text-xs">{location.name}</div>
+                      <div className="text-[10px] text-slate-500 truncate">{location.fullAddress}</div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Search Button */}
+        <button
+          onClick={handleSearchRiders}
+          disabled={searching || !selectedPickup || !selectedDropoff}
+          className="w-full py-3 bg-gradient-to-r from-orange-500 via-red-500 to-pink-500 text-white font-bold text-sm rounded-lg hover:shadow-lg transition-all shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          {searching ? (
+            <>
+              <Loader className="animate-spin" size={16} />
+              Searching...
+            </>
+          ) : (
+            <>
+              <Search size={16} />
+              Find Riders
+            </>
+          )}
+        </button>
+
+        {/* Quick Clear */}
+        {(pickup || dropoff) && (
+          <button
+            onClick={handleClearSearch}
+            className="w-full py-1.5 text-xs text-slate-500 hover:text-slate-700 flex items-center justify-center gap-1"
+          >
+            <X size={12} />
+            Clear All
+          </button>
+        )}
       </div>
 
       {/* Matched Riders */}
       {matchedRiders.length > 0 && (
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-slate-800">
-              Available Riders ({matchedRiders.length})
+        <div className="space-y-3">
+          <div className="flex items-center justify-between px-2">
+            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+              <div className="w-8 h-8 bg-orange-100 rounded-full flex items-center justify-center">
+                <User size={16} className="text-orange-600" />
+              </div>
+              {matchedRiders.length} Riders Found
             </h3>
-            <p className="text-sm text-slate-600">
-              Sorted by best match
-            </p>
           </div>
 
           <div className="space-y-3">
@@ -486,14 +508,6 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
                 isSelected={selectedRider?.id === rider.id}
               />
             ))}
-          </div>
-
-          {/* Algorithm Info */}
-          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <strong>Smart Matching:</strong> Riders are ranked by location knowledge, distance, 
-              rating, and mode. Riders who know your destination area appear first!
-            </p>
           </div>
         </div>
       )}
@@ -511,9 +525,9 @@ function RiderCard({
   isSelected: boolean;
 }) {
   const modeConfig = {
-    normal: { color: 'slate', icon: DollarSign, label: 'Standard' },
-    vip: { color: 'purple', icon: Crown, label: 'VIP Service' },
-    return: { color: 'green', icon: Home, label: 'Return Home' }
+    normal: { color: 'bg-blue-100 text-blue-700', icon: DollarSign, label: 'Standard' },
+    vip: { color: 'bg-purple-100 text-purple-700', icon: Crown, label: 'VIP' },
+    return: { color: 'bg-green-100 text-green-700', icon: Home, label: 'Return' }
   };
 
   const config = modeConfig[rider.mode];
@@ -523,133 +537,126 @@ function RiderCard({
     : 0;
 
   return (
-    <div className={`border-2 rounded-xl p-5 transition-all ${
+    <div className={`border-2 rounded-2xl overflow-hidden transition-all shadow-md ${
       isSelected 
-        ? 'border-orange-500 bg-gradient-to-br from-orange-50 to-yellow-50'
-        : 'border-slate-200 bg-white hover:border-orange-300'
+        ? 'border-orange-500 bg-gradient-to-br from-orange-50 to-amber-50 shadow-lg'
+        : 'border-slate-200 bg-white hover:border-orange-300 hover:shadow-lg'
     }`}>
-      <div className="flex items-start gap-4">
-        {/* Rider Avatar */}
-        <div className="relative flex-shrink-0">
-          <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg">
+      {/* Header Section */}
+      <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-4 text-white">
+        <div className="flex items-center gap-3 mb-2">
+          <div className="w-14 h-14 bg-gradient-to-br from-orange-400 to-red-500 rounded-full flex items-center justify-center text-white font-bold text-lg shadow-lg flex-shrink-0">
             {rider.name.split(' ').map(n => n[0]).join('')}
           </div>
-          {rider.knows_destination && (
-            <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
-              <Navigation size={12} className="text-white" />
-            </div>
-          )}
-        </div>
-
-        {/* Rider Info */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-start justify-between gap-2 mb-2">
-            <div>
-              <h4 className="font-bold text-slate-800 text-lg">{rider.name}</h4>
-              <div className="flex items-center gap-3 text-sm text-slate-600">
-                <div className="flex items-center gap-1">
-                  <Star size={14} className="text-yellow-500 fill-yellow-500" />
-                  <span className="font-medium">{rider.rating}</span>
-                </div>
-                <span>•</span>
-                <span>{rider.total_rides} rides</span>
+          <div className="flex-1 min-w-0">
+            <h4 className="font-bold text-lg truncate">{rider.name}</h4>
+            <div className="flex items-center gap-2 text-sm">
+              <div className="flex items-center gap-1">
+                <Star size={14} className="text-yellow-400 fill-yellow-400" />
+                <span className="font-semibold">{rider.rating}</span>
               </div>
-            </div>
-            <div className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 bg-${config.color}-100 text-${config.color}-700`}>
-              <ModeIcon size={12} />
-              {config.label}
+              <span className="text-slate-400">•</span>
+              <span className="text-slate-300">{rider.total_rides} trips</span>
             </div>
           </div>
-
-          {/* Rider Highlights */}
-          <div className="flex flex-wrap gap-2 mb-3">
-            {rider.knows_destination && (
-              <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
-                <Navigation size={12} />
-                Knows your destination
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
-              {rider.distance_km} km away
-            </span>
-            <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
-              Arrives in {rider.estimated_arrival_min} min
-            </span>
-          </div>
-
-          {/* Pricing and Action */}
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-slate-800">
-                  UGX {rider.price.toLocaleString()}
-                </span>
-                {rider.original_price && (
-                  <span className="text-sm text-slate-500 line-through">
-                    UGX {rider.original_price.toLocaleString()}
-                  </span>
-                )}
-              </div>
-              {discountPercent > 0 && (
-                <span className="text-xs font-semibold text-green-600">
-                  Save {discountPercent}% 🎉
-                </span>
-              )}
-            </div>
-            
-            <div className="flex items-center gap-2">
-              {isSelected && (
-                <a
-                  href={`tel:${rider.phone}`}
-                  className="px-4 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-all shadow-md flex items-center gap-2"
-                >
-                  <Phone size={18} />
-                  Call
-                </a>
-              )}
-              <button
-                onClick={() => onRequest(rider)}
-                disabled={isSelected}
-                className={`px-6 py-2.5 rounded-lg font-semibold transition-all ${
-                  isSelected
-                    ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
-                    : 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white hover:from-orange-600 hover:to-yellow-600 shadow-md'
-                }`}
-              >
-                {isSelected ? '✓ Requested' : 'Request'}
-              </button>
-            </div>
+          <div className={`px-2.5 py-1 rounded-full text-xs font-bold flex items-center gap-1 ${config.color} flex-shrink-0`}>
+            <ModeIcon size={12} />
+            {config.label}
           </div>
         </div>
       </div>
 
-      {/* Vehicle Details */}
-      {isSelected && (
-        <div className="mt-4 pt-4 border-t border-slate-200">
-          <div className="flex items-center justify-between text-sm">
-            <div className="flex items-center gap-2 text-slate-600">
-              <span className="font-semibold">Vehicle:</span>
-              <span>{rider.vehicle.color} {rider.vehicle.type}</span>
+      {/* Body Section */}
+      <div className="p-4">
+        {/* Badges */}
+        <div className="flex flex-wrap gap-2 mb-3">
+          {rider.knows_destination && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-100 text-emerald-700 text-xs font-semibold rounded-full">
+              <Navigation size={12} />
+              Knows route
+            </span>
+          )}
+          <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
+            📍 {rider.distance_km} km
+          </span>
+          <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-semibold rounded-full">
+            ⏱️ {rider.estimated_arrival_min} min
+          </span>
+        </div>
+
+        {/* Pricing */}
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-slate-800">
+                {rider.price.toLocaleString()}
+              </span>
+              <span className="text-sm text-slate-600">UGX</span>
             </div>
-            <div className="flex items-center gap-2 text-slate-600">
-              <span className="font-semibold">Plate:</span>
-              <span className="bg-yellow-400 text-slate-900 px-2 py-0.5 rounded font-bold">
+            {rider.original_price && discountPercent > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-400 line-through">
+                  {rider.original_price.toLocaleString()}
+                </span>
+                <span className="text-xs font-bold text-green-600 bg-green-100 px-2 py-0.5 rounded-full">
+                  -{discountPercent}%
+                </span>
+              </div>
+            )}
+          </div>
+          
+          <button
+            onClick={() => onRequest(rider)}
+            disabled={isSelected}
+            className={`px-5 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center gap-2 ${
+              isSelected
+                ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                : 'bg-gradient-to-r from-orange-500 to-red-500 text-white hover:shadow-lg active:scale-95'
+            }`}
+          >
+            {isSelected ? (
+              <><CheckCircle size={16} /> Requested</>
+            ) : (
+              'Book Now'
+            )}
+          </button>
+        </div>
+
+        {/* Vehicle Details - Show when selected */}
+        {isSelected && (
+          <div className="bg-slate-50 rounded-xl p-3 border-2 border-orange-200">
+            <div className="flex items-center justify-between text-sm mb-2">
+              <span className="text-slate-600 font-medium">Vehicle:</span>
+              <span className="text-slate-800 font-semibold">{rider.vehicle.color} {rider.vehicle.type}</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-slate-600 font-medium text-sm">Plate:</span>
+              <span className="bg-yellow-400 text-slate-900 px-3 py-1 rounded-lg font-bold text-sm">
                 {rider.vehicle.plate}
               </span>
             </div>
+            {rider.phone && (
+              <a
+                href={`tel:${rider.phone}`}
+                className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-all"
+              >
+                <Phone size={18} />
+                Call Rider
+              </a>
+            )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Why This Rider Notice */}
-      {rider.knows_destination && rider.mode === 'return' && (
-        <div className="mt-4 pt-4 border-t border-slate-200">
-          <p className="text-sm text-slate-600">
-            <strong className="text-green-600">Best Value:</strong> This rider knows your exact destination 
-            and is heading home in that direction. Great price + local expertise!
-          </p>
-        </div>
-      )}
+        {/* Best Value Notice */}
+        {rider.knows_destination && rider.mode === 'return' && (
+          <div className="mt-3 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+            <p className="text-xs text-emerald-800 flex items-start gap-2">
+              <span className="text-base">💡</span>
+              <span><strong>Best Value:</strong> This rider knows your destination and is heading that way!</span>
+            </p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

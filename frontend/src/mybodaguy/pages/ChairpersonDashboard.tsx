@@ -847,14 +847,14 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1 sm:gap-2 px-2 xs:px-2.5 sm:px-4 py-1.5 xs:py-2 sm:py-3 font-medium transition-all relative whitespace-nowrap text-[10px] xs:text-xs sm:text-sm ${
+      className={`flex items-center gap-0.5 xs:gap-1 sm:gap-2 px-1.5 xs:px-2 sm:px-4 py-1 xs:py-1.5 sm:py-3 font-medium transition-all relative whitespace-nowrap text-[9px] xs:text-[10px] sm:text-sm ${
         active
           ? 'text-orange-500'
           : 'text-slate-600 hover:text-slate-800'
       }`}
     >
       {icon}
-      <span className="hidden xs:inline">{label}</span>
+      <span className="inline truncate">{label}</span>
       {active && (
         <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
       )}
