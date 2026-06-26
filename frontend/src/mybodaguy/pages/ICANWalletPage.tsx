@@ -12,8 +12,8 @@ import {
   type ICANBalance,
   type ICANTransaction,
 } from '../services/icanWalletService';
-import BuyIcan from '../../../../../ICAN/frontend/src/components/ICAN/BuyIcan';
-import SellIcan from '../../../../../ICAN/frontend/src/components/ICAN/SellIcan';
+import BuyIcan from '../components/BuyIcan';
+import SellIcan from '../components/SellIcan';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
