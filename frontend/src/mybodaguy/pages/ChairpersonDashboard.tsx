@@ -1,16 +1,19 @@
 import { useState, useEffect } from 'react';
-import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, TrendingUp, User, X, Check, Search, Calendar, CreditCard, Menu } from 'lucide-react';
+import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, TrendingUp, User, X, Check, Search, Calendar, CreditCard, Menu, BarChart3, Settings } from 'lucide-react';
 import { chairpersonService, SubordinateChairperson, CommitteeMember } from '../services/chairpersonService';
 import { riderService, Rider } from '../services/riderService';
 import { supabase } from '../services/supabaseClient';
 import { userService } from '../services/userService';
 import ProfileModal from '../components/ProfileModal';
+import IcanCoinCard from '../components/IcanCoinCard';
 import { toast } from 'sonner';
 
 interface ChairpersonDashboardProps {
   user: any;
   onSignOut: () => void;
 }
+
+type TabType = 'overview' | 'subordinates' | 'riders' | 'commission';
 
 export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDashboardProps) {
   const [myCommitteeInfo, setMyCommitteeInfo] = useState<CommitteeMember | null>(null);
@@ -23,6 +26,7 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
   const [showAssignRiderModal, setShowAssignRiderModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState<CommitteeMember | null>(null);
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [stats, setStats] = useState({
     totalSubordinates: 0,
     activeSubordinates: 0,
@@ -63,15 +67,10 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
           }
         }
       } else {
-        // Pick highest-level assignment as primary (district > division > subcounty > parish > stage)
-        const levelOrder: Record<string, number> = {
-          district: 0, division: 1, subcounty: 2, parish: 3, stage: 4
-        };
-        const primary = [...assignments].sort(
-          (a, b) => (levelOrder[a.region_type] ?? 5) - (levelOrder[b.region_type] ?? 5)
-        )[0];
-        setMyCommitteeInfo(primary);
-        setSelectedAssignment(primary);
+        // Service already returns levels sorted highest→lowest and fills any gaps.
+        setAllAssignments(assignments);
+        setMyCommitteeInfo(assignments[0]);     // index 0 = highest level
+        setSelectedAssignment(assignments[0]);
       }
 
       // Load subordinates for ALL assignments
@@ -230,8 +229,261 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Content without header - header is in UnifiedDashboard */}
-      <div className="container mx-auto px-4 py-8">
-        {/* Welcome Section - Clean and Simple */}
+      
+      {/* Navigation Tabs - Desktop Only */}
+      <div className="hidden md:block bg-white border-b border-slate-200 sticky top-12 xs:top-14 sm:top-16 z-40">
+        <div className="container mx-auto px-1 xs:px-2 sm:px-4">
+          <div className="flex gap-0.5 overflow-x-auto scrollbar-hide">
+            <TabButton
+              active={activeTab === 'overview'}
+              onClick={() => setActiveTab('overview')}
+              icon={<TrendingUp size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
+              label="Overview"
+            />
+            <TabButton
+              active={activeTab === 'subordinates'}
+              onClick={() => setActiveTab('subordinates')}
+              icon={<Users size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
+              label="Chairpersons"
+            />
+            {allAssignments.some(a => a.region_type === 'stage') && (
+              <TabButton
+                active={activeTab === 'riders'}
+                onClick={() => setActiveTab('riders')}
+                icon={<Bike size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
+                label="Riders"
+              />
+            )}
+            <TabButton
+              active={activeTab === 'commission'}
+              onClick={() => setActiveTab('commission')}
+              icon={<DollarSign size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
+              label="Commission"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Mobile: Current Tab Indicator with Dropdown */}
+      <div className="md:hidden bg-white border-b border-slate-200 sticky top-12 xs:top-14 z-40">
+        <div className="container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {activeTab === 'overview' && <><TrendingUp size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Overview</span></>}
+            {activeTab === 'subordinates' && <><Users size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Chairpersons</span></>}
+            {activeTab === 'riders' && <><Bike size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Riders</span></>}
+            {activeTab === 'commission' && <><DollarSign size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Commission</span></>}
+          </div>
+          
+          {/* Mobile Menu Button */}
+          <button
+            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+          >
+            {showMobileMenu ? <X size={16} /> : <Menu size={16} />}
+          </button>
+        </div>
+
+        {/* Mobile Dropdown Menu */}
+        {showMobileMenu && (
+          <div className="absolute right-2 xs:right-3 top-14 bg-white rounded-lg shadow-xl py-2 min-w-[180px] xs:min-w-[200px] z-50">
+            {/* Navigation Items */}
+            <div className="py-1 border-b border-slate-200">
+              <button
+                onClick={() => {
+                  setActiveTab('overview');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'overview' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <TrendingUp size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Overview</span>
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab('subordinates');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'subordinates' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Users size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Chairpersons</span>
+              </button>
+              {allAssignments.some(a => a.region_type === 'stage') && (
+                <button
+                  onClick={() => {
+                    setActiveTab('riders');
+                    setShowMobileMenu(false);
+                  }}
+                  className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                    activeTab === 'riders' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <Bike size={14} className="xs:w-4 xs:h-4" />
+                  <span className="text-xs xs:text-sm font-medium">Riders</span>
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setActiveTab('commission');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'commission' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <DollarSign size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Commission</span>
+              </button>
+            </div>
+
+            {/* Profile */}
+            <button
+              onClick={() => {
+                setShowMobileMenu(false);
+                setShowProfileModal(true);
+              }}
+              className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+            >
+              <User size={14} className="xs:w-4 xs:h-4" />
+              <span className="text-xs xs:text-sm font-medium">My Profile</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="container mx-auto px-2 xs:px-3 sm:px-4 py-3 xs:py-4 sm:py-8">
+        {/* Tab Content */}
+        {activeTab === 'overview' && (
+          <>
+            {/* Welcome Section - Clean and Simple */}
+            <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+              <h2 className="text-2xl font-bold text-slate-800 mb-2">
+                Welcome, Chairperson!
+              </h2>
+              <div className="flex items-center gap-2 text-slate-600 mb-4">
+                <MapPin size={18} />
+                <span>{allAssignments.length} Active Role{allAssignments.length !== 1 ? 's' : ''}</span>
+                <span className="text-slate-400">•</span>
+                <span>Managing {stats.totalSubordinates} Chairperson{stats.totalSubordinates !== 1 ? 's' : ''}</span>
+                {riders.length > 0 && (
+                  <>
+                    <span className="text-slate-400">•</span>
+                    <span>{riders.length} Rider{riders.length !== 1 ? 's' : ''}</span>
+                  </>
+                )}
+              </div>
+
+              {/* Role Selector — always visible */}
+              <div className="border-t pt-4">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Active Role
+                </label>
+                <select
+                  value={selectedAssignment?.id || ''}
+                  onChange={(e) => {
+                    const assignment = allAssignments.find(a => a.id === e.target.value);
+                    if (assignment) {
+                      setSelectedAssignment(assignment);
+                      setMyCommitteeInfo(assignment);
+                    }
+                  }}
+                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white text-slate-800"
+                >
+                  {allAssignments.map((assignment, idx) => {
+                    const isTop     = idx === 0;
+                    const isVirtual = assignment.id.startsWith('virtual-');
+                    const prefix    = isTop ? '★ ' : '└ ';
+                    const suffix    = isVirtual ? ' (access via top role)' : '';
+                    return (
+                      <option key={assignment.id} value={assignment.id}>
+                        {prefix}{formatRole(assignment.role)}{suffix}
+                      </option>
+                    );
+                  })}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Select a role to manage its subordinates and riders
+                </p>
+              </div>
+            </div>
+
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
+              {/* Total Assignments */}
+              <div className="bg-white rounded-xl shadow p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-slate-600 mb-1">My Roles</p>
+                    <p className="text-3xl font-bold text-slate-800">{stats.totalAssignments}</p>
+                  </div>
+                  <div className="bg-purple-100 p-3 rounded-lg">
+                    <MapPin className="text-purple-600" size={24} />
+                  </div>
+                </div>
+              </div>
+              {/* Total Subordinates */}
+              <div className="bg-white rounded-xl shadow p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-slate-600 mb-1">Total Chairpersons</p>
+                    <p className="text-3xl font-bold text-slate-800">{stats.totalSubordinates}</p>
+                  </div>
+                  <div className="bg-blue-100 p-3 rounded-lg">
+                    <Users className="text-blue-600" size={24} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Active Subordinates */}
+              <div className="bg-white rounded-xl shadow p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-slate-600 mb-1">Active</p>
+                    <p className="text-3xl font-bold text-green-600">{stats.activeSubordinates}</p>
+                  </div>
+                  <div className="bg-green-100 p-3 rounded-lg">
+                    <TrendingUp className="text-green-600" size={24} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Commission Rate */}
+              <div className="bg-white rounded-xl shadow p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-slate-600 mb-1">Commission Rate</p>
+                    <p className="text-3xl font-bold text-orange-600">{stats.totalCommission}%</p>
+                  </div>
+                  <div className="bg-orange-100 p-3 rounded-lg">
+                    <DollarSign className="text-orange-600" size={24} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Monthly Rides */}
+              <div className="bg-white rounded-xl shadow p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-slate-600 mb-1">Monthly Rides</p>
+                    <p className="text-3xl font-bold text-purple-600">{stats.monthlyRides}</p>
+                  </div>
+                  <div className="bg-purple-100 p-3 rounded-lg">
+                    <Bike className="text-purple-600" size={24} />
+                  </div>
+                </div>
+              </div>
+
+              {/* ICAN Coins */}
+              <IcanCoinCard userId={user?.id} onGoToWallet={() => (window.location.href = '/ican-wallet')} />
+            </div>
+          </>
+        )}
+
+        {activeTab === 'subordinates' && (
         <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
           <h2 className="text-2xl font-bold text-slate-800 mb-2">
             Welcome, Chairperson!
@@ -249,35 +501,40 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
             )}
           </div>
 
-          {/* Role Selector */}
-          {allAssignments.length > 1 && (
-            <div className="border-t pt-4">
-              <label className="block text-sm font-medium text-slate-700 mb-2">
-                Active Role
-              </label>
-              <select
-                value={selectedAssignment?.id || ''}
-                onChange={(e) => {
-                  const assignment = allAssignments.find(a => a.id === e.target.value);
-                  if (assignment) {
-                    setSelectedAssignment(assignment);
-                    setMyCommitteeInfo(assignment);
-                  }
-                }}
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white"
-              >
-                {allAssignments.map((assignment) => (
+          {/* Role Selector — always visible */}
+          <div className="border-t pt-4">
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Active Role
+            </label>
+            <select
+              value={selectedAssignment?.id || ''}
+              onChange={(e) => {
+                const assignment = allAssignments.find(a => a.id === e.target.value);
+                if (assignment) {
+                  setSelectedAssignment(assignment);
+                  setMyCommitteeInfo(assignment);
+                }
+              }}
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white text-slate-800"
+            >
+              {allAssignments.map((assignment, idx) => {
+                const isTop     = idx === 0;
+                const isVirtual = assignment.id.startsWith('virtual-');
+                const prefix    = isTop ? '★ ' : '└ ';
+                const suffix    = isVirtual ? ' (access via top role)' : '';
+                return (
                   <option key={assignment.id} value={assignment.id}>
-                    {formatRole(assignment.role)} - {formatRegionType(assignment.region_type)}
+                    {prefix}{formatRole(assignment.role)}{suffix}
                   </option>
-                ))}
-              </select>
-              <p className="text-xs text-slate-500 mt-1">
-                Select a role to manage its subordinates and riders
-              </p>
-            </div>
-          )}
+                );
+              })}
+            </select>
+            <p className="text-xs text-slate-500 mt-1">
+              Select a role to manage its subordinates and riders
+            </p>
+          </div>
         </div>
+        )}
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
@@ -346,65 +603,23 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
           </div>
         </div>
 
-        {/* Subordinate Chairpersons or Riders - depends on selected role */}
-        {selectedAssignment?.region_type === 'stage' ? (
-          /* Stage Chairperson - Manage Riders */
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-slate-800">Your Riders</h3>
-              <button 
-                onClick={() => setShowAssignRiderModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
-              >
-                <UserPlus size={18} />
-                <span>Assign Rider</span>
-              </button>
-            </div>
-
-            {riders.length === 0 ? (
-              <div className="text-center py-12">
-                <Bike className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-600 mb-2">No riders assigned yet</p>
-                <p className="text-sm text-slate-500">Click "Assign Rider" to add your first rider</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {riders.map((rider) => (
-                  <div
-                    key={rider.id}
-                    className="flex items-center justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                        {rider.full_name?.charAt(0).toUpperCase() || 'R'}
-                      </div>
-                      <div>
-                        <p className="font-semibold text-slate-800">{rider.full_name}</p>
-                        <p className="text-sm text-slate-500">{rider.phone || 'No phone'}</p>
-                        <p className="text-xs text-slate-400">
-                          Status: <span className={rider.status === 'active' ? 'text-green-600' : 'text-slate-600'}>{rider.status}</span>
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm text-slate-600">Rides: {rider.total_rides || 0}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        ) : (
+        {activeTab === 'subordinates' && (
           /* Higher-level Chairperson - Manage Subordinates */
           <div className="bg-white rounded-xl shadow-lg p-6">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-slate-800">Your Chairpersons</h3>
+              <div>
+                <h3 className="text-xl font-bold text-slate-800">Your Chairpersons</h3>
+                <p className="text-sm text-slate-600">
+                  {selectedAssignment ? `Managing ${formatRegionType(selectedAssignment.region_type)} level` : 'Select a role'}
+                </p>
+              </div>
               <button 
                 onClick={() => setShowAssignModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
               >
                 <UserPlus size={18} />
-                <span>Assign Chairperson</span>
+                <span className="hidden sm:inline">Assign Chairperson</span>
+                <span className="sm:hidden">Assign</span>
               </button>
             </div>
 
@@ -457,9 +672,8 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
         </div>
         )}
 
-        {/* Riders Section (For ALL Stage Assignments) */}
-        {allAssignments.some(a => a.region_type === 'stage') && (
-          <div className="bg-white rounded-xl shadow-lg p-6 mt-6">
+        {activeTab === 'riders' && allAssignments.some(a => a.region_type === 'stage') && (
+          <div className="bg-white rounded-xl shadow-lg p-6">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-xl font-bold text-slate-800">Your Riders</h3>
@@ -473,7 +687,8 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
                   className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
                 >
                   <UserPlus size={18} />
-                  <span>Assign Rider</span>
+                  <span className="hidden sm:inline">Assign Rider</span>
+                  <span className="sm:hidden">Assign</span>
                 </button>
               )}
             </div>
@@ -537,41 +752,43 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
           </div>
         )}
 
-        {/* Commission Summary */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h3 className="text-lg font-bold text-slate-800 mb-4">Commission Summary</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center pb-3 border-b">
-                <span className="text-slate-600">This Month</span>
-                <span className="font-semibold text-slate-800">UGX 0</span>
+        {activeTab === 'commission' && (
+          /* Commission Summary */
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <h3 className="text-lg font-bold text-slate-800 mb-4">Commission Summary</h3>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center pb-3 border-b">
+                  <span className="text-slate-600">This Month</span>
+                  <span className="font-semibold text-slate-800">UGX 0</span>
+                </div>
+                <div className="flex justify-between items-center pb-3 border-b">
+                  <span className="text-slate-600">Last Month</span>
+                  <span className="font-semibold text-slate-800">UGX 0</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Total Earned</span>
+                  <span className="font-bold text-orange-600">UGX 0</span>
+                </div>
               </div>
-              <div className="flex justify-between items-center pb-3 border-b">
-                <span className="text-slate-600">Last Month</span>
-                <span className="font-semibold text-slate-800">UGX 0</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-600">Total Earned</span>
-                <span className="font-bold text-orange-600">UGX 0</span>
-              </div>
-            </div>
-            <p className="text-xs text-slate-500 mt-4">
-              Commission tracking coming soon...
-            </p>
-          </div>
-
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <h3 className="text-lg font-bold text-slate-800 mb-4">Recent Activity</h3>
-            <div className="space-y-3">
-              <p className="text-slate-600 text-center py-8">
-                No recent activity
+              <p className="text-xs text-slate-500 mt-4">
+                Commission tracking coming soon...
               </p>
             </div>
-            <p className="text-xs text-slate-500 mt-4">
-              Activity tracking coming soon...
-            </p>
+
+            <div className="bg-white rounded-xl shadow-lg p-6">
+              <h3 className="text-lg font-bold text-slate-800 mb-4">Recent Activity</h3>
+              <div className="space-y-3">
+                <p className="text-slate-600 text-center py-8">
+                  No recent activity
+                </p>
+              </div>
+              <p className="text-xs text-slate-500 mt-4">
+                Activity tracking coming soon...
+              </p>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* Profile Modal */}
@@ -612,6 +829,36 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
         />
       )}
     </div>
+  );
+}
+
+// Tab Button Component
+function TabButton({ 
+  active, 
+  onClick, 
+  icon, 
+  label 
+}: { 
+  active: boolean; 
+  onClick: () => void; 
+  icon: React.ReactNode; 
+  label: string; 
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-1 sm:gap-2 px-2 xs:px-2.5 sm:px-4 py-1.5 xs:py-2 sm:py-3 font-medium transition-all relative whitespace-nowrap text-[10px] xs:text-xs sm:text-sm ${
+        active
+          ? 'text-orange-500'
+          : 'text-slate-600 hover:text-slate-800'
+      }`}
+    >
+      {icon}
+      <span className="hidden xs:inline">{label}</span>
+      {active && (
+        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+      )}
+    </button>
   );
 }
 

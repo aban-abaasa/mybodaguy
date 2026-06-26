@@ -70,21 +70,56 @@ export const chairpersonService = {
     return data;
   },
 
-  // Get ALL committee assignments for a user (multi-role support)
+  // Get ALL committee assignments for a user, ordered highest → lowest level.
+  // If middle levels are missing from the DB (e.g. trigger not yet run), they are
+  // synthesised from the top assignment so the role selector always shows the full chain.
   async getAllMyCommitteeAssignments(userId: string): Promise<CommitteeMember[]> {
     const { data, error } = await supabase
       .from('mbg_committee_members')
       .select('*')
       .eq('user_id', userId)
-      .eq('is_active', true)
-      .order('appointed_at', { ascending: false });
+      .eq('is_active', true);
 
     if (error) {
       console.error('[ChairpersonService] Error fetching all committee assignments:', error);
       return [];
     }
 
-    return data || [];
+    const assignments: CommitteeMember[] = data || [];
+    if (assignments.length === 0) return [];
+
+    const LEVEL_ORDER: Record<string, number> = {
+      district: 0, division: 1, subcounty: 2, parish: 3, stage: 4,
+    };
+    const FULL_HIERARCHY: { role: ChairpersonRole; region_type: RegionType }[] = [
+      { role: 'district_chairperson',  region_type: 'district'  },
+      { role: 'division_chairperson',  region_type: 'division'  },
+      { role: 'subcounty_chairperson', region_type: 'subcounty' },
+      { role: 'parish_chairperson',    region_type: 'parish'    },
+      { role: 'stage_chairperson',     region_type: 'stage'     },
+    ];
+
+    // Sort real records: highest level first
+    const sorted = [...assignments].sort(
+      (a, b) => (LEVEL_ORDER[a.region_type] ?? 5) - (LEVEL_ORDER[b.region_type] ?? 5)
+    );
+
+    const topAssignment = sorted[0];
+    const topIdx = LEVEL_ORDER[topAssignment.region_type] ?? 4;
+
+    // Return every level from the top down to stage.
+    // Real DB records are used where they exist; missing levels are filled in
+    // as virtual records (same region_id as top, correct role/region_type).
+    return FULL_HIERARCHY.slice(topIdx).map(({ role, region_type }) => {
+      const real = sorted.find(a => a.region_type === region_type);
+      if (real) return real;
+      return {
+        ...topAssignment,
+        id: `virtual-${role}`,   // only used as select value — not sent to DB
+        role,
+        region_type,
+      };
+    });
   },
 
   // Get subordinate chairpersons

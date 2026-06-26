@@ -14,8 +14,14 @@ export default function App() {
   const [showAuth, setShowAuth] = useState(false);
 
   useEffect(() => {
+    // Prevent multiple initialization in React Strict Mode
+    let isInitialized = false;
+    
     // Initialize auth state
     const initAuth = async () => {
+      if (isInitialized) return;
+      isInitialized = true;
+      
       try {
         console.log('[MyBodaGuy] Initializing auth...');
         const session = await authService.getSession();
@@ -44,9 +50,13 @@ export default function App() {
 
     initAuth();
 
-    // Subscribe to auth changes
+    // Subscribe to auth changes - debounce to prevent rapid state changes
+    let timeoutId: NodeJS.Timeout;
     const { data: authListener } = authService.onAuthStateChange(async (event, session) => {
-      console.log('[MyBodaGuy] Auth state changed:', event, session);
+      console.log('[MyBodaGuy] Auth state changed:', event);
+      
+      // Clear any pending updates
+      if (timeoutId) clearTimeout(timeoutId);
       
       // Only handle SIGNED_OUT event to prevent false logouts
       if (event === 'SIGNED_OUT') {
@@ -55,16 +65,19 @@ export default function App() {
         return;
       }
       
-      // For SIGNED_IN and TOKEN_REFRESHED, update the session
-      if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED')) {
-        setUser(session.user);
-        const role = await userService.getUserRole(session.user.id);
-        console.log('[MyBodaGuy] Role after auth change:', role);
-        setUserRole(role);
+      // For SIGNED_IN and TOKEN_REFRESHED, debounce the update
+      if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
+        timeoutId = setTimeout(async () => {
+          setUser(session.user);
+          const role = await userService.getUserRole(session.user.id);
+          console.log('[MyBodaGuy] Role after auth change:', role);
+          setUserRole(role);
+        }, 100); // 100ms debounce
       }
     });
 
     return () => {
+      if (timeoutId) clearTimeout(timeoutId);
       authListener?.subscription?.unsubscribe();
     };
   }, []);

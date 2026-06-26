@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Bike, Copy, ArrowUp, ArrowDown, RefreshCw, Wallet, TrendingUp, ChevronRight } from 'lucide-react';
+import { Bike, Copy, ArrowUp, ArrowDown, RefreshCw, Wallet, TrendingUp, ChevronRight, ShoppingCart, Banknote } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../../services/supabaseClient';
 import {
@@ -12,6 +12,8 @@ import {
   type ICANBalance,
   type ICANTransaction,
 } from '../services/icanWalletService';
+import BuyIcan from '../../../../../ICAN/frontend/src/components/ICAN/BuyIcan';
+import SellIcan from '../../../../../ICAN/frontend/src/components/ICAN/SellIcan';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -19,6 +21,7 @@ const TX_LABELS: Record<string, string> = {
   earn: 'Delivery Earned', cashback: 'Cashback', purchase: 'Purchase',
   transfer_in: 'Received', transfer_out: 'Sent',
   tithe: 'Tithe (10%)', sale: 'Sale', refund: 'Refund',
+  buy: 'Bought ICAN', sell: 'Sold ICAN',
 };
 
 const APP_LABELS: Record<string, string> = {
@@ -140,6 +143,25 @@ function ReceiveModal({ address, onClose }: { address: string; onClose: () => vo
   );
 }
 
+// ─── Buy/Sell Overlays (use ICAN app components directly) ────────────────────
+
+function TradeModal({ title, userId, onClose, onDone, children }: { title: string; userId: string; onClose: () => void; onDone: () => void; children: React.ReactNode }) {
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
+        <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-slate-100">
+          <h2 className="font-bold text-lg text-slate-800">{title}</h2>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
+        </div>
+        <div className="p-2">{children}</div>
+        <div className="px-6 pb-5">
+          <button onClick={onClose} className="w-full py-3 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm">Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 interface ICANWalletPageProps {
@@ -152,7 +174,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'in' | 'out' | 'tithe'>('all');
-  const [modal, setModal] = useState<'send' | 'receive' | null>(null);
+  const [modal, setModal] = useState<'send' | 'receive' | 'buy' | 'sell' | null>(null);
   const [balanceHidden, setBalanceHidden] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -240,10 +262,12 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
             </button>
           )}
 
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-5 gap-2">
             {[
               { label: 'Send', icon: <ArrowUp className="w-4 h-4" />, onClick: () => setModal('send') },
               { label: 'Receive', icon: <ArrowDown className="w-4 h-4" />, onClick: () => setModal('receive') },
+              { label: 'Buy', icon: <ShoppingCart className="w-4 h-4" />, onClick: () => setModal('buy') },
+              { label: 'Sell', icon: <Banknote className="w-4 h-4" />, onClick: () => setModal('sell') },
               { label: 'History', icon: <TrendingUp className="w-4 h-4" />, onClick: () => document.getElementById('tx-list')?.scrollIntoView({ behavior: 'smooth' }) },
             ].map(btn => (
               <button key={btn.label} onClick={btn.onClick}
@@ -362,6 +386,16 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
       )}
       {modal === 'receive' && balance.address && (
         <ReceiveModal address={balance.address} onClose={() => setModal(null)} />
+      )}
+      {modal === 'buy' && (
+        <TradeModal title="💳 Buy ICAN Coins" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>
+          <BuyIcan userId={user.id} onSuccess={() => { loadData(); setModal(null); }} />
+        </TradeModal>
+      )}
+      {modal === 'sell' && (
+        <TradeModal title="💰 Sell ICAN Coins" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>
+          <SellIcan userId={user.id} onSuccess={() => { loadData(); setModal(null); }} />
+        </TradeModal>
       )}
     </div>
   );

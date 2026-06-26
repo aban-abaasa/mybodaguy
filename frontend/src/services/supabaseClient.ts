@@ -114,6 +114,21 @@ function createNoopSupabaseClient(): SupabaseClient {
   } as unknown as SupabaseClient;
 }
 
+// Strip expired implicit-flow auth hashes from the URL before the client
+// reads them — prevents a stale email-confirmation link from triggering
+// a 403 → forced sign-out loop.
+if (typeof window !== 'undefined' && window.location.hash.includes('access_token')) {
+  try {
+    const params    = new URLSearchParams(window.location.hash.slice(1));
+    const expiresAt = Number(params.get('expires_at') || 0);
+    const nowSec    = Math.floor(Date.now() / 1000);
+    if (expiresAt > 0 && expiresAt < nowSec) {
+      console.warn('[Supabase] Stale auth URL detected — clearing hash.');
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  } catch (_) { /* ignore hash-parsing failures */ }
+}
+
 /**
  * Initialize Supabase client as a singleton
  * Ensures only one GoTrueClient instance exists across the app

@@ -6,6 +6,7 @@ import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
 import RiderICANEarnings from '../components/RiderICANEarnings';
 import SupermarketDeliveryPool from '../components/SupermarketDeliveryPool';
+import IcanCoinCard from '../components/IcanCoinCard';
 
 interface RiderDashboardProps {
   user: any;
@@ -161,7 +162,7 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
         {activeTab === 'overview' && (
           <div className="space-y-4 sm:space-y-6">
             {/* Stats Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-6">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-6">
               <StatCard
                 title="Today's Earnings"
                 value="UGX 45k"
@@ -186,6 +187,7 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
                 icon={<Settings size={20} className="sm:w-6 sm:h-6" />}
                 color="purple"
               />
+              <IcanCoinCard userId={user?.id} onGoToWallet={() => (window.location.href = '/ican-wallet')} />
             </div>
 
             {/* ICAN Wallet Earnings */}

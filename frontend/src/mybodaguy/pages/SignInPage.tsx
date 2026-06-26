@@ -36,9 +36,14 @@ export default function SignInPage({ onBack }: SignInPageProps) {
   const handleGoogleSignIn = async () => {
     try {
       setLoading(true);
-      await authService.signInWithGoogle();
+      console.log('[SignInPage] Starting Google sign-in...');
+      const result = await authService.signInWithGoogle();
+      console.log('[SignInPage] Google sign-in result:', result);
       // User will be redirected to Google, no need for success message here
     } catch (error: any) {
+      console.error('[SignInPage] Google sign-in error:', error);
+      console.error('[SignInPage] Error message:', error.message);
+      console.error('[SignInPage] Error details:', error);
       toast.error(error.message || 'Google sign-in failed');
       setLoading(false);
     }

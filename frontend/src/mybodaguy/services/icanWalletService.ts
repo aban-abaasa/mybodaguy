@@ -64,6 +64,20 @@ export interface TransferResult {
   recipient_received: number;
 }
 
+export interface BuyResult {
+  success: boolean;
+  tx_id: string;
+  ican_bought: number;
+  ugx_paid: number;
+}
+
+export interface SellResult {
+  success: boolean;
+  tx_id: string;
+  ican_sold: number;
+  ugx_payout: number;
+}
+
 // ─── Wallet ───────────────────────────────────────────────────────────────────
 
 export async function getOrCreateWallet(userId: string): Promise<ICANWallet> {
@@ -200,6 +214,55 @@ export async function sendICAN({
   if (error) throw error;
   if (!data.success) throw new Error(data.error);
   return data as TransferResult;
+}
+
+// ─── Buy / Sell ───────────────────────────────────────────────────────────────
+
+/**
+ * Buy ICAN coins — user pays UGX (notional), ICAN is credited to their wallet.
+ * 1 ICAN = 5,000 UGX floor price. No tithe on purchases.
+ */
+export async function buyICAN({
+  userId,
+  icanAmount,
+  paymentRef = null,
+}: {
+  userId: string;
+  icanAmount: number;
+  paymentRef?: string | null;
+}): Promise<BuyResult> {
+  const { data, error } = await supabase.rpc('buy_ican_coins', {
+    p_user_id: userId,
+    p_ican_amount: icanAmount,
+    p_source_app: SOURCE_APP,
+    p_payment_ref: paymentRef,
+  });
+  if (error) throw error;
+  if (!data.success) throw new Error(data.error ?? 'Buy failed');
+  return data as BuyResult;
+}
+
+/**
+ * Sell ICAN coins — ICAN is debited, UGX payout is handled offline by cashier/admin.
+ */
+export async function sellICAN({
+  userId,
+  icanAmount,
+  reference = null,
+}: {
+  userId: string;
+  icanAmount: number;
+  reference?: string | null;
+}): Promise<SellResult> {
+  const { data, error } = await supabase.rpc('sell_ican_coins', {
+    p_user_id: userId,
+    p_ican_amount: icanAmount,
+    p_source_app: SOURCE_APP,
+    p_reference: reference,
+  });
+  if (error) throw error;
+  if (!data.success) throw new Error(data.error ?? 'Sell failed');
+  return data as SellResult;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

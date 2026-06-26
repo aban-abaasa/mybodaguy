@@ -75,14 +75,27 @@ export const authService = {
 
   // Sign in with Google
   async signInWithGoogle() {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: `${window.location.origin}`,
-      },
-    });
+    console.log('[AuthService] Initiating Google OAuth...');
+    console.log('[AuthService] Redirect will be to:', window.location.origin);
+    
+    try {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}`,
+        },
+      });
 
-    if (error) throw error;
-    return data;
+      if (error) {
+        console.error('[AuthService] OAuth error:', error);
+        throw error;
+      }
+      
+      console.log('[AuthService] OAuth initiated successfully:', data);
+      return data;
+    } catch (err) {
+      console.error('[AuthService] Exception during OAuth:', err);
+      throw err;
+    }
   },
 };
