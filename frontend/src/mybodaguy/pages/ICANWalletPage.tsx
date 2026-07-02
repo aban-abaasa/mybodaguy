@@ -26,7 +26,7 @@ const TX_LABELS: Record<string, string> = {
 
 const APP_LABELS: Record<string, string> = {
   ican: 'ICAN', 'digital-city-era': 'Supermarket',
-  'farm-agent': 'Farm Agent', mybodaguy: 'My Boda Guy',
+  'farm-agent': 'Backbone', mybodaguy: 'My Boda Guy',
 };
 
 function formatDate(ts: string) {
