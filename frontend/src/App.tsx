@@ -6,6 +6,7 @@ import { userService } from "./mybodaguy/services/userService";
 import SignInPage from "./mybodaguy/pages/SignInPage";
 import LandingPage from "./mybodaguy/pages/LandingPage";
 import UnifiedDashboard from "./mybodaguy/pages/UnifiedDashboard";
+import ChatWidget from "./mybodaguy/components/ChatWidget";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -110,6 +111,7 @@ export default function App() {
       return (
         <>
           <SignInPage onBack={() => setShowAuth(false)} />
+          <ChatWidget />
           <Toaster position="top-right" theme="light" />
         </>
       );
@@ -117,6 +119,7 @@ export default function App() {
     return (
       <>
         <LandingPage onGetStarted={() => setShowAuth(true)} />
+        <ChatWidget />
         <Toaster position="top-right" theme="light" />
       </>
     );
@@ -155,6 +158,7 @@ export default function App() {
   return (
     <>
       <UnifiedDashboard user={user} onSignOut={handleSignOut} />
+      <ChatWidget />
       <Toaster position="top-right" theme="light" />
     </>
   );

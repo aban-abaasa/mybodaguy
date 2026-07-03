@@ -1,12 +1,29 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Bike, Users, MapPin, DollarSign, Settings,
-  TrendingUp, LogOut, Menu, X, Shield, Search
+  TrendingUp, LogOut, Menu, X, Shield, Search,
+  MessageSquare, RefreshCw, Globe, Lock, Trash2, Send, CheckCircle, Mail, Gift,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '../services/userService';
 import RegionsManagement from '../components/RegionsManagement';
 import IcanCoinCard from '../components/IcanCoinCard';
+import {
+  devListAllLandingMessages,
+  devDeleteLandingMessage,
+  devReplyToLandingMessage,
+  devMarkCorrectAnswer,
+  devGrantLandingBonus,
+  type LandingMessage,
+} from '../services/landingMessagesService';
+import {
+  listConversations,
+  fetchMessages as fetchChatMessages,
+  sendMessage as sendChatMessage,
+  markConversationRead,
+  subscribeToAllConversations,
+  subscribeToMessages as subscribeToChatMessages,
+} from '../services/chatService';
 
 interface DeveloperDashboardProps {
   user: any;
@@ -21,6 +38,25 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
 
   useEffect(() => {
     loadUsers();
+  }, []);
+
+  // Signal to ChatWidget that a real developer session is actively viewing
+  // this dashboard, so the floating widget hides itself (mirrors the other
+  // 3 apps hiding their widget on their hidden dev-token panel) — mybodaguy
+  // has no token panel, just a real authenticated developer role instead.
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('mbg_developer_active', 'true');
+    } catch {
+      // ignore storage errors (private browsing, quota, etc.)
+    }
+    return () => {
+      try {
+        sessionStorage.removeItem('mbg_developer_active');
+      } catch {
+        // ignore
+      }
+    };
   }, []);
 
   const loadUsers = async () => {
@@ -40,6 +76,8 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
     { id: 'users', label: 'Users', icon: Users },
     { id: 'regions', label: 'Regions', icon: MapPin },
     { id: 'commissions', label: 'Commissions', icon: DollarSign },
+    { id: 'public-board', label: 'Public Board', icon: MessageSquare },
+    { id: 'messages', label: 'Messages', icon: Mail },
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -104,6 +142,8 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
           {activeTab === 'users' && <UsersTab users={users} loading={loading} onReload={loadUsers} />}
           {activeTab === 'regions' && <RegionsManagement />}
           {activeTab === 'commissions' && <CommissionsTab />}
+          {activeTab === 'public-board' && <PublicBoardTab />}
+          {activeTab === 'messages' && <MessagesTab />}
           {activeTab === 'settings' && <SettingsTab />}
         </div>
       </div>
@@ -397,6 +437,484 @@ function UsersTab({ users, loading, onReload }: { users: any[]; loading: boolean
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+const fmtBoardTime = (value?: string) => {
+  if (!value) return '';
+  const date = new Date(value);
+  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return date.toLocaleDateString();
+};
+
+// ─── Public landing-page message board (moderation) ────────────────────
+// No dev_token needed — this dashboard is already only shown to real
+// mbg_users.role_type = 'developer' accounts; landing_messages_is_dev()
+// checks auth.uid() against that directly.
+const fmtChatTime = (d?: string) => {
+  if (!d) return '';
+  const date = new Date(d);
+  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return date.toLocaleDateString();
+};
+
+function MessagesTab() {
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<any[]>([]);
+  const [reply, setReply] = useState('');
+  const [sending, setSending] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  const refresh = useCallback(async () => {
+    setConversations(await listConversations());
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    return subscribeToAllConversations((payload: any) => {
+      const row = payload.new;
+      if (!row || row.kind === 'team') return;
+      setConversations((prev) =>
+        [row, ...prev.filter((c) => c.id !== row.id)]
+          .sort((a, b) => new Date(b.last_message_at).getTime() - new Date(a.last_message_at).getTime())
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!selectedId) { setMessages([]); return; }
+    let cancelled = false;
+    (async () => {
+      const msgs = await fetchChatMessages(selectedId);
+      if (cancelled) return;
+      setMessages(msgs);
+      await markConversationRead(selectedId, 'dev');
+      setConversations((prev) => prev.map((c) => (c.id === selectedId ? { ...c, unread_by_dev: false } : c)));
+    })();
+    const unsub = subscribeToChatMessages(selectedId, (msg) => {
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+    });
+    return () => { cancelled = true; unsub(); };
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  const selected = conversations.find((c) => c.id === selectedId);
+
+  const handleReply = async () => {
+    const body = reply.trim();
+    if (!body || !selectedId || sending) return;
+    setSending(true);
+    try {
+      const msg = await sendChatMessage(selectedId, { senderRole: 'dev', senderName: 'My Boda Guy Team', body });
+      setMessages((prev) => [...prev, msg]);
+      setReply('');
+    } catch (e) {
+      console.error('[MessagesTab] reply failed:', e);
+      toast.error('Failed to send reply');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+      <div className="rounded-xl border border-slate-200 overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Conversations ({conversations.length})
+        </div>
+        <div className="max-h-[65vh] overflow-y-auto">
+          {conversations.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setSelectedId(c.id)}
+              className={`w-full border-b border-slate-100 last:border-0 px-4 py-3 text-left transition ${
+                selectedId === c.id ? 'bg-orange-50' : 'hover:bg-slate-50'
+              }`}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-slate-800 truncate">{c.guest_name || c.role || 'Guest'}</p>
+                {c.unread_by_dev && <span className="h-2 w-2 flex-shrink-0 rounded-full bg-red-500" />}
+              </div>
+              <p className="text-xs text-slate-500 truncate">{c.guest_email}</p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-medium capitalize text-slate-600">{c.portal}</span>
+                <span className="text-[10px] text-slate-400">{fmtChatTime(c.last_message_at)}</span>
+              </div>
+              {c.last_message_preview && <p className="mt-1 truncate text-xs text-slate-500">{c.last_message_preview}</p>}
+            </button>
+          ))}
+          {conversations.length === 0 && (
+            <p className="px-4 py-10 text-center text-sm text-slate-500">No conversations yet.</p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-col overflow-hidden rounded-xl border border-slate-200">
+        {!selected ? (
+          <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
+            <div className="text-center">
+              <MessageSquare className="mx-auto mb-2 h-8 w-8 opacity-40" />
+              Select a conversation to reply
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="border-b border-slate-200 px-4 py-3">
+              <p className="text-sm font-semibold text-slate-800">{selected.guest_name || 'Guest'}</p>
+              <p className="text-xs text-slate-500">{selected.guest_email} · {selected.portal}</p>
+            </div>
+            <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto px-4 py-3" style={{ maxHeight: '48vh' }}>
+              {messages.map((m) => {
+                const fromDev = m.sender_role === 'dev';
+                return (
+                  <div key={m.id} className={`flex ${fromDev ? 'justify-end' : 'justify-start'}`}>
+                    <div
+                      className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${
+                        fromDev ? 'bg-gradient-to-br from-orange-500 to-yellow-500 text-white' : 'bg-slate-100 text-slate-800'
+                      }`}
+                    >
+                      {!fromDev && (
+                        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                          {m.sender_name || selected.role}
+                        </p>
+                      )}
+                      <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="flex items-center gap-2 border-t border-slate-200 px-3 py-3">
+              <input
+                value={reply}
+                onChange={(e) => setReply(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleReply(); }}
+                placeholder="Reply as My Boda Guy Team…"
+                className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
+              />
+              <button
+                onClick={handleReply}
+                disabled={sending || !reply.trim()}
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-r from-orange-500 to-yellow-500 text-white transition disabled:opacity-40"
+              >
+                <Send className="h-4 w-4" />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PublicBoardTab() {
+  const [items, setItems] = useState<LandingMessage[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [replyDraft, setReplyDraft] = useState('');
+  const [replying, setReplying] = useState(false);
+  const [markingId, setMarkingId] = useState<string | null>(null);
+  const [grantTargetId, setGrantTargetId] = useState<string | null>(null);
+  const [grantAmount, setGrantAmount] = useState('');
+  const [grantingId, setGrantingId] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      setItems(await devListAllLandingMessages());
+    } catch (e) {
+      console.error('[PublicBoardTab] failed to load messages:', e);
+      toast.error('Failed to load public board messages');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const handleDelete = async (id: string) => {
+    if (deletingId) return;
+    setDeletingId(id);
+    try {
+      await devDeleteLandingMessage(id);
+      if (expandedId === id) setExpandedId(null);
+      await refresh();
+    } catch (e) {
+      console.error('[PublicBoardTab] failed to delete message:', e);
+      toast.error('Failed to delete message');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const handleReply = async (id: string) => {
+    const body = replyDraft.trim();
+    if (!body || replying) return;
+    setReplying(true);
+    try {
+      await devReplyToLandingMessage(id, body);
+      setReplyDraft('');
+      await refresh();
+    } catch (e) {
+      console.error('[PublicBoardTab] failed to reply:', e);
+      toast.error('Failed to send reply');
+    } finally {
+      setReplying(false);
+    }
+  };
+
+  const handleMarkCorrect = async (id: string) => {
+    if (markingId) return;
+    setMarkingId(id);
+    try {
+      await devMarkCorrectAnswer(id);
+      await refresh();
+    } catch (e) {
+      console.error('[PublicBoardTab] failed to mark correct answer:', e);
+      toast.error((e as Error)?.message || 'Failed to mark as correct answer');
+    } finally {
+      setMarkingId(null);
+    }
+  };
+
+  const handleOpenGrant = (id: string) => {
+    setGrantTargetId((prev) => (prev === id ? null : id));
+    setGrantAmount('');
+  };
+
+  const handleGrant = async (item: LandingMessage) => {
+    const amt = parseFloat(grantAmount);
+    if (!amt || amt <= 0 || grantingId || !item.user_id) return;
+    setGrantingId(item.id);
+    try {
+      await devGrantLandingBonus(item.user_id, amt, 'Manual grant from Public Board');
+      setGrantTargetId(null);
+      setGrantAmount('');
+      await refresh();
+    } catch (e) {
+      console.error('[PublicBoardTab] failed to grant bonus:', e);
+      toast.error((e as Error)?.message || 'Failed to grant ICAN');
+    } finally {
+      setGrantingId(null);
+    }
+  };
+
+  const topLevel = items.filter((m) => !m.parent_id);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Landing Page Messages</h2>
+          <p className="text-sm text-slate-600 mt-1">
+            Community board messages posted from the My Boda Guy landing page.
+          </p>
+        </div>
+        <button
+          onClick={refresh}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all disabled:opacity-50"
+        >
+          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+          Refresh
+        </button>
+      </div>
+
+      <div className="rounded-xl border border-slate-200 overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
+          <span>Messages ({topLevel.length})</span>
+        </div>
+        <div className="max-h-[65vh] divide-y divide-slate-100 overflow-y-auto">
+          {topLevel.map((m) => {
+            const replies = items.filter((i) => i.parent_id === m.id);
+            const isExpanded = expandedId === m.id;
+            return (
+              <div key={m.id} className="px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <button
+                    onClick={() => { setExpandedId(isExpanded ? null : m.id); setReplyDraft(''); }}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-slate-800">{m.name || 'Website visitor'}</p>
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                        m.is_public
+                          ? 'border-orange-200 bg-orange-50 text-orange-600'
+                          : 'border-amber-200 bg-amber-50 text-amber-600'
+                      }`}>
+                        {m.is_public ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                        {m.is_public ? 'Public' : 'Private'}
+                      </span>
+                      {m.origin_app && (
+                        <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-medium capitalize text-slate-600">
+                          {m.origin_app}
+                        </span>
+                      )}
+                      {m.reward_reason === 'popular' && (
+                        <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
+                          🪙 Popular
+                        </span>
+                      )}
+                      <span className="text-[10px] text-slate-400">{fmtBoardTime(m.created_at)}</span>
+                      {replies.length > 0 && (
+                        <span className="text-[10px] text-slate-400">· {replies.length} {replies.length === 1 ? 'reply' : 'replies'}</span>
+                      )}
+                    </div>
+                    {m.email && <p className="text-xs text-slate-500">{m.email}</p>}
+                    <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{m.message}</p>
+                  </button>
+                  <button
+                    onClick={() => handleDelete(m.id)}
+                    disabled={deletingId === m.id}
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-rose-500 transition hover:bg-rose-50 disabled:opacity-40"
+                    title="Delete message"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+
+                {isExpanded && (
+                  <div className="mt-3 space-y-2 border-l-2 border-slate-100 pl-3">
+                    {m.user_id && (
+                      <div>
+                        <button
+                          onClick={() => handleOpenGrant(m.id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600 transition hover:bg-amber-100"
+                        >
+                          <Gift className="h-3 w-3" /> Grant ICAN to {m.name || 'this poster'}
+                        </button>
+                        {grantTargetId === m.id && (
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <input
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              value={grantAmount}
+                              onChange={(e) => setGrantAmount(e.target.value)}
+                              onKeyDown={(e) => { if (e.key === 'Enter') handleGrant(m); }}
+                              placeholder="Amount"
+                              className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-amber-400"
+                            />
+                            <button
+                              onClick={() => handleGrant(m)}
+                              disabled={grantingId === m.id || !grantAmount}
+                              className="rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white transition disabled:opacity-40"
+                            >
+                              {grantingId === m.id ? 'Granting…' : 'Confirm'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {replies.map((r) => (
+                      <div key={r.id} className={`flex items-start justify-between gap-2 rounded-lg px-3 py-2 ${r.sender_role === 'dev' ? 'bg-orange-50' : 'bg-slate-50'}`}>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-xs font-semibold text-slate-800">{r.sender_role === 'dev' ? 'My Boda Guy Team' : (r.name || 'Website visitor')}</p>
+                            {r.reward_reason && (
+                              <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
+                                🪙 Correct answer
+                              </span>
+                            )}
+                            <span className="text-[10px] text-slate-400">{fmtBoardTime(r.created_at)}</span>
+                          </div>
+                          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700">{r.message}</p>
+                          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                            {r.sender_role !== 'dev' && r.user_id && !r.rewarded_at && (
+                              <button
+                                onClick={() => handleMarkCorrect(r.id)}
+                                disabled={markingId === r.id}
+                                className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 transition hover:bg-emerald-100 disabled:opacity-40"
+                              >
+                                <CheckCircle className="h-3 w-3" /> {markingId === r.id ? 'Marking…' : 'Mark correct answer (+1 ICAN)'}
+                              </button>
+                            )}
+                            {r.sender_role !== 'dev' && r.user_id && (
+                              <button
+                                onClick={() => handleOpenGrant(r.id)}
+                                className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-600 transition hover:bg-amber-100"
+                              >
+                                <Gift className="h-3 w-3" /> Grant ICAN
+                              </button>
+                            )}
+                          </div>
+                          {grantTargetId === r.id && (
+                            <div className="mt-1.5 flex items-center gap-2">
+                              <input
+                                type="number"
+                                min="0.01"
+                                step="0.01"
+                                value={grantAmount}
+                                onChange={(e) => setGrantAmount(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleGrant(r); }}
+                                placeholder="Amount"
+                                className="w-24 rounded-lg border border-slate-200 px-2 py-1 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-amber-400"
+                              />
+                              <button
+                                onClick={() => handleGrant(r)}
+                                disabled={grantingId === r.id || !grantAmount}
+                                className="rounded-lg bg-amber-500 px-2.5 py-1 text-[10px] font-bold text-white transition disabled:opacity-40"
+                              >
+                                {grantingId === r.id ? 'Granting…' : 'Confirm'}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => handleDelete(r.id)}
+                          disabled={deletingId === r.id}
+                          className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-rose-500 transition hover:bg-rose-50 disabled:opacity-40"
+                          title="Delete reply"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    {replies.length === 0 && <p className="text-xs text-slate-500">No replies yet.</p>}
+
+                    {m.is_public && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <input
+                          value={replyDraft}
+                          onChange={(e) => setReplyDraft(e.target.value)}
+                          onKeyDown={(e) => { if (e.key === 'Enter') handleReply(m.id); }}
+                          placeholder="Reply as My Boda Guy Team…"
+                          className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
+                        />
+                        <button
+                          onClick={() => handleReply(m.id)}
+                          disabled={replying || !replyDraft.trim()}
+                          className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-orange-500 to-yellow-500 text-white transition disabled:opacity-40"
+                        >
+                          <Send className="h-4 w-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {!loading && topLevel.length === 0 && (
+            <p className="px-4 py-10 text-center text-sm text-slate-500">No landing page messages yet.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
