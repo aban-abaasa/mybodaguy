@@ -240,15 +240,21 @@ export const fetchPublicThreads = async (
 };
 
 export const subscribeToPublicLandingMessages = (onInsert: (row: LandingMessage) => void) => {
+  // Create a unique channel name to avoid conflicts when remounting
+  const channelName = `landing_messages_public_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
   const channel = supabase
-    .channel('landing_messages_public')
+    .channel(channelName)
     .on(
       'postgres_changes',
       { event: 'INSERT', schema: 'public', table: 'landing_messages', filter: 'is_public=eq.true' },
       (payload: any) => onInsert(payload.new)
     )
     .subscribe();
-  return () => supabase.removeChannel(channel);
+  
+  return () => {
+    supabase.removeChannel(channel);
+  };
 };
 
 // Developer Dashboard moderation — mybodaguy has no dev-token panel like the
