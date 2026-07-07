@@ -1,8 +1,10 @@
-import { useState } from 'react';
-import { Crown, DollarSign, Home, TrendingUp, TrendingDown, Info, Tag } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Crown, DollarSign, Home, TrendingUp, TrendingDown, Info, Tag, Zap, Fuel, Umbrella } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '../services/supabaseClient';
 
 type RiderMode = 'normal' | 'vip' | 'discount' | 'return';
+type PowerType = 'electric' | 'fuel';
 
 interface RiderModeSelectorProps {
   riderId: string;
@@ -15,7 +17,31 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
   const [vipSurcharge, setVipSurcharge] = useState(10); // 0-20% extra for VIP
   const [discountRate, setDiscountRate] = useState(10); // 0-30% discount to attract customers
   const [returnDiscount, setReturnDiscount] = useState(30); // 0-50% discount when going home
+  const [powerType, setPowerType] = useState<PowerType>('fuel');
+  const [hasUmbrella, setHasUmbrella] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    const loadRider = async () => {
+      const { data, error } = await supabase
+        .from('mbg_riders')
+        .select('mode, vip_surcharge_pct, discount_pct, return_discount_pct, power_type, has_umbrella')
+        .eq('user_id', riderId)
+        .maybeSingle();
+
+      if (!error && data) {
+        setSelectedMode((data.mode as RiderMode) || 'normal');
+        setVipSurcharge(Number(data.vip_surcharge_pct ?? 10));
+        setDiscountRate(Number(data.discount_pct ?? 10));
+        setReturnDiscount(Number(data.return_discount_pct ?? 30));
+        setPowerType((data.power_type as PowerType) || 'fuel');
+        setHasUmbrella(!!data.has_umbrella);
+      }
+      setLoaded(true);
+    };
+    loadRider();
+  }, [riderId]);
 
   const modes = [
     {
@@ -52,21 +78,56 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
     }
   ];
 
+  const persistRiderSettings = async (updates: Record<string, any>) => {
+    const { error } = await supabase.from('mbg_riders').update(updates).eq('user_id', riderId);
+    if (error) throw error;
+  };
+
   const handleModeChange = async (mode: RiderMode) => {
     if (mode === selectedMode) return;
 
     setLoading(true);
     try {
-      // TODO: Implement API call to update rider mode
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
+      await persistRiderSettings({ mode, updated_at: new Date().toISOString() });
       setSelectedMode(mode);
       onModeChange?.(mode, vipSurcharge, discountRate, returnDiscount);
       toast.success(`Switched to ${modes.find(m => m.id === mode)?.name} mode`);
-    } catch (error) {
-      toast.error('Failed to change mode');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to change mode');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const commitRateChange = async (field: 'vip_surcharge_pct' | 'discount_pct' | 'return_discount_pct', value: number) => {
+    try {
+      await persistRiderSettings({ [field]: value, updated_at: new Date().toISOString() });
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to save rate');
+    }
+  };
+
+  const togglePowerType = async () => {
+    const next: PowerType = powerType === 'electric' ? 'fuel' : 'electric';
+    setPowerType(next);
+    try {
+      await persistRiderSettings({ power_type: next, updated_at: new Date().toISOString() });
+      toast.success(`Vehicle set to ${next === 'electric' ? 'Electric' : 'Fuel'}`);
+    } catch (error: any) {
+      setPowerType(powerType);
+      toast.error(error?.message || 'Failed to update vehicle type');
+    }
+  };
+
+  const toggleUmbrella = async () => {
+    const next = !hasUmbrella;
+    setHasUmbrella(next);
+    try {
+      await persistRiderSettings({ has_umbrella: next, updated_at: new Date().toISOString() });
+      toast.success(next ? 'Rain cover enabled' : 'Rain cover disabled');
+    } catch (error: any) {
+      setHasUmbrella(hasUmbrella);
+      toast.error(error?.message || 'Failed to update rain cover setting');
     }
   };
 
@@ -82,12 +143,12 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
         {modes.map((mode) => {
           const Icon = mode.icon;
           const isSelected = selectedMode === mode.id;
-          
+
           return (
             <button
               key={mode.id}
               onClick={() => handleModeChange(mode.id)}
-              disabled={loading}
+              disabled={loading || !loaded}
               className={`relative flex-shrink-0 w-[75px] xs:w-[85px] sm:w-[100px] md:w-[110px] p-2 xs:p-2.5 sm:p-3 rounded-lg border-2 transition-all ${
                 isSelected
                   ? `border-${mode.color}-500 bg-gradient-to-br from-${mode.color}-50 to-${mode.color}-100 shadow-md`
@@ -112,15 +173,15 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
 
               {/* Mode name */}
               <h4 className="font-bold text-[10px] xs:text-[11px] sm:text-xs text-slate-800 mb-0.5 text-center truncate">{mode.name}</h4>
-              
+
               {/* Price badge */}
               <div className={`inline-flex items-center justify-center gap-0.5 px-0.5 xs:px-1 py-0.5 rounded-full text-[8px] xs:text-[9px] sm:text-[10px] font-semibold w-full ${
                 mode.id === 'vip' ? 'bg-green-100 text-green-700' :
                 mode.id === 'discount' || mode.id === 'return' ? 'bg-red-100 text-red-700' :
                 'bg-slate-100 text-slate-700'
               }`}>
-                {mode.id === 'vip' ? <TrendingUp size={8} className="xs:w-[9px] xs:h-[9px] sm:w-2.5 sm:h-2.5" /> : 
-                 (mode.id === 'discount' || mode.id === 'return') ? <TrendingDown size={8} className="xs:w-[9px] xs:h-[9px] sm:w-2.5 sm:h-2.5" /> : 
+                {mode.id === 'vip' ? <TrendingUp size={8} className="xs:w-[9px] xs:h-[9px] sm:w-2.5 sm:h-2.5" /> :
+                 (mode.id === 'discount' || mode.id === 'return') ? <TrendingDown size={8} className="xs:w-[9px] xs:h-[9px] sm:w-2.5 sm:h-2.5" /> :
                  null}
                 <span className="truncate">{mode.priceChange}</span>
               </div>
@@ -143,6 +204,8 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
             step="1"
             value={vipSurcharge}
             onChange={(e) => setVipSurcharge(Number(e.target.value))}
+            onMouseUp={(e) => commitRateChange('vip_surcharge_pct', Number((e.target as HTMLInputElement).value))}
+            onTouchEnd={(e) => commitRateChange('vip_surcharge_pct', Number((e.target as HTMLInputElement).value))}
             className="w-full h-1.5 xs:h-2 bg-purple-200 rounded-lg appearance-none cursor-pointer accent-purple-500"
           />
           <div className="flex justify-between text-[9px] xs:text-xs text-purple-700 mt-0.5 xs:mt-1">
@@ -151,7 +214,7 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
             <span>20%</span>
           </div>
           <p className="text-[10px] xs:text-xs text-purple-600 mt-1.5 xs:mt-2">
-            💰 Customers pay {vipSurcharge}% more • You earn extra UGX {(5000 * vipSurcharge / 100).toFixed(0)} per 5km ride
+            💰 Customers pay {vipSurcharge}% more • Applied automatically on your real fare quotes
           </p>
         </div>
       )}
@@ -170,6 +233,8 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
             step="5"
             value={discountRate}
             onChange={(e) => setDiscountRate(Number(e.target.value))}
+            onMouseUp={(e) => commitRateChange('discount_pct', Number((e.target as HTMLInputElement).value))}
+            onTouchEnd={(e) => commitRateChange('discount_pct', Number((e.target as HTMLInputElement).value))}
             className="w-full h-1.5 xs:h-2 bg-orange-200 rounded-lg appearance-none cursor-pointer accent-orange-500"
           />
           <div className="flex justify-between text-[9px] xs:text-xs text-orange-700 mt-0.5 xs:mt-1">
@@ -178,7 +243,7 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
             <span>30%</span>
           </div>
           <p className="text-[10px] xs:text-xs text-orange-600 mt-1.5 xs:mt-2">
-            🎯 Attract more customers! • They save {discountRate}% • You earn UGX {(5000 * (100 - discountRate) / 100).toFixed(0)} per 5km
+            🎯 Attract more customers! They save {discountRate}% on your real fare quotes
           </p>
           <div className="mt-1.5 xs:mt-2 p-1.5 xs:p-2 bg-orange-100 rounded text-[9px] xs:text-xs text-orange-800">
             <strong>Strategy:</strong> Higher discounts = More ride requests. Great for slow hours!
@@ -200,6 +265,8 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
             step="5"
             value={returnDiscount}
             onChange={(e) => setReturnDiscount(Number(e.target.value))}
+            onMouseUp={(e) => commitRateChange('return_discount_pct', Number((e.target as HTMLInputElement).value))}
+            onTouchEnd={(e) => commitRateChange('return_discount_pct', Number((e.target as HTMLInputElement).value))}
             className="w-full h-1.5 xs:h-2 bg-green-200 rounded-lg appearance-none cursor-pointer accent-green-500"
           />
           <div className="flex justify-between text-[9px] xs:text-xs text-green-700 mt-0.5 xs:mt-1">
@@ -208,7 +275,7 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
             <span>50%</span>
           </div>
           <p className="text-[10px] xs:text-xs text-green-600 mt-1.5 xs:mt-2">
-            🏠 Going home anyway • Customers save {returnDiscount}% • You earn UGX {(5000 * (100 - returnDiscount) / 100).toFixed(0)} per 5km
+            🏠 Going home anyway • Customers save {returnDiscount}% on your real fare quotes
           </p>
         </div>
       )}
@@ -242,6 +309,40 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
             </p>
           </div>
         </div>
+      </div>
+
+      {/* My Vehicle — real attributes used by the matching engine */}
+      <div className="mt-3 sm:mt-4 md:mt-6 p-2.5 xs:p-3 sm:p-4 rounded-lg border-2 border-slate-200 bg-slate-50">
+        <h5 className="font-semibold text-[10px] xs:text-xs sm:text-sm text-slate-800 mb-2">My Vehicle</h5>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={togglePowerType}
+            disabled={!loaded}
+            className={`flex items-center justify-center gap-1.5 py-2 xs:py-2.5 rounded-lg text-[10px] xs:text-xs sm:text-sm font-semibold border-2 transition-all ${
+              powerType === 'electric'
+                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                : 'border-amber-500 bg-amber-50 text-amber-700'
+            }`}
+          >
+            {powerType === 'electric' ? <Zap size={14} /> : <Fuel size={14} />}
+            {powerType === 'electric' ? 'Electric' : 'Fuel'}
+          </button>
+          <button
+            onClick={toggleUmbrella}
+            disabled={!loaded}
+            className={`flex items-center justify-center gap-1.5 py-2 xs:py-2.5 rounded-lg text-[10px] xs:text-xs sm:text-sm font-semibold border-2 transition-all ${
+              hasUmbrella
+                ? 'border-blue-500 bg-blue-50 text-blue-700'
+                : 'border-slate-300 bg-white text-slate-500'
+            }`}
+          >
+            <Umbrella size={14} />
+            {hasUmbrella ? 'Rain Cover: Yes' : 'Rain Cover: No'}
+          </button>
+        </div>
+        <p className="text-[9px] xs:text-xs text-slate-500 mt-2">
+          Customers can filter for electric bikes or rain cover — keep this accurate so you only get matched to requests you can actually fulfil.
+        </p>
       </div>
 
       {/* Tips - Compact */}

@@ -9,20 +9,21 @@ import { getBalance, getTransactions, type ICANBalance, type ICANTransaction } f
 import EnhancedRideRequest from '../components/EnhancedRideRequest';
 import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
 import IcanCoinCard from '../components/IcanCoinCard';
+import CustomerAreaManager from '../components/CustomerAreaManager';
 
 interface CustomerDashboardProps {
   user: any;
   onSignOut: () => void;
 }
 
-type TabType = 'overview' | 'book-ride' | 'delivery' | 'shop' | 'orders' | 'rewards' | 'profile';
+type TabType = 'overview' | 'book-ride' | 'shop' | 'orders' | 'areas' | 'rewards' | 'profile';
 
 const ALL_TABS = [
   { id: 'overview'  as TabType, label: 'Overview',  emoji: '🏠' },
-  { id: 'book-ride' as TabType, label: 'Book Ride', emoji: '🏍️' },
-  { id: 'delivery'  as TabType, label: 'Delivery',  emoji: '📦' },
+  { id: 'book-ride' as TabType, label: 'Book a Ride', emoji: '🏍️' },
   { id: 'shop'      as TabType, label: 'Shop',      emoji: '🛒' },
   { id: 'orders'    as TabType, label: 'Orders',    emoji: '📋' },
+  { id: 'areas'     as TabType, label: 'My Areas',  emoji: '📍' },
   { id: 'rewards'   as TabType, label: 'Rewards',   emoji: '🎁' },
   { id: 'profile'   as TabType, label: 'Profile',   emoji: '👤' },
 ];
@@ -331,16 +332,16 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  // Fetch ride history: users → customers → rides
+  // Fetch ride history: mbg_users → mbg_customers → mbg_rides
   useEffect(() => {
     if (!user?.id) return;
     setRidesLoading(true);
     const load = async () => {
-      const { data: cr } = await supabase.from('customers').select('id').eq('user_id', user.id).maybeSingle();
+      const { data: cr } = await supabase.from('mbg_customers').select('id').eq('user_id', user.id).maybeSingle();
       if (!cr?.id) { setRidesLoading(false); return; }
       const { data } = await supabase
-        .from('rides')
-        .select('id, created_at, pickup_location, dropoff_location, status, fare')
+        .from('mbg_rides')
+        .select('id, created_at, pickup_location, dropoff_location, status, fare, service_type')
         .eq('customer_id', cr.id)
         .order('created_at', { ascending: false })
         .limit(20);
@@ -459,9 +460,9 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <IcanCoinCard userId={user?.id} onGoToWallet={() => (window.location.href = '/ican-wallet')} />
               {[
-                { label: 'Book a Ride',     desc: 'Get a boda in minutes',  emoji: '🏍️', tab: 'book-ride' as TabType },
-                { label: 'Delivery',         desc: 'Supermarket to your door', emoji: '📦', tab: 'delivery' as TabType },
+                { label: 'Book a Ride', desc: 'Boda ride or a delivery', emoji: '🏍️', tab: 'book-ride' as TabType },
                 { label: 'Scan & Checkout',  desc: 'POS · Pay with ICAN',     emoji: '🛒', tab: 'shop' as TabType },
+                { label: 'My Orders',       desc: 'Track rides & deliveries', emoji: '📋', tab: 'orders' as TabType },
               ].map(c => (
                 <button key={c.tab} onClick={() => setActiveTab(c.tab)}
                   className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 text-left hover:shadow-md hover:border-orange-200 transition-all">
@@ -508,9 +509,6 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
           </div>
         )}
 
-        {/* Delivery */}
-        {activeTab === 'delivery' && <CustomerDeliveryTab user={user} />}
-
         {/* Shop / Scan + POS */}
         {activeTab === 'shop' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
@@ -521,20 +519,20 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
         {/* Orders — rides + deliveries */}
         {activeTab === 'orders' && (
           <div className="space-y-5">
-            {/* Rides */}
+            {/* Rides & point-to-point deliveries — real mbg_rides data */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
               <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <Bike size={16} className="text-orange-500" /> Ride History
+                <Bike size={16} className="text-orange-500" /> Rides &amp; Deliveries
               </h3>
               {ridesLoading ? (
                 <p className="text-slate-400 text-sm">Loading…</p>
               ) : rides.length === 0 ? (
                 <div className="text-center py-8">
                   <Clock className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">No rides yet.</p>
+                  <p className="text-slate-400 text-sm">No rides or deliveries yet.</p>
                   <button onClick={() => setActiveTab('book-ride')}
                     className="mt-3 px-5 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg text-sm font-medium">
-                    Book a Ride
+                    Book a Ride or Delivery
                   </button>
                 </div>
               ) : (
@@ -542,7 +540,10 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
                   {rides.map(r => (
                     <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
                       <div>
-                        <p className="font-medium text-slate-800 text-sm">{r.pickup_location} → {r.dropoff_location}</p>
+                        <p className="font-medium text-slate-800 text-sm flex items-center gap-1.5">
+                          {r.service_type === 'delivery' ? <Package size={14} className="text-blue-500" /> : <Bike size={14} className="text-orange-500" />}
+                          {r.pickup_location} → {r.dropoff_location}
+                        </p>
                         <p className="text-xs text-slate-400 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
                       </div>
                       <div className="text-right">
@@ -555,15 +556,18 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               )}
             </div>
 
-            {/* Deliveries (reuse DeliveryTab in list-only mode) */}
+            {/* Shop-for-me supermarket delivery orders */}
             <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
               <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <Package size={16} className="text-blue-500" /> Delivery Orders
+                <Package size={16} className="text-blue-500" /> Shop-For-Me Delivery Orders
               </h3>
               <CustomerDeliveryTab user={user} />
             </div>
           </div>
         )}
+
+        {/* My Areas */}
+        {activeTab === 'areas' && <CustomerAreaManager customerId={user?.id} />}
 
         {/* Rewards */}
         {activeTab === 'rewards' && <RewardsTab user={user} />}

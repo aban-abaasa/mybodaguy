@@ -1,24 +1,64 @@
-import { useState } from 'react';
-import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User, Package } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User, Package, Bell } from 'lucide-react';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
 import RiderICANEarnings from '../components/RiderICANEarnings';
 import SupermarketDeliveryPool from '../components/SupermarketDeliveryPool';
+import RiderRideRequests from '../components/RiderRideRequests';
 import IcanCoinCard from '../components/IcanCoinCard';
+import { supabase } from '../services/supabaseClient';
 
 interface RiderDashboardProps {
   user: any;
   onSignOut: () => void;
 }
 
-type TabType = 'overview' | 'mode' | 'locations' | 'partnerships' | 'deliveries';
+type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' | 'deliveries';
+
+// Keeps mbg_riders.current_lat/current_lng fresh so the real matching engine
+// (mbg_find_available_riders) can rank this rider by actual live distance
+// instead of only their static home-marked area.
+function useLiveLocationPing(userId: string | undefined) {
+  const lastSentRef = useRef(0);
+
+  useEffect(() => {
+    if (!userId || !navigator.geolocation) return;
+
+    const ping = () => {
+      const now = Date.now();
+      if (now - lastSentRef.current < 45000) return; // throttle to ~45s
+      lastSentRef.current = now;
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          supabase
+            .from('mbg_riders')
+            .update({
+              current_lat: pos.coords.latitude,
+              current_lng: pos.coords.longitude,
+              location_updated_at: new Date().toISOString(),
+            })
+            .eq('user_id', userId)
+            .then(() => {});
+        },
+        () => {},
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    };
+
+    ping();
+    const interval = setInterval(ping, 60000);
+    return () => clearInterval(interval);
+  }, [userId]);
+}
 
 export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+
+  useLiveLocationPing(user?.id);
 
   return (
     <div>
@@ -33,6 +73,12 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
               onClick={() => setActiveTab('overview')}
               icon={<TrendingUp size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
               label="Overview"
+            />
+            <TabButton
+              active={activeTab === 'requests'}
+              onClick={() => setActiveTab('requests')}
+              icon={<Bell size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
+              label="Requests"
             />
             <TabButton
               active={activeTab === 'mode'}
@@ -61,6 +107,7 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
         <div className="container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
             {activeTab === 'overview' && <><TrendingUp size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Overview</span></>}
+            {activeTab === 'requests' && <><Bell size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Requests</span></>}
             {activeTab === 'mode' && <><Settings size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Work Mode</span></>}
             {activeTab === 'locations' && <><Map size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Areas</span></>}
             {activeTab === 'partnerships' && <><ShoppingBag size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Markets</span></>}
@@ -91,6 +138,18 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
               >
                 <TrendingUp size={14} className="xs:w-4 xs:h-4" />
                 <span className="text-xs xs:text-sm font-medium">Overview</span>
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab('requests');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'requests' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Bell size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Requests</span>
               </button>
               <button
                 onClick={() => {
@@ -196,7 +255,15 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
             {/* Quick Actions */}
             <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
               <h3 className="text-lg sm:text-xl font-bold text-slate-800 mb-3 sm:mb-4">Quick Start</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                <button
+                  onClick={() => setActiveTab('requests')}
+                  className="p-4 sm:p-6 bg-gradient-to-br from-orange-100 to-yellow-100 rounded-xl border-2 border-orange-300 hover:border-orange-400 transition-all text-left"
+                >
+                  <Bell className="text-orange-600 mb-2 sm:mb-3" size={24} />
+                  <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Ride Requests</h4>
+                  <p className="text-xs text-slate-600">Accept real requests near you</p>
+                </button>
                 <button
                   onClick={() => setActiveTab('mode')}
                   className="p-4 sm:p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border-2 border-purple-200 hover:border-purple-400 transition-all text-left"
@@ -224,6 +291,10 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === 'requests' && (
+          <RiderRideRequests riderId={user.id} />
         )}
 
         {activeTab === 'mode' && (

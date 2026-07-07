@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
-import { MapPin, Plus, X, Home, Check } from 'lucide-react';
+import { MapPin, Plus, X, Home, Crosshair } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '../services/supabaseClient';
 
 interface Location {
   id: string;
   name: string;
   address: string;
-  latitude?: number;
-  longitude?: number;
+  latitude: number | null;
+  longitude: number | null;
   is_home: boolean;
 }
 
@@ -21,39 +22,59 @@ export default function RiderLocationManager({ riderId }: RiderLocationManagerPr
   const [newLocation, setNewLocation] = useState({
     name: '',
     address: '',
+    latitude: null as number | null,
+    longitude: null as number | null,
     is_home: false
   });
   const [loading, setLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
 
-  // TODO: Load rider's known locations from database
   useEffect(() => {
     loadLocations();
   }, [riderId]);
 
   const loadLocations = async () => {
-    // TODO: Implement API call to fetch rider locations
     setLoading(true);
     try {
-      // Placeholder data
-      setLocations([
-        {
-          id: '1',
-          name: 'Kampala Central',
-          address: 'City Center, Kampala',
-          is_home: true
-        },
-        {
-          id: '2',
-          name: 'Nakasero Market',
-          address: 'Nakasero, Kampala',
-          is_home: false
-        }
-      ]);
+      const { data, error } = await supabase
+        .from('mbg_rider_locations')
+        .select('id, name, address, latitude, longitude, is_home')
+        .eq('rider_user_id', riderId)
+        .order('is_home', { ascending: false })
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+      setLocations(data || []);
     } catch (error) {
+      console.error('[RiderLocationManager] Failed to load locations:', error);
       toast.error('Failed to load locations');
     } finally {
       setLoading(false);
     }
+  };
+
+  const captureCurrentPosition = () => {
+    if (!navigator.geolocation) {
+      toast.error('Your browser does not support GPS location');
+      return;
+    }
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setNewLocation((prev) => ({
+          ...prev,
+          latitude: pos.coords.latitude,
+          longitude: pos.coords.longitude
+        }));
+        toast.success('GPS location captured');
+        setLocating(false);
+      },
+      () => {
+        toast.error('Could not get your GPS location — you can still save with just an address');
+        setLocating(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const handleAddLocation = async () => {
@@ -64,18 +85,32 @@ export default function RiderLocationManager({ riderId }: RiderLocationManagerPr
 
     setLoading(true);
     try {
-      // TODO: Implement API call to add location
-      const location: Location = {
-        id: Date.now().toString(),
-        ...newLocation
-      };
-      
-      setLocations([...locations, location]);
-      setNewLocation({ name: '', address: '', is_home: false });
+      const { error } = await supabase.from('mbg_rider_locations').insert({
+        rider_user_id: riderId,
+        name: newLocation.name,
+        address: newLocation.address,
+        latitude: newLocation.latitude,
+        longitude: newLocation.longitude,
+        is_home: newLocation.is_home
+      });
+
+      if (error) throw error;
+
+      // Only one home base makes sense — clear it on any other rows if this one is home
+      if (newLocation.is_home) {
+        await supabase
+          .from('mbg_rider_locations')
+          .update({ is_home: false })
+          .eq('rider_user_id', riderId)
+          .neq('name', newLocation.name);
+      }
+
+      setNewLocation({ name: '', address: '', latitude: null, longitude: null, is_home: false });
       setShowAddForm(false);
       toast.success('Location added successfully');
-    } catch (error) {
-      toast.error('Failed to add location');
+      await loadLocations();
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to add location');
     } finally {
       setLoading(false);
     }
@@ -83,24 +118,24 @@ export default function RiderLocationManager({ riderId }: RiderLocationManagerPr
 
   const handleRemoveLocation = async (locationId: string) => {
     try {
-      // TODO: Implement API call to remove location
-      setLocations(locations.filter(loc => loc.id !== locationId));
+      const { error } = await supabase.from('mbg_rider_locations').delete().eq('id', locationId);
+      if (error) throw error;
+      setLocations(locations.filter((loc) => loc.id !== locationId));
       toast.success('Location removed');
-    } catch (error) {
-      toast.error('Failed to remove location');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to remove location');
     }
   };
 
   const handleSetHomeLocation = async (locationId: string) => {
     try {
-      // TODO: Implement API call to set home location
-      setLocations(locations.map(loc => ({
-        ...loc,
-        is_home: loc.id === locationId
-      })));
+      await supabase.from('mbg_rider_locations').update({ is_home: false }).eq('rider_user_id', riderId);
+      const { error } = await supabase.from('mbg_rider_locations').update({ is_home: true }).eq('id', locationId);
+      if (error) throw error;
+      setLocations(locations.map((loc) => ({ ...loc, is_home: loc.id === locationId })));
       toast.success('Home location updated');
-    } catch (error) {
-      toast.error('Failed to update home location');
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to update home location');
     }
   };
 
@@ -109,7 +144,7 @@ export default function RiderLocationManager({ riderId }: RiderLocationManagerPr
       <div className="flex items-center justify-between mb-6">
         <div>
           <h3 className="text-xl font-bold text-slate-800">Areas I Know Well</h3>
-          <p className="text-sm text-slate-600">Mark locations where you can navigate easily</p>
+          <p className="text-sm text-slate-600">Real GPS-tagged areas — used to match you to nearby ride/delivery requests</p>
         </div>
         <button
           onClick={() => setShowAddForm(!showAddForm)}
@@ -148,6 +183,22 @@ export default function RiderLocationManager({ riderId }: RiderLocationManagerPr
                 placeholder="e.g., City Center, Near Shoprite"
                 className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none"
               />
+            </div>
+            <div>
+              <button
+                type="button"
+                onClick={captureCurrentPosition}
+                disabled={locating}
+                className="flex items-center gap-2 text-sm font-medium text-orange-600 hover:text-orange-700 disabled:opacity-50"
+              >
+                <Crosshair size={16} className={locating ? 'animate-spin' : ''} />
+                {locating ? 'Getting GPS location…' : 'Use my current GPS location'}
+              </button>
+              {newLocation.latitude != null && newLocation.longitude != null && (
+                <p className="text-xs text-slate-500 mt-1">
+                  📍 {newLocation.latitude.toFixed(5)}, {newLocation.longitude.toFixed(5)}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <input
@@ -208,6 +259,9 @@ export default function RiderLocationManager({ riderId }: RiderLocationManagerPr
                         Home Base
                       </span>
                     )}
+                    {location.latitude == null && (
+                      <span className="text-xs px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full">No GPS</span>
+                    )}
                   </h4>
                   <p className="text-sm text-slate-600">{location.address}</p>
                 </div>
@@ -237,8 +291,8 @@ export default function RiderLocationManager({ riderId }: RiderLocationManagerPr
 
       <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
         <p className="text-sm text-blue-800">
-          <strong>Tip:</strong> Adding more areas you know well increases your chances of getting ride requests. 
-          Your home base helps customers find you for return trips at discounted rates!
+          <strong>Tip:</strong> Areas with a GPS location are used by the real matching algorithm to prioritize
+          you for nearby requests. Your home base helps customers find you for return trips at discounted rates!
         </p>
       </div>
     </div>

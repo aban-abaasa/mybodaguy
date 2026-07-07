@@ -1,12 +1,44 @@
 import { useState, useRef, useEffect } from 'react';
 import * as React from 'react';
-import { MapPin, Search, Crown, Home, DollarSign, Star, User, Navigation, Phone, X, Clock, CheckCircle, XCircle, Loader, ArrowLeft } from 'lucide-react';
+import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package } from 'lucide-react';
 import { toast } from 'sonner';
 import { searchLocations, Location } from '../data/mockLocations';
-import { findAvailableRiders, MatchedRider } from '../data/mockRiders';
-import { trackJourneyEvent, trackRideCall, trackUIInteraction } from '../../services/featureAnalyticsService';
+import { supabase } from '../services/supabaseClient';
+import { trackRideCall, trackUIInteraction } from '../../services/featureAnalyticsService';
 
-type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'on_the_way' | 'arrived' | 'journey_started' | 'completed';
+type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
+type ServiceType = 'ride' | 'delivery';
+type DeliveryMode = 'supermarket' | 'normal';
+type PowerFilter = 'any' | 'electric' | 'fuel';
+
+interface MatchedRider {
+  rider_id: string;
+  full_name: string;
+  phone: string | null;
+  rating: number;
+  total_rides: number;
+  vehicle_type: string;
+  power_type: 'electric' | 'fuel';
+  has_umbrella: boolean;
+  plate_number: string;
+  vehicle_color: string;
+  mode: 'normal' | 'vip' | 'discount' | 'return';
+  distance_to_pickup_km: number | null;
+  estimated_arrival_min: number;
+  knows_destination: boolean;
+  fare: number;
+  distance_km: number;
+  time_multiplier: number;
+}
+
+interface Supermarket {
+  id: string;
+  name: string;
+  location: string;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
 
 interface EnhancedRideRequestProps {
   customerId: string;
@@ -26,9 +58,115 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
   const [selectedRider, setSelectedRider] = useState<MatchedRider | null>(null);
   const [rideStatus, setRideStatus] = useState<RideStatus | null>(null);
   const [waitingTimer, setWaitingTimer] = useState(30);
-  const [estimatedArrival, setEstimatedArrival] = useState(0);
+  const [rideId, setRideId] = useState<string | null>(null);
+
+  // Service options — real vehicle/weather filters matched against riders' actual registered attributes
+  const [serviceType, setServiceType] = useState<ServiceType>('ride');
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('normal');
+  const [supermarkets, setSupermarkets] = useState<Supermarket[]>([]);
+  const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
+  const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
+  const [umbrellaRequired, setUmbrellaRequired] = useState(false);
+
+  // Customer's own registered areas — merged into the location suggestions
+  const [customerAreas, setCustomerAreas] = useState<Location[]>([]);
+  const [defaultDropoff, setDefaultDropoff] = useState<Location | null>(null);
+
+  // True once pickup was auto-filled from a registered supermarket's own
+  // location — the pickup field locks so the customer isn't asked to
+  // re-enter something we already know.
+  const [pickupIsAutoFromSupermarket, setPickupIsAutoFromSupermarket] = useState(false);
+
   const pickupRef = useRef<HTMLDivElement>(null);
   const dropoffRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    supabase
+      .from('supermarkets')
+      .select('id, name, location, address, latitude, longitude')
+      .eq('is_active', true)
+      .order('name', { ascending: true })
+      .then(async ({ data, error }) => {
+        if (error) {
+          // latitude/longitude migration not applied yet on this project —
+          // degrade gracefully instead of losing the supermarket list.
+          console.warn('[EnhancedRideRequest] supermarkets geo columns unavailable, falling back:', error.message);
+          const fallback = await supabase
+            .from('supermarkets')
+            .select('id, name, location, address')
+            .eq('is_active', true)
+            .order('name', { ascending: true });
+          setSupermarkets((fallback.data || []).map((sm: any) => ({ ...sm, latitude: null, longitude: null })));
+          return;
+        }
+        setSupermarkets(data || []);
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!customerId) return;
+    supabase
+      .from('mbg_customer_areas')
+      .select('id, name, address, latitude, longitude, is_default')
+      .eq('customer_user_id', customerId)
+      .then(({ data }) => {
+        const areas = (data || [])
+          .filter((a: any) => a.latitude != null && a.longitude != null)
+          .map((a: any) => ({
+            id: `area_${a.id}`,
+            name: a.name,
+            area: a.name,
+            fullAddress: a.address,
+            coordinates: { lat: a.latitude, lng: a.longitude }
+          }));
+        setCustomerAreas(areas);
+        const def = (data || []).find((a: any) => a.is_default && a.latitude != null && a.longitude != null);
+        if (def) {
+          setDefaultDropoff({
+            id: `area_${def.id}`,
+            name: def.name,
+            area: def.name,
+            fullAddress: def.address,
+            coordinates: { lat: def.latitude, lng: def.longitude }
+          });
+        }
+      });
+  }, [customerId]);
+
+  // Smart supermarket pickup: once a registered supermarket with known
+  // coordinates is chosen, fill pickup automatically instead of making the
+  // customer search for a place they already picked from a dropdown.
+  useEffect(() => {
+    if (serviceType !== 'delivery' || deliveryMode !== 'supermarket' || !selectedSupermarketId) {
+      setPickupIsAutoFromSupermarket(false);
+      return;
+    }
+    const sm = supermarkets.find(s => s.id === selectedSupermarketId);
+    if (sm && sm.latitude != null && sm.longitude != null) {
+      const loc: Location = {
+        id: `supermarket_${sm.id}`,
+        name: sm.name,
+        area: sm.location,
+        fullAddress: sm.address || `${sm.name}, ${sm.location}`,
+        coordinates: { lat: sm.latitude, lng: sm.longitude }
+      };
+      setSelectedPickup(loc);
+      setPickup(loc.fullAddress);
+      setPickupIsAutoFromSupermarket(true);
+    } else {
+      setPickupIsAutoFromSupermarket(false);
+    }
+  }, [serviceType, deliveryMode, selectedSupermarketId, supermarkets]);
+
+  // Smart default drop-off: pre-fill (but keep editable) from the
+  // customer's saved default area when starting a fresh request.
+  useEffect(() => {
+    if (defaultDropoff && !selectedDropoff && !dropoff) {
+      setSelectedDropoff(defaultDropoff);
+      setDropoff(defaultDropoff.fullAddress);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultDropoff]);
 
   // Close suggestions when clicking outside
   useEffect(() => {
@@ -44,41 +182,62 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Timer for waiting acceptance
+  // Timer for waiting acceptance — real timeout withdraws the live offer
   useEffect(() => {
     if (rideStatus === 'waiting_acceptance' && waitingTimer > 0) {
       const timer = setTimeout(() => setWaitingTimer(prev => prev - 1), 1000);
       return () => clearTimeout(timer);
     } else if (rideStatus === 'waiting_acceptance' && waitingTimer === 0) {
-      // Auto decline after 30 seconds
-      handleRiderResponse(false);
+      handleTimeout();
     }
   }, [rideStatus, waitingTimer]);
 
-  // Timer for rider arrival
+  // Poll the real ride row for status changes made by the rider
   useEffect(() => {
-    if (rideStatus === 'on_the_way' && estimatedArrival > 0) {
-      const timer = setTimeout(() => {
-        const newTime = estimatedArrival - 1;
-        setEstimatedArrival(newTime);
-        
-        // When timer reaches 0, rider has arrived
-        if (newTime === 0) {
-          setRideStatus('arrived');
-          toast.success('🎉 Your rider has arrived!', {
-            description: 'Please meet your rider at the pickup location',
-            duration: 5000
+    if (!rideId) return;
+    if (rideStatus !== 'waiting_acceptance' && rideStatus !== 'accepted' && rideStatus !== 'journey_started') return;
+
+    const poll = async () => {
+      const { data } = await supabase.from('mbg_rides').select('status, rider_id').eq('id', rideId).maybeSingle();
+      if (!data) return;
+
+      if (rideStatus === 'waiting_acceptance') {
+        if (data.status === 'accepted') {
+          setRideStatus('accepted');
+          toast.success(`🎉 ${selectedRider?.full_name} accepted your ride!`, {
+            description: 'Rider is on the way',
+            duration: 4000
+          });
+        } else if (data.rider_id === null) {
+          setRideStatus('declined');
+          toast.error(`${selectedRider?.full_name} declined your ride`, {
+            description: 'Try requesting from another rider',
+            duration: 4000
           });
         }
-      }, 60000); // 1 minute (use 6000 for faster testing - 6 seconds)
-      return () => clearTimeout(timer);
-    }
-  }, [rideStatus, estimatedArrival]);
+      } else if (rideStatus === 'accepted' && data.status === 'in_progress') {
+        setRideStatus('journey_started');
+      } else if (rideStatus === 'journey_started' && data.status === 'completed') {
+        setRideStatus('completed');
+      }
+    };
+
+    const interval = setInterval(poll, 3000);
+    return () => clearInterval(interval);
+  }, [rideId, rideStatus, selectedRider]);
+
+  const mergeSuggestions = (query: string): Location[] => {
+    const q = query.toLowerCase();
+    const personal = customerAreas.filter(
+      a => a.name.toLowerCase().includes(q) || a.fullAddress.toLowerCase().includes(q)
+    );
+    return [...personal, ...searchLocations(query)];
+  };
 
   const handlePickupChange = (value: string) => {
     setPickup(value);
     setSelectedPickup(null);
-    const suggestions = searchLocations(value);
+    const suggestions = mergeSuggestions(value);
     setPickupSuggestions(suggestions);
     setShowPickupSuggestions(suggestions.length > 0);
   };
@@ -86,7 +245,7 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
   const handleDropoffChange = (value: string) => {
     setDropoff(value);
     setSelectedDropoff(null);
-    const suggestions = searchLocations(value);
+    const suggestions = mergeSuggestions(value);
     setDropoffSuggestions(suggestions);
     setShowDropoffSuggestions(suggestions.length > 0);
   };
@@ -110,38 +269,49 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
       toast.error('Please select both pickup and drop-off locations from suggestions');
       return;
     }
+    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && !selectedSupermarketId) {
+      toast.error('Please choose a supermarket for this delivery');
+      return;
+    }
 
     setSearching(true);
     try {
-      // Track feature usage for ride search
       await trackUIInteraction('click', 'search_riders', {
         pickup_location: selectedPickup?.name,
         dropoff_location: selectedDropoff?.name,
         customer_id: customerId,
+        service_type: serviceType,
       });
 
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const { data, error } = await supabase.rpc('mbg_find_available_riders', {
+        p_pickup_lat: selectedPickup.coordinates.lat,
+        p_pickup_lng: selectedPickup.coordinates.lng,
+        p_dropoff_lat: selectedDropoff.coordinates.lat,
+        p_dropoff_lng: selectedDropoff.coordinates.lng,
+        p_dropoff_area: selectedDropoff.area,
+        p_power_type: powerFilter === 'any' ? null : powerFilter,
+        p_require_umbrella: umbrellaRequired,
+        p_exclude_rider_ids: [],
+        p_limit: 10,
+      });
 
-      // Use mock data to find riders
-      const riders = findAvailableRiders(
-        selectedPickup.coordinates.lat,
-        selectedPickup.coordinates.lng,
-        selectedDropoff.area
-      );
-
+      if (error) throw error;
+      const riders = (data || []) as MatchedRider[];
       setMatchedRiders(riders);
-      
-      // Track successful search
+
       await trackUIInteraction('success', 'riders_found', {
         riders_count: riders.length,
         pickup_location: selectedPickup?.name,
         dropoff_location: selectedDropoff?.name,
       });
 
-      toast.success(`Found ${riders.length} available riders near you!`);
-    } catch (error) {
-      toast.error('Failed to find riders');
+      if (riders.length === 0) {
+        toast.error('No available riders match your filters right now');
+      } else {
+        toast.success(`Found ${riders.length} available riders near you!`);
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to find riders');
     } finally {
       setSearching(false);
     }
@@ -151,75 +321,73 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
     setSelectedRider(rider);
     setRideStatus('waiting_acceptance');
     setWaitingTimer(30);
-    
-    // Track ride request
-    await trackRideCall('start_ride', rider.id, {
-      rider_name: rider.name,
-      rider_rating: rider.rating,
-      estimated_fare: rider.estimatedFare,
-      customer_id: customerId,
-      pickup_location: selectedPickup?.name,
-      dropoff_location: selectedDropoff?.name,
-    });
-    
-    toast.info(`Request sent to ${rider.name}`, {
-      description: 'Waiting for rider to accept...'
-    });
 
-    // Simulate rider response after 3-8 seconds
-    const responseTime = Math.floor(Math.random() * 5000) + 3000;
-    setTimeout(() => {
-      // 85% chance of acceptance
-      const accepted = Math.random() > 0.15;
-      handleRiderResponse(accepted);
-    }, responseTime);
-  };
+    try {
+      const { data, error } = await supabase.rpc('mbg_request_ride', {
+        p_service_type: serviceType,
+        p_delivery_mode: serviceType === 'delivery' ? deliveryMode : null,
+        p_supermarket_id: serviceType === 'delivery' && deliveryMode === 'supermarket' ? selectedSupermarketId : null,
+        p_rider_id: rider.rider_id,
+        p_pickup_location: selectedPickup!.fullAddress,
+        p_pickup_lat: selectedPickup!.coordinates.lat,
+        p_pickup_lng: selectedPickup!.coordinates.lng,
+        p_dropoff_location: selectedDropoff!.fullAddress,
+        p_dropoff_lat: selectedDropoff!.coordinates.lat,
+        p_dropoff_lng: selectedDropoff!.coordinates.lng,
+        p_power_type_requested: powerFilter === 'any' ? null : powerFilter,
+        p_umbrella_requested: umbrellaRequired,
+      });
 
-  const handleRiderResponse = async (accepted: boolean) => {
-    if (accepted) {
-      setRideStatus('accepted');
-      
-      // Track ride acceptance
-      if (selectedRider) {
-        await trackRideCall('accept_ride', selectedRider.id, {
-          rider_name: selectedRider.name,
-          customer_id: customerId,
-          estimated_fare: selectedRider.estimatedFare,
-        });
-      }
-      
-      toast.success(`🎉 ${selectedRider?.name} accepted your ride!`, {
-        description: 'Rider is on the way',
-        duration: 4000
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Could not create the request');
+
+      setRideId(data.ride_id);
+
+      await trackRideCall('start_ride', rider.rider_id, {
+        rider_name: rider.full_name,
+        rider_rating: rider.rating,
+        estimated_fare: data.fare,
+        customer_id: customerId,
+        pickup_location: selectedPickup?.name,
+        dropoff_location: selectedDropoff?.name,
       });
-      
-      // Move to "on the way" after 2 seconds
-      setTimeout(() => {
-        setRideStatus('on_the_way');
-        setEstimatedArrival(selectedRider?.estimated_arrival_min || 5);
-      }, 2000);
-    } else {
-      setRideStatus('declined');
-      
-      // Track ride decline
-      if (selectedRider) {
-        await trackRideCall('decline_ride', selectedRider.id, {
-          rider_name: selectedRider.name,
-          customer_id: customerId,
-        });
-      }
-      
-      toast.error(`${selectedRider?.name} declined your ride`, {
-        description: 'Try requesting from another rider',
-        duration: 4000
+
+      toast.info(`Request sent to ${rider.full_name}`, {
+        description: 'Waiting for rider to accept...'
       });
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to send this request');
+      setRideStatus(null);
+      setSelectedRider(null);
     }
   };
 
-  const handleBackToSearch = () => {
+  const handleTimeout = async () => {
+    if (rideId) {
+      try {
+        await supabase.rpc('mbg_withdraw_ride_offer', { p_ride_id: rideId });
+      } catch (_) {}
+    }
+    if (selectedRider) {
+      await trackRideCall('decline_ride', selectedRider.rider_id, {
+        rider_name: selectedRider.full_name,
+        customer_id: customerId,
+        reason: 'timeout',
+      });
+    }
+    setRideStatus('declined');
+  };
+
+  const handleBackToSearch = async () => {
+    if (rideId && rideStatus === 'waiting_acceptance') {
+      try {
+        await supabase.rpc('mbg_withdraw_ride_offer', { p_ride_id: rideId });
+      } catch (_) {}
+    }
+    setMatchedRiders(prev => prev.filter(r => r.rider_id !== selectedRider?.rider_id));
     setRideStatus(null);
     setSelectedRider(null);
-    setMatchedRiders([]);
+    setRideId(null);
   };
 
   const handleStartNewRide = () => {
@@ -230,47 +398,25 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
     setMatchedRiders([]);
     setSelectedRider(null);
     setRideStatus(null);
+    setRideId(null);
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
+    setSelectedSupermarketId('');
+    setPickupIsAutoFromSupermarket(false);
   };
 
-  const handleStartJourney = async () => {
-    setRideStatus('journey_started');
-    
-    // Track feature usage for journey start
-    if (selectedRider) {
-      await trackJourneyEvent('start', selectedRider.id, {
-        customer_id: customerId,
-        pickup_location: selectedPickup?.name,
-        dropoff_location: selectedDropoff?.name,
-        rider_name: selectedRider.name,
-        estimated_fare: selectedRider.estimatedFare,
-      });
+  const handleCancelRide = async () => {
+    if (rideId) {
+      try {
+        const { error } = await supabase.rpc('mbg_cancel_ride', { p_ride_id: rideId, p_reason: 'Cancelled by customer' });
+        if (error) throw error;
+      } catch (error: any) {
+        toast.error(error?.message || 'Failed to cancel ride');
+        return;
+      }
     }
-    
-    toast.success('🚀 Let\'s start the journey!', {
-      description: 'Have a safe trip!',
-      duration: 3000
-    });
-  };
-
-  const handleCompleteJourney = async () => {
-    setRideStatus('completed');
-    
-    // Track journey completion
-    if (selectedRider) {
-      await trackJourneyEvent('complete', selectedRider.id, {
-        customer_id: customerId,
-        rider_name: selectedRider.name,
-        pickup_location: selectedPickup?.name,
-        dropoff_location: selectedDropoff?.name,
-      });
-    }
-    
-    toast.success('✅ Journey completed!', {
-      description: 'Thanks for riding with My Boda Guy',
-      duration: 4000
-    });
+    toast.info('Ride cancelled');
+    handleStartNewRide();
   };
 
   const handleClearSearch = () => {
@@ -281,8 +427,11 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
     setMatchedRiders([]);
     setSelectedRider(null);
     setRideStatus(null);
+    setRideId(null);
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
+    setSelectedSupermarketId('');
+    setPickupIsAutoFromSupermarket(false);
   };
 
   // Render different UI based on ride status
@@ -290,53 +439,36 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
     return <WaitingForAcceptance rider={selectedRider} timer={waitingTimer} onCancel={handleBackToSearch} />;
   }
 
-  if (rideStatus === 'accepted' && selectedRider) {
-    return <RideAccepted rider={selectedRider} />;
-  }
-
   if (rideStatus === 'declined' && selectedRider) {
     return <RideDeclined rider={selectedRider} onBackToRiders={handleBackToSearch} onStartNew={handleStartNewRide} />;
   }
 
-  if (rideStatus === 'on_the_way' && selectedRider) {
+  if (rideStatus === 'accepted' && selectedRider) {
     return (
-      <RiderOnTheWay 
-        rider={selectedRider} 
-        pickup={selectedPickup!} 
-        dropoff={selectedDropoff!}
-        estimatedArrival={estimatedArrival}
-        onCancel={handleStartNewRide}
-      />
-    );
-  }
-
-  if (rideStatus === 'arrived' && selectedRider) {
-    return (
-      <RiderArrived 
-        rider={selectedRider} 
+      <RiderOnTheWay
+        rider={selectedRider}
         pickup={selectedPickup!}
-        onStartJourney={handleStartJourney}
-        onCancel={handleStartNewRide}
+        dropoff={selectedDropoff!}
+        onCancel={handleCancelRide}
       />
     );
   }
 
   if (rideStatus === 'journey_started' && selectedRider) {
     return (
-      <JourneyStarted 
-        rider={selectedRider} 
-        pickup={selectedPickup!} 
+      <JourneyStarted
+        rider={selectedRider}
+        pickup={selectedPickup!}
         dropoff={selectedDropoff!}
-        onComplete={handleCompleteJourney}
       />
     );
   }
 
   if (rideStatus === 'completed' && selectedRider) {
     return (
-      <JourneyCompleted 
-        rider={selectedRider} 
-        pickup={selectedPickup!} 
+      <JourneyCompleted
+        rider={selectedRider}
+        pickup={selectedPickup!}
         dropoff={selectedDropoff!}
         onStartNew={handleStartNewRide}
       />
@@ -346,9 +478,15 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
   return (
     <div className="space-y-6">
       {/* Search Form */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
+      <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-slate-800">Request a Ride</h3>
+          <h3 className="text-lg sm:text-xl font-bold text-slate-800">
+            {serviceType === 'ride'
+              ? 'Book a Ride'
+              : deliveryMode === 'supermarket'
+              ? 'Delivery From a Supermarket'
+              : 'Normal Delivery'}
+          </h3>
           {(pickup || dropoff) && (
             <button
               onClick={handleClearSearch}
@@ -359,30 +497,123 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
             </button>
           )}
         </div>
-        
+
+        {/* Service type */}
+        <div className="grid grid-cols-2 gap-2 mb-4">
+          <button
+            onClick={() => setServiceType('ride')}
+            className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
+              serviceType === 'ride' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+            }`}
+          >
+            <Bike size={16} /> Ride
+          </button>
+          <button
+            onClick={() => setServiceType('delivery')}
+            className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
+              serviceType === 'delivery' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+            }`}
+          >
+            <Package size={16} /> Delivery
+          </button>
+        </div>
+
+        {/* Delivery mode + supermarket picker */}
+        {serviceType === 'delivery' && (
+          <div className="mb-4 space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => setDeliveryMode('supermarket')}
+                className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                  deliveryMode === 'supermarket' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
+                }`}
+              >
+                🏪 From a Supermarket
+              </button>
+              <button
+                onClick={() => setDeliveryMode('normal')}
+                className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                  deliveryMode === 'normal' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
+                }`}
+              >
+                📦 Normal Delivery
+              </button>
+            </div>
+            {deliveryMode === 'supermarket' && (
+              <select
+                value={selectedSupermarketId}
+                onChange={(e) => setSelectedSupermarketId(e.target.value)}
+                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+              >
+                <option value="">Select a registered supermarket…</option>
+                {supermarkets.map(sm => (
+                  <option key={sm.id} value={sm.id}>{sm.name} — {sm.location}</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+
+        {/* Vehicle / weather filters — matched against riders' real registered attributes */}
+        <div className="grid grid-cols-3 gap-2 mb-4">
+          {(['any', 'electric', 'fuel'] as PowerFilter[]).map(opt => (
+            <button
+              key={opt}
+              onClick={() => setPowerFilter(opt)}
+              className={`flex items-center justify-center gap-1 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                powerFilter === opt ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              {opt === 'electric' ? <Zap size={14} /> : opt === 'fuel' ? <Fuel size={14} /> : null}
+              {opt === 'any' ? 'Any Vehicle' : opt === 'electric' ? 'Electric' : 'Fuel'}
+            </button>
+          ))}
+          <button
+            onClick={() => setUmbrellaRequired(!umbrellaRequired)}
+            className={`col-span-3 flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+              umbrellaRequired ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
+            }`}
+          >
+            <Umbrella size={14} /> {umbrellaRequired ? 'Rain cover required' : 'Rain cover not required'}
+          </button>
+        </div>
+
         <div className="space-y-4">
           {/* Pickup Location */}
           <div ref={pickupRef} className="relative">
-            <label className="block text-sm font-medium text-slate-700 mb-2">
+            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
               Pickup Location
+              {pickupIsAutoFromSupermarket && (
+                <span className="text-[10px] px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-semibold">
+                  Auto-filled from supermarket
+                </span>
+              )}
             </label>
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-green-500" size={20} />
               <input
                 type="text"
                 value={pickup}
-                onChange={(e) => handlePickupChange(e.target.value)}
-                onFocus={() => pickup && setShowPickupSuggestions(true)}
+                readOnly={pickupIsAutoFromSupermarket}
+                onChange={(e) => !pickupIsAutoFromSupermarket && handlePickupChange(e.target.value)}
+                onFocus={() => !pickupIsAutoFromSupermarket && pickup && setShowPickupSuggestions(true)}
                 placeholder="Where are you now? (e.g., Kampala Road, Acacia Mall)"
-                className="w-full pl-11 pr-4 py-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none text-slate-800 placeholder-slate-400"
+                className={`w-full pl-11 pr-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none text-slate-800 placeholder-slate-400 ${
+                  pickupIsAutoFromSupermarket ? 'border-green-300 bg-green-50 cursor-default' : 'border-slate-300'
+                }`}
               />
               {selectedPickup && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 bg-green-500 rounded-full" />
               )}
             </div>
-            
+            {serviceType === 'delivery' && deliveryMode === 'supermarket' && selectedSupermarketId && !pickupIsAutoFromSupermarket && (
+              <p className="text-xs text-amber-600 mt-1">
+                This supermarket hasn't set its exact location yet — please confirm the pickup point manually.
+              </p>
+            )}
+
             {/* Pickup Suggestions */}
-            {showPickupSuggestions && pickupSuggestions.length > 0 && (
+            {!pickupIsAutoFromSupermarket && showPickupSuggestions && pickupSuggestions.length > 0 && (
               <div className="absolute z-10 w-full mt-2 bg-white border-2 border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
                 {pickupSuggestions.map((location) => (
                   <button
@@ -405,8 +636,13 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
 
           {/* Dropoff Location */}
           <div ref={dropoffRef} className="relative">
-            <label className="block text-sm font-medium text-slate-700 mb-2">
+            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
               Drop-off Location
+              {defaultDropoff && selectedDropoff?.id === defaultDropoff.id && (
+                <span className="text-[10px] px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full font-semibold">
+                  Your default area
+                </span>
+              )}
             </label>
             <div className="relative">
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-red-500" size={20} />
@@ -422,7 +658,7 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 bg-red-500 rounded-full" />
               )}
             </div>
-            
+
             {/* Dropoff Suggestions */}
             {showDropoffSuggestions && dropoffSuggestions.length > 0 && (
               <div className="absolute z-10 w-full mt-2 bg-white border-2 border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
@@ -467,23 +703,25 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
 
       {/* Matched Riders */}
       {matchedRiders.length > 0 && (
-        <div className="bg-white rounded-xl shadow-lg p-6">
+        <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-slate-800">
+            <h3 className="text-lg sm:text-xl font-bold text-slate-800">
               Available Riders ({matchedRiders.length})
             </h3>
-            <p className="text-sm text-slate-600">
+            <p className="text-xs sm:text-sm text-slate-600">
               Sorted by best match
             </p>
           </div>
 
+          <VipDemandInsight riders={matchedRiders} />
+
           <div className="space-y-3">
             {matchedRiders.map((rider) => (
               <RiderCard
-                key={rider.id}
+                key={rider.rider_id}
                 rider={rider}
                 onRequest={handleRequestRide}
-                isSelected={selectedRider?.id === rider.id}
+                isSelected={selectedRider?.rider_id === rider.rider_id}
               />
             ))}
           </div>
@@ -491,8 +729,9 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
           {/* Algorithm Info */}
           <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
             <p className="text-sm text-blue-800">
-              <strong>Smart Matching:</strong> Riders are ranked by location knowledge, distance, 
-              rating, and mode. Riders who know your destination area appear first!
+              <strong>Real Matching:</strong> Riders are ranked by real registered areas they know,
+              real GPS distance, rating, and their own vehicle/mode. Riders who know your destination
+              area appear first — no simulated data.
             </p>
           </div>
         </div>
@@ -501,38 +740,99 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
   );
 }
 
-function RiderCard({ 
-  rider, 
+// Real call functionality: only render a working tel: link when the rider
+// actually has a phone number on file (mbg_user_profiles.phone falling back
+// to mbg_users.phone) — never a dead/broken "Call" button.
+function CallButton({ phone, label = 'Call', className = '' }: { phone: string | null; label?: string; className?: string }) {
+  if (!phone) {
+    return (
+      <span className={`bg-slate-100 text-slate-400 rounded-lg font-semibold flex items-center justify-center gap-2 cursor-not-allowed ${className}`}>
+        <Phone size={18} />
+        No phone on file
+      </span>
+    );
+  }
+  return (
+    <a
+      href={`tel:${phone}`}
+      className={`bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-all shadow-md flex items-center justify-center gap-2 ${className}`}
+    >
+      <Phone size={18} />
+      {label}
+    </a>
+  );
+}
+
+// Real demand signal, not decoration: driven by the server-computed
+// time-of-day surge multiplier (mbg_current_time_multiplier) and how many
+// riders actually came back from the live search — the same numbers that
+// set the fare. No fabricated "high demand" banners.
+function VipDemandInsight({ riders }: { riders: MatchedRider[] }) {
+  if (riders.length === 0) return null;
+
+  const timeMultiplier = riders[0]?.time_multiplier ?? 1;
+  const vipCount = riders.filter(r => r.mode === 'vip').length;
+  const normalCount = riders.length - vipCount;
+  const isPeak = timeMultiplier > 1;
+  const isScarce = riders.length <= 2;
+  const vipWorthIt = isPeak || isScarce;
+
+  if (!vipWorthIt) {
+    return (
+      <div className="mb-4 p-3 rounded-lg border border-slate-200 bg-slate-50 flex items-center gap-2 text-xs sm:text-sm text-slate-600">
+        <Crown size={16} className="text-slate-400 flex-shrink-0" />
+        Normal demand right now — {normalCount} standard-priced rider{normalCount === 1 ? '' : 's'} nearby.
+        VIP won't get you picked up meaningfully faster.
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-4 p-3 rounded-lg border-2 border-purple-300 bg-purple-50 flex items-start gap-2 text-xs sm:text-sm text-purple-800">
+      <Crown size={16} className="text-purple-500 flex-shrink-0 mt-0.5" />
+      <div>
+        <strong>VIP may actually help right now: </strong>
+        {isPeak && `it's peak hours (fares are already at ${timeMultiplier}x)`}
+        {isPeak && isScarce && ' and '}
+        {isScarce && `only ${riders.length} rider${riders.length === 1 ? ' is' : 's are'} available nearby`}
+        {vipCount > 0
+          ? ` — ${vipCount} VIP rider${vipCount === 1 ? '' : 's'} in this list get priority pickup.`
+          : ' — no VIP riders are online in your area yet, so this won\'t change your wait time either.'}
+      </div>
+    </div>
+  );
+}
+
+function RiderCard({
+  rider,
   onRequest,
-  isSelected 
-}: { 
-  rider: MatchedRider; 
+  isSelected
+}: {
+  rider: MatchedRider;
   onRequest: (rider: MatchedRider) => void;
   isSelected: boolean;
 }) {
   const modeConfig = {
     normal: { color: 'slate', icon: DollarSign, label: 'Standard' },
     vip: { color: 'purple', icon: Crown, label: 'VIP Service' },
+    discount: { color: 'orange', icon: DollarSign, label: 'Discount' },
     return: { color: 'green', icon: Home, label: 'Return Home' }
   };
 
-  const config = modeConfig[rider.mode];
+  const config = modeConfig[rider.mode] || modeConfig.normal;
   const ModeIcon = config.icon;
-  const discountPercent = rider.original_price 
-    ? Math.round(((rider.original_price - rider.price) / rider.original_price) * 100)
-    : 0;
 
   return (
-    <div className={`border-2 rounded-xl p-5 transition-all ${
-      isSelected 
+    <div className={`border-2 rounded-xl p-4 sm:p-5 transition-all ${
+      isSelected
         ? 'border-orange-500 bg-gradient-to-br from-orange-50 to-yellow-50'
         : 'border-slate-200 bg-white hover:border-orange-300'
     }`}>
-      <div className="flex items-start gap-4">
+      <div className="flex items-start gap-3 sm:gap-4">
         {/* Rider Avatar */}
         <div className="relative flex-shrink-0">
-          <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg">
-            {rider.name.split(' ').map(n => n[0]).join('')}
+          <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-lg sm:text-xl shadow-lg">
+            {rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
           </div>
           {rider.knows_destination && (
             <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
@@ -545,8 +845,8 @@ function RiderCard({
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-2">
             <div>
-              <h4 className="font-bold text-slate-800 text-lg">{rider.name}</h4>
-              <div className="flex items-center gap-3 text-sm text-slate-600">
+              <h4 className="font-bold text-slate-800 text-base sm:text-lg">{rider.full_name}</h4>
+              <div className="flex items-center gap-3 text-xs sm:text-sm text-slate-600">
                 <div className="flex items-center gap-1">
                   <Star size={14} className="text-yellow-500 fill-yellow-500" />
                   <span className="font-medium">{rider.rating}</span>
@@ -555,14 +855,14 @@ function RiderCard({
                 <span>{rider.total_rides} rides</span>
               </div>
             </div>
-            <div className={`px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1 bg-${config.color}-100 text-${config.color}-700`}>
+            <div className={`px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1 bg-${config.color}-100 text-${config.color}-700 flex-shrink-0`}>
               <ModeIcon size={12} />
               {config.label}
             </div>
           </div>
 
           {/* Rider Highlights */}
-          <div className="flex flex-wrap gap-2 mb-3">
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-3">
             {rider.knows_destination && (
               <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
                 <Navigation size={12} />
@@ -570,47 +870,38 @@ function RiderCard({
               </span>
             )}
             <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-medium rounded-full">
-              {rider.distance_km} km away
+              {rider.distance_to_pickup_km != null ? `${rider.distance_to_pickup_km.toFixed(1)} km away` : 'Distance unknown'}
             </span>
             <span className="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 text-purple-700 text-xs font-medium rounded-full">
               Arrives in {rider.estimated_arrival_min} min
             </span>
+            <span className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-100 text-emerald-700 text-xs font-medium rounded-full">
+              {rider.power_type === 'electric' ? <Zap size={12} /> : <Fuel size={12} />}
+              {rider.power_type === 'electric' ? 'Electric' : 'Fuel'}
+            </span>
+            {rider.has_umbrella && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-sky-100 text-sky-700 text-xs font-medium rounded-full">
+                <Umbrella size={12} /> Rain cover
+              </span>
+            )}
           </div>
 
           {/* Pricing and Action */}
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold text-slate-800">
-                  UGX {rider.price.toLocaleString()}
-                </span>
-                {rider.original_price && (
-                  <span className="text-sm text-slate-500 line-through">
-                    UGX {rider.original_price.toLocaleString()}
-                  </span>
-                )}
-              </div>
-              {discountPercent > 0 && (
-                <span className="text-xs font-semibold text-green-600">
-                  Save {discountPercent}% 🎉
-                </span>
-              )}
+            <div className="flex items-baseline gap-2">
+              <span className="text-xl sm:text-2xl font-bold text-slate-800">
+                UGX {rider.fare.toLocaleString()}
+              </span>
             </div>
-            
+
             <div className="flex items-center gap-2">
               {isSelected && (
-                <a
-                  href={`tel:${rider.phone}`}
-                  className="px-4 py-2.5 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-all shadow-md flex items-center gap-2"
-                >
-                  <Phone size={18} />
-                  Call
-                </a>
+                <CallButton phone={rider.phone} className="px-4 py-2.5" />
               )}
               <button
                 onClick={() => onRequest(rider)}
                 disabled={isSelected}
-                className={`px-6 py-2.5 rounded-lg font-semibold transition-all ${
+                className={`px-5 sm:px-6 py-2.5 rounded-lg font-semibold transition-all ${
                   isSelected
                     ? 'bg-slate-200 text-slate-600 cursor-not-allowed'
                     : 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white hover:from-orange-600 hover:to-yellow-600 shadow-md'
@@ -626,28 +917,18 @@ function RiderCard({
       {/* Vehicle Details */}
       {isSelected && (
         <div className="mt-4 pt-4 border-t border-slate-200">
-          <div className="flex items-center justify-between text-sm">
+          <div className="flex items-center justify-between text-sm flex-wrap gap-2">
             <div className="flex items-center gap-2 text-slate-600">
               <span className="font-semibold">Vehicle:</span>
-              <span>{rider.vehicle.color} {rider.vehicle.type}</span>
+              <span>{rider.vehicle_color} {rider.vehicle_type}</span>
             </div>
             <div className="flex items-center gap-2 text-slate-600">
               <span className="font-semibold">Plate:</span>
               <span className="bg-yellow-400 text-slate-900 px-2 py-0.5 rounded font-bold">
-                {rider.vehicle.plate}
+                {rider.plate_number}
               </span>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Why This Rider Notice */}
-      {rider.knows_destination && rider.mode === 'return' && (
-        <div className="mt-4 pt-4 border-t border-slate-200">
-          <p className="text-sm text-slate-600">
-            <strong className="text-green-600">Best Value:</strong> This rider knows your exact destination 
-            and is heading home in that direction. Great price + local expertise!
-          </p>
         </div>
       )}
     </div>
@@ -661,7 +942,7 @@ function WaitingForAcceptance({ rider, timer, onCancel }: { rider: MatchedRider;
       {/* Animated Loading */}
       <div className="relative mb-8">
         <div className="w-32 h-32 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-4xl shadow-2xl animate-pulse">
-          {rider.name.split(' ').map(n => n[0]).join('')}
+          {rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
         </div>
         <div className="absolute -top-2 -right-2 w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center animate-bounce">
           <Clock className="text-white" size={24} />
@@ -670,7 +951,7 @@ function WaitingForAcceptance({ rider, timer, onCancel }: { rider: MatchedRider;
 
       {/* Status */}
       <h2 className="text-3xl font-bold text-slate-800 mb-2 text-center">
-        Waiting for {rider.name.split(' ')[0]}
+        Waiting for {rider.full_name.split(' ')[0]}
       </h2>
       <p className="text-slate-600 mb-6 text-center">
         Your ride request has been sent. The rider will respond shortly.
@@ -691,7 +972,7 @@ function WaitingForAcceptance({ rider, timer, onCancel }: { rider: MatchedRider;
             </div>
             <div className="flex items-center gap-2 text-sm text-slate-600">
               <Navigation size={16} />
-              <span>{rider.distance_km} km away</span>
+              <span>{rider.distance_to_pickup_km != null ? `${rider.distance_to_pickup_km.toFixed(1)} km away` : 'Distance unknown'}</span>
             </div>
           </div>
         </div>
@@ -700,7 +981,7 @@ function WaitingForAcceptance({ rider, timer, onCancel }: { rider: MatchedRider;
       {/* Loading Bar */}
       <div className="w-full max-w-md mb-8">
         <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-          <div 
+          <div
             className="h-full bg-gradient-to-r from-orange-500 to-yellow-500 transition-all duration-1000"
             style={{ width: `${((30 - timer) / 30) * 100}%` }}
           />
@@ -714,63 +995,6 @@ function WaitingForAcceptance({ rider, timer, onCancel }: { rider: MatchedRider;
       >
         Cancel Request
       </button>
-    </div>
-  );
-}
-
-// Ride Accepted Component
-function RideAccepted({ rider }: { rider: MatchedRider }) {
-  return (
-    <div className="min-h-[500px] bg-gradient-to-br from-green-50 to-emerald-50 rounded-xl shadow-xl p-8 flex flex-col items-center justify-center">
-      {/* Success Animation */}
-      <div className="relative mb-8 animate-bounce">
-        <div className="w-32 h-32 bg-gradient-to-br from-green-500 to-emerald-500 rounded-full flex items-center justify-center shadow-2xl">
-          <CheckCircle className="text-white" size={64} />
-        </div>
-        <div className="absolute inset-0 bg-green-500 rounded-full opacity-25 animate-ping"></div>
-      </div>
-
-      {/* Success Message */}
-      <h2 className="text-4xl font-bold text-slate-800 mb-3 text-center">
-        Ride Accepted! 🎉
-      </h2>
-      <p className="text-xl text-slate-700 mb-2 text-center">
-        {rider.name} is getting ready
-      </p>
-      <p className="text-slate-600 text-center mb-8">
-        Your rider will be on the way shortly
-      </p>
-
-      {/* Rider Info Card */}
-      <div className="bg-white rounded-xl p-6 shadow-lg max-w-md w-full">
-        <div className="flex items-center gap-4 mb-4">
-          <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-xl">
-            {rider.name.split(' ').map(n => n[0]).join('')}
-          </div>
-          <div className="flex-1">
-            <h3 className="font-bold text-lg text-slate-800">{rider.name}</h3>
-            <div className="flex items-center gap-2 text-sm text-slate-600">
-              <Star className="text-yellow-500 fill-yellow-500" size={14} />
-              <span>{rider.rating}</span>
-              <span>•</span>
-              <span>{rider.total_rides} rides</span>
-            </div>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-2 gap-3 text-sm">
-          <div className="bg-slate-50 rounded-lg p-3">
-            <div className="text-slate-600 mb-1">Vehicle</div>
-            <div className="font-semibold text-slate-800">{rider.vehicle.color} {rider.vehicle.type}</div>
-          </div>
-          <div className="bg-slate-50 rounded-lg p-3">
-            <div className="text-slate-600 mb-1">Plate</div>
-            <div className="font-bold text-slate-800 bg-yellow-400 inline-block px-2 py-0.5 rounded">
-              {rider.vehicle.plate}
-            </div>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -791,7 +1015,7 @@ function RideDeclined({ rider, onBackToRiders, onStartNew }: { rider: MatchedRid
         Ride Not Available
       </h2>
       <p className="text-lg text-slate-700 mb-2 text-center">
-        {rider.name} couldn't accept your ride
+        {rider.full_name} couldn't accept your ride
       </p>
       <p className="text-slate-600 text-center mb-8 max-w-md">
         Don't worry! There are other available riders nearby. Try requesting from another rider or start a new search.
@@ -817,18 +1041,16 @@ function RideDeclined({ rider, onBackToRiders, onStartNew }: { rider: MatchedRid
   );
 }
 
-// Rider On The Way Component
-function RiderOnTheWay({ 
-  rider, 
-  pickup, 
-  dropoff, 
-  estimatedArrival,
-  onCancel 
-}: { 
-  rider: MatchedRider; 
-  pickup: Location; 
+// Rider On The Way Component (covers 'accepted' — rider confirmed and heading to pickup)
+function RiderOnTheWay({
+  rider,
+  pickup,
+  dropoff,
+  onCancel
+}: {
+  rider: MatchedRider;
+  pickup: Location;
   dropoff: Location;
-  estimatedArrival: number;
   onCancel: () => void;
 }) {
   return (
@@ -838,11 +1060,11 @@ function RiderOnTheWay({
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
-            <h2 className="text-2xl font-bold">Rider On The Way</h2>
+            <h2 className="text-xl sm:text-2xl font-bold">Rider On The Way</h2>
           </div>
           <div className="bg-white/20 px-4 py-2 rounded-lg">
             <div className="text-sm opacity-90">Arriving in</div>
-            <div className="text-2xl font-bold">{estimatedArrival} min</div>
+            <div className="text-2xl font-bold">{rider.estimated_arrival_min} min</div>
           </div>
         </div>
         <p className="opacity-90">Your rider is heading to your pickup location</p>
@@ -853,10 +1075,10 @@ function RiderOnTheWay({
         <h3 className="text-lg font-bold text-slate-800 mb-4">Rider Details</h3>
         <div className="flex items-start gap-4 mb-6">
           <div className="w-20 h-20 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg">
-            {rider.name.split(' ').map(n => n[0]).join('')}
+            {rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
           </div>
           <div className="flex-1">
-            <h4 className="text-xl font-bold text-slate-800">{rider.name}</h4>
+            <h4 className="text-xl font-bold text-slate-800">{rider.full_name}</h4>
             <div className="flex items-center gap-3 text-sm text-slate-600 mb-2">
               <div className="flex items-center gap-1">
                 <Star className="text-yellow-500 fill-yellow-500" size={16} />
@@ -866,16 +1088,7 @@ function RiderOnTheWay({
               <span>{rider.total_rides} completed rides</span>
             </div>
             <div className="flex items-center gap-2">
-              <a
-                href={`tel:${rider.phone}`}
-                className="flex-1 px-4 py-2 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-all flex items-center justify-center gap-2"
-              >
-                <Phone size={18} />
-                Call Rider
-              </a>
-              <button className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg font-semibold hover:bg-blue-600 transition-all">
-                Send Message
-              </button>
+              <CallButton phone={rider.phone} label="Call Rider" className="flex-1 px-4 py-2" />
             </div>
           </div>
         </div>
@@ -884,12 +1097,12 @@ function RiderOnTheWay({
         <div className="grid grid-cols-2 gap-4 mb-6 pb-6 border-b border-slate-200">
           <div className="bg-slate-50 rounded-lg p-4">
             <div className="text-sm text-slate-600 mb-1">Vehicle</div>
-            <div className="font-semibold text-slate-800">{rider.vehicle.color} {rider.vehicle.type}</div>
+            <div className="font-semibold text-slate-800">{rider.vehicle_color} {rider.vehicle_type}</div>
           </div>
           <div className="bg-slate-50 rounded-lg p-4">
             <div className="text-sm text-slate-600 mb-1">Plate Number</div>
             <div className="font-bold text-lg bg-yellow-400 text-slate-900 inline-block px-3 py-1 rounded">
-              {rider.vehicle.plate}
+              {rider.plate_number}
             </div>
           </div>
         </div>
@@ -908,9 +1121,9 @@ function RiderOnTheWay({
                 <div className="text-sm text-slate-600">{pickup.fullAddress}</div>
               </div>
             </div>
-            
+
             <div className="ml-4 border-l-2 border-dashed border-slate-300 h-8"></div>
-            
+
             <div className="flex items-start gap-3">
               <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
                 <MapPin className="text-red-600" size={18} />
@@ -929,7 +1142,7 @@ function RiderOnTheWay({
           <div className="flex items-center justify-between">
             <span className="text-slate-600">Fare Amount</span>
             <span className="text-2xl font-bold text-slate-800">
-              UGX {rider.price.toLocaleString()}
+              UGX {rider.fare.toLocaleString()}
             </span>
           </div>
         </div>
@@ -946,143 +1159,15 @@ function RiderOnTheWay({
   );
 }
 
-// Rider Arrived Component
-function RiderArrived({ 
-  rider, 
+// Journey Started Component ('in_progress' — rider marks pickup/completion, customer just watches)
+function JourneyStarted({
+  rider,
   pickup,
-  onStartJourney,
-  onCancel 
-}: { 
-  rider: MatchedRider; 
+  dropoff
+}: {
+  rider: MatchedRider;
   pickup: Location;
-  onStartJourney: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="space-y-6">
-      {/* Arrival Announcement */}
-      <div className="bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl shadow-2xl p-8 text-white text-center relative overflow-hidden">
-        {/* Background Animation */}
-        <div className="absolute inset-0 opacity-20">
-          <div className="absolute top-0 left-0 w-32 h-32 bg-white rounded-full -translate-x-1/2 -translate-y-1/2 animate-ping"></div>
-          <div className="absolute bottom-0 right-0 w-32 h-32 bg-white rounded-full translate-x-1/2 translate-y-1/2 animate-ping" style={{ animationDelay: '1s' }}></div>
-        </div>
-        
-        {/* Content */}
-        <div className="relative z-10">
-          <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl animate-bounce">
-            <CheckCircle className="text-blue-500" size={48} />
-          </div>
-          
-          <h2 className="text-4xl font-bold mb-3">
-            🎉 Rider Has Arrived!
-          </h2>
-          <p className="text-xl opacity-95 mb-2">
-            {rider.name} is waiting for you
-          </p>
-          <p className="text-lg opacity-90">
-            Please proceed to the pickup location
-          </p>
-        </div>
-      </div>
-
-      {/* Rider & Vehicle Info */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h3 className="text-lg font-bold text-slate-800 mb-4">Your Rider</h3>
-        
-        <div className="flex items-center gap-4 mb-6 pb-6 border-b border-slate-200">
-          <div className="w-20 h-20 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg">
-            {rider.name.split(' ').map(n => n[0]).join('')}
-          </div>
-          <div className="flex-1">
-            <h4 className="text-xl font-bold text-slate-800">{rider.name}</h4>
-            <div className="flex items-center gap-2 text-sm text-slate-600 mb-2">
-              <Star className="text-yellow-500 fill-yellow-500" size={16} />
-              <span className="font-semibold">{rider.rating}</span>
-              <span>•</span>
-              <span>{rider.total_rides} rides</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Vehicle Details - Emphasized */}
-        <div className="bg-gradient-to-br from-yellow-50 to-orange-50 rounded-xl p-6 mb-6 border-2 border-yellow-300">
-          <h4 className="font-bold text-slate-800 mb-3 text-center">Look for this vehicle:</h4>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="bg-white rounded-lg p-4 text-center shadow-md">
-              <div className="text-sm text-slate-600 mb-2">Vehicle</div>
-              <div className="font-bold text-lg text-slate-800">{rider.vehicle.color}</div>
-              <div className="font-semibold text-slate-700">{rider.vehicle.type}</div>
-            </div>
-            <div className="bg-white rounded-lg p-4 text-center shadow-md">
-              <div className="text-sm text-slate-600 mb-2">Plate Number</div>
-              <div className="font-black text-2xl bg-yellow-400 text-slate-900 inline-block px-4 py-2 rounded-lg shadow-lg mt-1">
-                {rider.vehicle.plate}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Pickup Location */}
-        <div className="bg-slate-50 rounded-lg p-4 mb-4">
-          <div className="flex items-start gap-3">
-            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0">
-              <MapPin className="text-green-600" size={20} />
-            </div>
-            <div className="flex-1">
-              <div className="text-sm text-slate-600 mb-1">Meeting Point</div>
-              <div className="font-bold text-slate-800">{pickup.name}</div>
-              <div className="text-sm text-slate-600">{pickup.fullAddress}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Contact */}
-        <div className="flex gap-3">
-          <a
-            href={`tel:${rider.phone}`}
-            className="flex-1 px-6 py-4 bg-green-500 text-white rounded-xl font-bold hover:bg-green-600 transition-all flex items-center justify-center gap-2 shadow-lg"
-          >
-            <Phone size={20} />
-            Call Rider
-          </a>
-          <button className="flex-1 px-6 py-4 bg-blue-500 text-white rounded-xl font-bold hover:bg-blue-600 transition-all flex items-center justify-center gap-2 shadow-lg">
-            Message
-          </button>
-        </div>
-      </div>
-
-      {/* Start Journey Button */}
-      <button
-        onClick={onStartJourney}
-        className="w-full py-5 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold text-xl rounded-xl hover:from-green-600 hover:to-emerald-700 transition-all shadow-xl flex items-center justify-center gap-3"
-      >
-        <CheckCircle size={24} />
-        Let's start the journey
-      </button>
-
-      {/* Cancel */}
-      <button
-        onClick={onCancel}
-        className="w-full py-3 bg-red-50 text-red-600 font-semibold rounded-lg hover:bg-red-100 transition-all border-2 border-red-200"
-      >
-        Cancel Ride
-      </button>
-    </div>
-  );
-}
-
-// Journey Started Component
-function JourneyStarted({ 
-  rider, 
-  pickup, 
-  dropoff,
-  onComplete
-}: { 
-  rider: MatchedRider; 
-  pickup: Location; 
   dropoff: Location;
-  onComplete: () => void;
 }) {
   const [journeyTime, setJourneyTime] = React.useState(0);
 
@@ -1103,29 +1188,27 @@ function JourneyStarted({
     <div className="space-y-6">
       {/* Journey In Progress Header */}
       <div className="bg-gradient-to-r from-green-500 via-emerald-500 to-teal-500 rounded-2xl shadow-2xl p-8 text-white text-center relative overflow-hidden">
-        {/* Animated Background */}
         <div className="absolute inset-0">
           <div className="absolute top-0 left-1/4 w-64 h-64 bg-white opacity-10 rounded-full animate-pulse"></div>
           <div className="absolute bottom-0 right-1/4 w-48 h-48 bg-white opacity-10 rounded-full animate-pulse" style={{ animationDelay: '1s' }}></div>
         </div>
-        
+
         <div className="relative z-10">
           <div className="inline-flex items-center gap-3 bg-white/20 rounded-full px-6 py-3 mb-4">
             <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
             <span className="font-semibold text-lg">Journey In Progress</span>
           </div>
-          
-          <h2 className="text-4xl font-bold mb-3">
+
+          <h2 className="text-3xl sm:text-4xl font-bold mb-3">
             🚗 On Your Way!
           </h2>
-          <p className="text-xl opacity-95 mb-4">
+          <p className="text-lg sm:text-xl opacity-95 mb-4">
             Heading to your destination
           </p>
-          
-          {/* Journey Timer */}
+
           <div className="inline-block bg-white/20 rounded-xl px-8 py-4 backdrop-blur-sm">
             <div className="text-sm opacity-90 mb-1">Journey Time</div>
-            <div className="text-5xl font-bold font-mono">{formatTime(journeyTime)}</div>
+            <div className="text-4xl sm:text-5xl font-bold font-mono">{formatTime(journeyTime)}</div>
           </div>
         </div>
       </div>
@@ -1133,7 +1216,7 @@ function JourneyStarted({
       {/* Trip Details */}
       <div className="bg-white rounded-xl shadow-lg p-6">
         <h3 className="text-lg font-bold text-slate-800 mb-4">Trip Details</h3>
-        
+
         {/* Route */}
         <div className="space-y-4 mb-6">
           <div className="flex items-start gap-3">
@@ -1146,9 +1229,9 @@ function JourneyStarted({
               <div className="text-sm text-slate-600">{pickup.area}</div>
             </div>
           </div>
-          
+
           <div className="ml-5 border-l-2 border-dashed border-slate-300 h-12"></div>
-          
+
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0 mt-1 animate-pulse">
               <MapPin className="text-red-600" size={20} />
@@ -1165,21 +1248,15 @@ function JourneyStarted({
         <div className="border-t border-slate-200 pt-6">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg">
-              {rider.name.split(' ').map(n => n[0]).join('')}
+              {rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
             </div>
             <div className="flex-1">
-              <h4 className="font-bold text-slate-800 text-lg">{rider.name}</h4>
+              <h4 className="font-bold text-slate-800 text-lg">{rider.full_name}</h4>
               <div className="text-sm text-slate-600">
-                {rider.vehicle.color} {rider.vehicle.type} • {rider.vehicle.plate}
+                {rider.vehicle_color} {rider.vehicle_type} • {rider.plate_number}
               </div>
             </div>
-            <a
-              href={`tel:${rider.phone}`}
-              className="px-4 py-2 bg-green-500 text-white rounded-lg font-semibold hover:bg-green-600 transition-all flex items-center gap-2"
-            >
-              <Phone size={18} />
-              Call
-            </a>
+            <CallButton phone={rider.phone} className="px-4 py-2" />
           </div>
         </div>
 
@@ -1187,26 +1264,18 @@ function JourneyStarted({
         <div className="mt-6 pt-6 border-t border-slate-200">
           <div className="flex items-center justify-between">
             <span className="text-slate-600 font-medium">Trip Fare</span>
-            <span className="text-3xl font-bold text-green-600">
-              UGX {rider.price.toLocaleString()}
+            <span className="text-2xl sm:text-3xl font-bold text-green-600">
+              UGX {rider.fare.toLocaleString()}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Arrived Button */}
-      <button
-        onClick={onComplete}
-        className="w-full py-5 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-bold text-xl rounded-xl hover:from-blue-600 hover:to-purple-700 transition-all shadow-xl flex items-center justify-center gap-3"
-      >
-        <CheckCircle size={24} />
-        I've Arrived - End Journey
-      </button>
-
-      {/* Safety Info */}
+      {/* Info — completion is confirmed by the rider */}
       <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 text-center">
         <p className="text-sm text-blue-800">
-          <strong>Safety First:</strong> Always wear a helmet and follow traffic rules
+          <strong>Almost there!</strong> {rider.full_name.split(' ')[0]} will mark the trip complete on arrival.
+          Always wear a helmet and follow traffic rules.
         </p>
       </div>
     </div>
@@ -1214,14 +1283,14 @@ function JourneyStarted({
 }
 
 // Journey Completed Component
-function JourneyCompleted({ 
-  rider, 
-  pickup, 
+function JourneyCompleted({
+  rider,
+  pickup,
   dropoff,
   onStartNew
-}: { 
-  rider: MatchedRider; 
-  pickup: Location; 
+}: {
+  rider: MatchedRider;
+  pickup: Location;
   dropoff: Location;
   onStartNew: () => void;
 }) {
@@ -1235,19 +1304,19 @@ function JourneyCompleted({
         <div className="absolute inset-0 opacity-20">
           <div className="absolute top-0 left-0 w-full h-full bg-white animate-pulse"></div>
         </div>
-        
+
         <div className="relative z-10">
           <div className="w-32 h-32 bg-white rounded-full flex items-center justify-center mx-auto mb-6 shadow-2xl">
             <CheckCircle className="text-green-500" size={64} />
           </div>
-          
-          <h2 className="text-4xl font-bold mb-3">
+
+          <h2 className="text-3xl sm:text-4xl font-bold mb-3">
             ✅ Journey Complete!
           </h2>
-          <p className="text-xl opacity-95 mb-2">
+          <p className="text-lg sm:text-xl opacity-95 mb-2">
             You've arrived safely at your destination
           </p>
-          <p className="text-lg opacity-90">
+          <p className="text-base sm:text-lg opacity-90">
             Thanks for riding with My Boda Guy
           </p>
         </div>
@@ -1256,7 +1325,7 @@ function JourneyCompleted({
       {/* Trip Summary */}
       <div className="bg-white rounded-xl shadow-lg p-6">
         <h3 className="text-lg font-bold text-slate-800 mb-4">Trip Summary</h3>
-        
+
         <div className="space-y-3 mb-6">
           <div className="flex justify-between py-2">
             <span className="text-slate-600">From</span>
@@ -1268,12 +1337,12 @@ function JourneyCompleted({
           </div>
           <div className="flex justify-between py-2">
             <span className="text-slate-600">Rider</span>
-            <span className="font-semibold text-slate-800">{rider.name}</span>
+            <span className="font-semibold text-slate-800">{rider.full_name}</span>
           </div>
           <div className="flex justify-between py-2 border-t-2 border-slate-200 pt-4">
             <span className="text-slate-700 font-medium text-lg">Total Fare</span>
-            <span className="text-3xl font-bold text-green-600">
-              UGX {rider.price.toLocaleString()}
+            <span className="text-2xl sm:text-3xl font-bold text-green-600">
+              UGX {rider.fare.toLocaleString()}
             </span>
           </div>
         </div>
@@ -1282,8 +1351,8 @@ function JourneyCompleted({
       {/* Rate Your Rider */}
       <div className="bg-white rounded-xl shadow-lg p-6">
         <h3 className="text-lg font-bold text-slate-800 mb-4 text-center">Rate Your Experience</h3>
-        <p className="text-slate-600 text-center mb-4">How was your ride with {rider.name.split(' ')[0]}?</p>
-        
+        <p className="text-slate-600 text-center mb-4">How was your ride with {rider.full_name.split(' ')[0]}?</p>
+
         <div className="flex justify-center gap-2 mb-6">
           {[1, 2, 3, 4, 5].map((star) => (
             <button
@@ -1294,7 +1363,7 @@ function JourneyCompleted({
               className="transition-transform hover:scale-110"
             >
               <Star
-                size={48}
+                size={40}
                 className={`${
                   star <= (hoveredRating || rating)
                     ? 'text-yellow-500 fill-yellow-500'
@@ -1325,13 +1394,6 @@ function JourneyCompleted({
           className="w-full py-5 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold text-xl rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-xl"
         >
           Book Another Ride
-        </button>
-        
-        <button
-          onClick={onStartNew}
-          className="w-full py-3 bg-white text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-all border-2 border-slate-200"
-        >
-          Back to Home
         </button>
       </div>
     </div>

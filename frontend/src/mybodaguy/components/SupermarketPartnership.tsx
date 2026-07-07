@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
-import { ShoppingBag, Check, X, Clock, MapPin, DollarSign } from 'lucide-react';
+import { ShoppingBag, Check, X, Clock, MapPin, Phone } from 'lucide-react';
 import { toast } from 'sonner';
+import { supabase } from '../services/supabaseClient';
 
 interface Supermarket {
   id: string;
   name: string;
   location: string;
-  commission_rate: number;
-  distance_km?: number;
-  logo?: string;
+  address: string | null;
+  phone: string | null;
   is_applied: boolean;
+  application_id?: string;
   application_status?: 'pending' | 'approved' | 'rejected';
 }
 
@@ -29,45 +30,40 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
   const loadSupermarkets = async () => {
     setLoading(true);
     try {
-      // TODO: Implement API call to fetch supermarkets
-      // Placeholder data
-      setSupermarkets([
-        {
-          id: '1',
-          name: 'Shoprite Kampala',
-          location: 'City Center, Kampala',
-          commission_rate: 15,
-          distance_km: 2.5,
-          is_applied: false
-        },
-        {
-          id: '2',
-          name: 'Carrefour Nakasero',
-          location: 'Nakasero Hill, Kampala',
-          commission_rate: 18,
-          distance_km: 3.2,
-          is_applied: true,
-          application_status: 'pending'
-        },
-        {
-          id: '3',
-          name: 'Quality Supermarket',
-          location: 'Ntinda, Kampala',
-          commission_rate: 20,
-          distance_km: 5.0,
-          is_applied: true,
-          application_status: 'approved'
-        },
-        {
-          id: '4',
-          name: 'Game Stores',
-          location: 'Lugogo, Kampala',
-          commission_rate: 12,
-          distance_km: 4.1,
-          is_applied: false
-        }
+      const [{ data: markets, error: marketsError }, { data: applications, error: appsError }] = await Promise.all([
+        supabase
+          .from('supermarkets')
+          .select('id, name, location, address, phone')
+          .eq('is_active', true)
+          .order('name', { ascending: true }),
+        supabase
+          .from('rider_supermarket_applications')
+          .select('id, supermarket_id, status')
+          .eq('rider_user_id', riderId),
       ]);
+
+      if (marketsError) throw marketsError;
+      if (appsError) throw appsError;
+
+      const appBySupermarket = new Map((applications || []).map(a => [a.supermarket_id, a]));
+
+      setSupermarkets(
+        (markets || []).map((sm: any) => {
+          const app = appBySupermarket.get(sm.id);
+          return {
+            id: sm.id,
+            name: sm.name,
+            location: sm.location,
+            address: sm.address,
+            phone: sm.phone,
+            is_applied: !!app,
+            application_id: app?.id,
+            application_status: app?.status,
+          };
+        })
+      );
     } catch (error) {
+      console.error('[SupermarketPartnership] Failed to load supermarkets:', error);
       toast.error('Failed to load supermarkets');
     } finally {
       setLoading(false);
@@ -77,18 +73,28 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
   const handleApply = async (supermarketId: string) => {
     setLoading(true);
     try {
-      // TODO: Implement API call to apply for partnership
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setSupermarkets(supermarkets.map(sm => 
-        sm.id === supermarketId 
-          ? { ...sm, is_applied: true, application_status: 'pending' as const }
-          : sm
-      ));
-      
+      const [{ data: authUser }, { data: profile }, { data: rider }] = await Promise.all([
+        supabase.auth.getUser(),
+        supabase.from('mbg_user_profiles').select('full_name, phone').eq('user_id', riderId).maybeSingle(),
+        supabase.from('mbg_riders').select('vehicle_type, license_number').eq('user_id', riderId).maybeSingle(),
+      ]);
+
+      const { error } = await supabase.from('rider_supermarket_applications').insert({
+        supermarket_id: supermarketId,
+        rider_user_id: riderId,
+        rider_name: profile?.full_name || authUser?.user?.email?.split('@')[0] || 'Rider',
+        rider_email: authUser?.user?.email || null,
+        rider_phone: profile?.phone || null,
+        vehicle_type: rider?.vehicle_type || null,
+        license_number: rider?.license_number || null,
+      });
+
+      if (error) throw error;
+
       toast.success('Application submitted successfully');
-    } catch (error) {
-      toast.error('Failed to submit application');
+      await loadSupermarkets();
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to submit application');
     } finally {
       setLoading(false);
     }
@@ -97,18 +103,18 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
   const handleWithdrawApplication = async (supermarketId: string) => {
     setLoading(true);
     try {
-      // TODO: Implement API call to withdraw application
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setSupermarkets(supermarkets.map(sm => 
-        sm.id === supermarketId 
-          ? { ...sm, is_applied: false, application_status: undefined }
-          : sm
-      ));
-      
+      const { error } = await supabase
+        .from('rider_supermarket_applications')
+        .delete()
+        .eq('supermarket_id', supermarketId)
+        .eq('rider_user_id', riderId);
+
+      if (error) throw error;
+
       toast.success('Application withdrawn');
-    } catch (error) {
-      toast.error('Failed to withdraw application');
+      await loadSupermarkets();
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to withdraw application');
     } finally {
       setLoading(false);
     }
@@ -119,9 +125,18 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
 
   return (
     <div className="bg-white rounded-xl shadow-lg p-6">
-      <div className="mb-6">
-        <h3 className="text-xl font-bold text-slate-800 mb-2">Supermarket Partnerships</h3>
-        <p className="text-sm text-slate-600">Apply to work for supermarkets and earn commissions on deliveries</p>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-xl font-bold text-slate-800 mb-2">Supermarket Partnerships</h3>
+          <p className="text-sm text-slate-600">Apply to work for supermarkets and earn commissions on deliveries</p>
+        </div>
+        <button
+          onClick={loadSupermarkets}
+          disabled={loading}
+          className="text-sm text-orange-600 hover:text-orange-700 font-medium disabled:opacity-50 whitespace-nowrap"
+        >
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
       </div>
 
       {/* Tabs */}
@@ -167,7 +182,7 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
                 <div className="text-center py-8 bg-slate-50 rounded-lg">
                   <ShoppingBag className="w-12 h-12 text-slate-400 mx-auto mb-3" />
                   <p className="text-slate-600">No available supermarkets</p>
-                  <p className="text-sm text-slate-500">You've applied to all nearby supermarkets</p>
+                  <p className="text-sm text-slate-500">You've applied to all registered supermarkets</p>
                 </div>
               ) : (
                 availableSupermarkets.map((supermarket) => (
@@ -208,8 +223,8 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
       {/* Info Box */}
       <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
         <p className="text-sm text-blue-800">
-          <strong>How it works:</strong> Apply to supermarkets near your known areas. 
-          Once approved, you'll receive delivery requests from customers shopping at these stores. 
+          <strong>How it works:</strong> Apply to any registered supermarket on the platform.
+          Once approved, you'll receive delivery requests from customers shopping at that store.
           Earn commission on every successful delivery!
         </p>
       </div>
@@ -217,12 +232,12 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
   );
 }
 
-function SupermarketCard({ 
-  supermarket, 
-  onApply, 
-  loading 
-}: { 
-  supermarket: Supermarket; 
+function SupermarketCard({
+  supermarket,
+  onApply,
+  loading
+}: {
+  supermarket: Supermarket;
   onApply: (id: string) => void;
   loading: boolean;
 }) {
@@ -239,18 +254,13 @@ function SupermarketCard({
               <MapPin size={14} />
               {supermarket.location}
             </div>
+            {supermarket.phone && (
+              <div className="flex items-center gap-1 text-sm text-slate-500 mt-0.5">
+                <Phone size={14} />
+                {supermarket.phone}
+              </div>
+            )}
           </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="bg-slate-50 rounded-lg p-3">
-          <p className="text-xs text-slate-600 mb-1">Commission Rate</p>
-          <p className="text-lg font-bold text-slate-800">{supermarket.commission_rate}%</p>
-        </div>
-        <div className="bg-slate-50 rounded-lg p-3">
-          <p className="text-xs text-slate-600 mb-1">Distance</p>
-          <p className="text-lg font-bold text-slate-800">{supermarket.distance_km} km</p>
         </div>
       </div>
 
@@ -265,12 +275,12 @@ function SupermarketCard({
   );
 }
 
-function ApplicationCard({ 
-  supermarket, 
-  onWithdraw, 
-  loading 
-}: { 
-  supermarket: Supermarket; 
+function ApplicationCard({
+  supermarket,
+  onWithdraw,
+  loading
+}: {
+  supermarket: Supermarket;
   onWithdraw: (id: string) => void;
   loading: boolean;
 }) {
@@ -285,7 +295,7 @@ function ApplicationCard({
 
   return (
     <div className={`border-2 rounded-lg p-5 transition-all ${
-      supermarket.application_status === 'approved' 
+      supermarket.application_status === 'approved'
         ? 'border-green-300 bg-gradient-to-br from-green-50 to-emerald-50'
         : supermarket.application_status === 'rejected'
         ? 'border-red-300 bg-red-50'
@@ -307,17 +317,6 @@ function ApplicationCard({
         <div className={`flex items-center gap-1 px-3 py-1 rounded-full text-sm font-semibold bg-${status.color}-100 text-${status.color}-700`}>
           <StatusIcon size={16} />
           {status.text}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3 mb-4">
-        <div className="bg-white rounded-lg p-3 shadow-sm">
-          <p className="text-xs text-slate-600 mb-1">Commission Rate</p>
-          <p className="text-lg font-bold text-slate-800">{supermarket.commission_rate}%</p>
-        </div>
-        <div className="bg-white rounded-lg p-3 shadow-sm">
-          <p className="text-xs text-slate-600 mb-1">Distance</p>
-          <p className="text-lg font-bold text-slate-800">{supermarket.distance_km} km</p>
         </div>
       </div>
 
