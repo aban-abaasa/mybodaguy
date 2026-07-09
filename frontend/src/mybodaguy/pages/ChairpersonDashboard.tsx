@@ -355,462 +355,740 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
         )}
       </div>
 
-      <div className="container mx-auto px-2 xs:px-3 sm:px-4 py-3 xs:py-4 sm:py-8">
+      <div className="container mx-auto px-2 xs:px-3 sm:px-4 py-2 xs:py-3 sm:py-4">
         {/* Tab Content */}
         {activeTab === 'overview' && (
           <>
-            {/* Welcome Section - Clean and Simple */}
-            <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-              <h2 className="text-2xl font-bold text-slate-800 mb-2">
-                Welcome, Chairperson!
-              </h2>
-              <div className="flex items-center gap-2 text-slate-600 mb-4">
-                <MapPin size={18} />
-                <span>{allAssignments.length} Active Role{allAssignments.length !== 1 ? 's' : ''}</span>
-                <span className="text-slate-400">•</span>
-                <span>Managing {stats.totalSubordinates} Chairperson{stats.totalSubordinates !== 1 ? 's' : ''}</span>
-                {riders.length > 0 && (
-                  <>
-                    <span className="text-slate-400">•</span>
-                    <span>{riders.length} Rider{riders.length !== 1 ? 's' : ''}</span>
-                  </>
-                )}
+            {/* Enhanced Welcome Section with Gradient */}
+            <div className="bg-gradient-to-br from-orange-500 via-orange-400 to-yellow-400 rounded-2xl shadow-xl p-4 sm:p-5 mb-4 text-white overflow-hidden relative">
+              {/* Decorative Background Pattern */}
+              <div className="absolute top-0 right-0 opacity-10">
+                <Bike size={200} className="transform rotate-12" />
               </div>
+              
+              <div className="relative z-10">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h2 className="text-xl sm:text-2xl font-bold mb-1">
+                      Welcome Back! 👋
+                    </h2>
+                    <p className="text-white/90 text-xs sm:text-sm">
+                      Here's your chairperson dashboard overview
+                    </p>
+                  </div>
+                  <div className="hidden sm:block bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2">
+                    <Calendar size={18} />
+                  </div>
+                </div>
 
-              {/* Role Selector — always visible */}
-              <div className="border-t pt-4">
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Active Role
-                </label>
-                <select
-                  value={selectedAssignment?.id || ''}
-                  onChange={(e) => {
-                    const assignment = allAssignments.find(a => a.id === e.target.value);
-                    if (assignment) {
-                      setSelectedAssignment(assignment);
-                      setMyCommitteeInfo(assignment);
-                      // Stage chairpersons manage riders, not subordinate chairpersons
-                      if (assignment.region_type === 'stage') {
-                        setActiveTab('riders');
+                {/* Quick Stats Row */}
+                <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-4">
+                  <div className="bg-white/20 backdrop-blur-sm rounded-xl p-2 sm:p-3">
+                    <MapPin size={16} className="mb-1" />
+                    <p className="text-lg sm:text-xl font-bold">{allAssignments.length}</p>
+                    <p className="text-[9px] sm:text-[10px] text-white/80">Active Role{allAssignments.length !== 1 ? 's' : ''}</p>
+                  </div>
+                  <div className="bg-white/20 backdrop-blur-sm rounded-xl p-2 sm:p-3">
+                    <Users size={16} className="mb-1" />
+                    <p className="text-lg sm:text-xl font-bold">{stats.totalSubordinates}</p>
+                    <p className="text-[9px] sm:text-[10px] text-white/80">Chairpersons</p>
+                  </div>
+                  {riders.length > 0 && (
+                    <div className="bg-white/20 backdrop-blur-sm rounded-xl p-2 sm:p-3">
+                      <Bike size={16} className="mb-1" />
+                      <p className="text-lg sm:text-xl font-bold">{riders.length}</p>
+                      <p className="text-[9px] sm:text-[10px] text-white/80">Riders</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Enhanced Role Selector */}
+                <div className="bg-white/15 backdrop-blur-md rounded-xl p-3 border border-white/20">
+                  <label className="block text-xs font-semibold text-white mb-1.5 flex items-center gap-2">
+                    <Settings size={14} />
+                    Active Role
+                  </label>
+                  <select
+                    value={selectedAssignment?.id || ''}
+                    onChange={(e) => {
+                      const assignment = allAssignments.find(a => a.id === e.target.value);
+                      if (assignment) {
+                        setSelectedAssignment(assignment);
+                        setMyCommitteeInfo(assignment);
+                        if (assignment.region_type === 'stage') {
+                          setActiveTab('riders');
+                        }
                       }
-                    }
-                  }}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white text-slate-800"
-                >
-                  {allAssignments.map((assignment, idx) => {
-                    const isTop     = idx === 0;
-                    const isVirtual = assignment.id.startsWith('virtual-');
-                    const prefix    = isTop ? '★ ' : '└ ';
-                    const suffix    = isVirtual ? ' (access via top role)' : '';
-                    return (
-                      <option key={assignment.id} value={assignment.id}>
-                        {prefix}{formatRole(assignment.role)}{suffix}
-                      </option>
-                    );
-                  })}
-                </select>
-                <p className="text-xs text-slate-500 mt-1">
-                  Select a role to manage its subordinates and riders
-                </p>
+                    }}
+                    className="w-full px-3 py-2 border-0 rounded-xl focus:ring-2 focus:ring-white/50 bg-white/90 text-slate-800 font-medium shadow-sm backdrop-blur-sm text-sm"
+                  >
+                    {allAssignments.map((assignment, idx) => {
+                      const isTop     = idx === 0;
+                      const isVirtual = assignment.id.startsWith('virtual-');
+                      const prefix    = isTop ? '⭐ ' : '└ ';
+                      const suffix    = isVirtual ? ' (access via top role)' : '';
+                      return (
+                        <option key={assignment.id} value={assignment.id}>
+                          {prefix}{formatRole(assignment.role)}{suffix}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <p className="text-[10px] text-white/70 mt-1.5 flex items-center gap-1">
+                    <span>💡</span>
+                    Select a role to manage its subordinates and riders
+                  </p>
+                </div>
               </div>
             </div>
 
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
-              {/* Total Assignments */}
-              <div className="bg-white rounded-xl shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">My Roles</p>
-                    <p className="text-3xl font-bold text-slate-800">{stats.totalAssignments}</p>
+            {/* Enhanced Stats Grid with Modern Design */}
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 mb-4">
+              {/* Total Assignments Card */}
+              <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
+                <div className="flex flex-col items-center text-center">
+                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
+                    <MapPin size={14} />
                   </div>
-                  <div className="bg-purple-100 p-3 rounded-lg">
-                    <MapPin className="text-purple-600" size={24} />
-                  </div>
+                  <p className="text-white/80 text-[10px] font-medium">My Roles</p>
+                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.totalAssignments}</p>
+                  <p className="text-[9px] text-white/70">Active</p>
                 </div>
               </div>
-              {/* Total Subordinates */}
-              <div className="bg-white rounded-xl shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Total Chairpersons</p>
-                    <p className="text-3xl font-bold text-slate-800">{stats.totalSubordinates}</p>
+
+              {/* Total Subordinates Card */}
+              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
+                <div className="flex flex-col items-center text-center">
+                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
+                    <Users size={14} />
                   </div>
-                  <div className="bg-blue-100 p-3 rounded-lg">
-                    <Users className="text-blue-600" size={24} />
+                  <p className="text-white/80 text-[10px] font-medium">Total</p>
+                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.totalSubordinates}</p>
+                  <div className="flex items-center gap-1 text-[9px] text-white/70">
+                    <span className="w-1 h-1 bg-green-300 rounded-full"></span>
+                    <span>{stats.activeSubordinates}</span>
                   </div>
                 </div>
               </div>
 
-              {/* Active Subordinates */}
-              <div className="bg-white rounded-xl shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Active</p>
-                    <p className="text-3xl font-bold text-green-600">{stats.activeSubordinates}</p>
+              {/* Commission Rate Card */}
+              <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
+                <div className="flex flex-col items-center text-center">
+                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
+                    <DollarSign size={14} />
                   </div>
-                  <div className="bg-green-100 p-3 rounded-lg">
-                    <TrendingUp className="text-green-600" size={24} />
-                  </div>
+                  <p className="text-white/80 text-[10px] font-medium">Commission</p>
+                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.totalCommission.toFixed(1)}%</p>
+                  <p className="text-[9px] text-white/70">Avg rate</p>
                 </div>
               </div>
 
-              {/* Commission Rate */}
-              <div className="bg-white rounded-xl shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Commission Rate</p>
-                    <p className="text-3xl font-bold text-orange-600">{stats.totalCommission}%</p>
+              {/* Monthly Rides Card */}
+              <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
+                <div className="flex flex-col items-center text-center">
+                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
+                    <Bike size={14} />
                   </div>
-                  <div className="bg-orange-100 p-3 rounded-lg">
-                    <DollarSign className="text-orange-600" size={24} />
-                  </div>
+                  <p className="text-white/80 text-[10px] font-medium">Rides</p>
+                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.monthlyRides}</p>
+                  <p className="text-[9px] text-white/70">Monthly</p>
                 </div>
               </div>
 
-              {/* Monthly Rides */}
-              <div className="bg-white rounded-xl shadow p-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-slate-600 mb-1">Monthly Rides</p>
-                    <p className="text-3xl font-bold text-purple-600">{stats.monthlyRides}</p>
+              {/* Active Status Card */}
+              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
+                <div className="flex flex-col items-center text-center">
+                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
+                    <TrendingUp size={14} />
                   </div>
-                  <div className="bg-purple-100 p-3 rounded-lg">
-                    <Bike className="text-purple-600" size={24} />
-                  </div>
+                  <p className="text-white/80 text-[10px] font-medium">Active</p>
+                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.activeSubordinates}</p>
+                  <p className="text-[9px] text-white/70">
+                    {stats.totalSubordinates > 0 
+                      ? `${((stats.activeSubordinates / stats.totalSubordinates) * 100).toFixed(0)}%`
+                      : '0%'}
+                  </p>
                 </div>
               </div>
 
-              {/* ICAN Coins */}
+              {/* ICAN Coins Card */}
               <IcanCoinCard userId={user?.id} onGoToWallet={() => (window.location.href = '/ican-wallet')} />
+            </div>
+
+            {/* Quick Actions Section */}
+            <div className="flex flex-col items-center gap-2 sm:gap-3 mb-4">
+              {/* Quick Action: Manage Subordinates */}
+              <div className="bg-white rounded-xl shadow-lg p-2 border-2 border-slate-100 hover:border-orange-300 transition-all inline-flex items-center gap-2">
+                <div className="bg-orange-100 p-1.5 rounded-lg flex-shrink-0">
+                  <Users className="text-orange-600" size={18} />
+                </div>
+                <div className="flex-shrink-0">
+                  <h3 className="text-sm font-bold text-slate-800 leading-none">Manage Chairpersons</h3>
+                  <p className="text-[10px] text-slate-600">View and assign</p>
+                </div>
+                <button
+                  onClick={() => setActiveTab('subordinates')}
+                  className="px-2.5 py-1 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center gap-1 text-xs flex-shrink-0"
+                >
+                  <span>Go</span>
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+
+              {/* Quick Action: Manage Riders */}
+              {allAssignments.some(a => a.region_type === 'stage') && (
+                <div className="bg-white rounded-xl shadow-lg p-2 border-2 border-slate-100 hover:border-green-300 transition-all inline-flex items-center gap-2">
+                  <div className="bg-green-100 p-1.5 rounded-lg flex-shrink-0">
+                    <Bike className="text-green-600" size={18} />
+                  </div>
+                  <div className="flex-shrink-0">
+                    <h3 className="text-sm font-bold text-slate-800 leading-none">Manage Riders</h3>
+                    <p className="text-[10px] text-slate-600">View and assign</p>
+                  </div>
+                  <button
+                    onClick={() => setActiveTab('riders')}
+                    className="px-2.5 py-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center gap-1 text-xs flex-shrink-0"
+                  >
+                    <span>Go</span>
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              )}
+
+              {/* Quick Action: Commission */}
+              <div className="bg-white rounded-xl shadow-lg p-2 border-2 border-slate-100 hover:border-purple-300 transition-all inline-flex items-center gap-2">
+                <div className="bg-purple-100 p-1.5 rounded-lg flex-shrink-0">
+                  <DollarSign className="text-purple-600" size={18} />
+                </div>
+                <div className="flex-shrink-0">
+                  <h3 className="text-sm font-bold text-slate-800 leading-none">Commission</h3>
+                  <p className="text-[10px] text-slate-600">Track earnings</p>
+                </div>
+                <button
+                  onClick={() => setActiveTab('commission')}
+                  className="px-2.5 py-1 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center gap-1 text-xs flex-shrink-0"
+                >
+                  <span>Go</span>
+                  <ChevronRight size={14} />
+                </button>
+              </div>
             </div>
           </>
         )}
 
         {activeTab === 'subordinates' && (
-        <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
-          <h2 className="text-2xl font-bold text-slate-800 mb-2">
-            Welcome, Chairperson!
-          </h2>
-          <div className="flex items-center gap-2 text-slate-600 mb-4">
-            <MapPin size={18} />
-            <span>{allAssignments.length} Active Role{allAssignments.length !== 1 ? 's' : ''}</span>
-            <span className="text-slate-400">•</span>
-            <span>Managing {stats.totalSubordinates} Chairperson{stats.totalSubordinates !== 1 ? 's' : ''}</span>
-            {riders.length > 0 && (
-              <>
-                <span className="text-slate-400">•</span>
-                <span>{riders.length} Rider{riders.length !== 1 ? 's' : ''}</span>
-              </>
-            )}
-          </div>
-
-          {/* Role Selector — always visible */}
-          <div className="border-t pt-4">
-            <label className="block text-sm font-medium text-slate-700 mb-2">
-              Active Role
-            </label>
-            <select
-              value={selectedAssignment?.id || ''}
-              onChange={(e) => {
-                const assignment = allAssignments.find(a => a.id === e.target.value);
-                if (assignment) {
-                  setSelectedAssignment(assignment);
-                  setMyCommitteeInfo(assignment);
-                  // Stage chairpersons manage riders, not subordinate chairpersons
-                  if (assignment.region_type === 'stage') {
-                    setActiveTab('riders');
-                  }
-                }
-              }}
-              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white text-slate-800"
-            >
-              {allAssignments.map((assignment, idx) => {
-                const isTop     = idx === 0;
-                const isVirtual = assignment.id.startsWith('virtual-');
-                const prefix    = isTop ? '★ ' : '└ ';
-                const suffix    = isVirtual ? ' (access via top role)' : '';
-                return (
-                  <option key={assignment.id} value={assignment.id}>
-                    {prefix}{formatRole(assignment.role)}{suffix}
-                  </option>
-                );
-              })}
-            </select>
-            <p className="text-xs text-slate-500 mt-1">
-              Select a role to manage its subordinates and riders
-            </p>
-          </div>
-        </div>
-        )}
-
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-          {/* Total Assignments */}
-          <div className="bg-white rounded-xl shadow p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-600 mb-1">My Roles</p>
-                <p className="text-3xl font-bold text-slate-800">{stats.totalAssignments}</p>
+          <>
+            {/* Enhanced Header Section with Gradient */}
+            <div className="bg-gradient-to-br from-blue-500 via-blue-400 to-indigo-500 rounded-xl shadow-xl p-3 mb-3 text-white relative overflow-hidden">
+              {/* Decorative Background */}
+              <div className="absolute top-0 right-0 opacity-10">
+                <Users size={120} className="transform rotate-12" />
               </div>
-              <div className="bg-purple-100 p-3 rounded-lg">
-                <MapPin className="text-purple-600" size={24} />
+              
+              <div className="relative z-10">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <Users size={24} />
+                    <div>
+                      <h2 className="text-lg sm:text-xl font-bold leading-none">Your Chairpersons</h2>
+                      <p className="text-white/90 text-[10px] sm:text-xs">
+                        {selectedAssignment ? `Managing ${formatRegionType(selectedAssignment.region_type)} level` : 'Select a role to manage'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {selectedAssignment?.region_type !== 'stage' && (
+                    <button
+                      onClick={() => setShowAssignModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all shadow-lg font-semibold text-xs flex-shrink-0"
+                    >
+                      <UserPlus size={16} />
+                      <span>Assign</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Stats Row */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <Users size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">{stats.totalSubordinates}</p>
+                    <p className="text-[9px] text-white/80">Total</p>
+                  </div>
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <Check size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">{stats.activeSubordinates}</p>
+                    <p className="text-[9px] text-white/80">Active</p>
+                  </div>
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <TrendingUp size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">
+                      {stats.totalSubordinates > 0 ? `${((stats.activeSubordinates / stats.totalSubordinates) * 100).toFixed(0)}%` : '0%'}
+                    </p>
+                    <p className="text-[9px] text-white/80">Rate</p>
+                  </div>
+                </div>
+
+                {/* Role Selector */}
+                <div className="bg-white/15 backdrop-blur-md rounded-lg p-2 border border-white/20 mt-3">
+                  <label className="block text-[10px] font-semibold text-white mb-1 flex items-center gap-1">
+                    <Settings size={12} />
+                    Active Role
+                  </label>
+                  <select
+                    value={selectedAssignment?.id || ''}
+                    onChange={(e) => {
+                      const assignment = allAssignments.find(a => a.id === e.target.value);
+                      if (assignment) {
+                        setSelectedAssignment(assignment);
+                        setMyCommitteeInfo(assignment);
+                        if (assignment.region_type === 'stage') {
+                          setActiveTab('riders');
+                        }
+                      }
+                    }}
+                    className="w-full px-2 py-1.5 border-0 rounded-lg focus:ring-2 focus:ring-white/50 bg-white/90 text-slate-800 font-medium shadow-sm text-xs"
+                  >
+                    {allAssignments.map((assignment, idx) => {
+                      const isTop     = idx === 0;
+                      const isVirtual = assignment.id.startsWith('virtual-');
+                      const prefix    = isTop ? '⭐ ' : '└ ';
+                      const suffix    = isVirtual ? ' (access via top role)' : '';
+                      return (
+                        <option key={assignment.id} value={assignment.id}>
+                          {prefix}{formatRole(assignment.role)}{suffix}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
               </div>
             </div>
-          </div>
-          {/* Total Subordinates */}
-          <div className="bg-white rounded-xl shadow p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-600 mb-1">Total Chairpersons</p>
-                <p className="text-3xl font-bold text-slate-800">{stats.totalSubordinates}</p>
-              </div>
-              <div className="bg-blue-100 p-3 rounded-lg">
-                <Users className="text-blue-600" size={24} />
-              </div>
-            </div>
-          </div>
 
-          {/* Active Subordinates */}
-          <div className="bg-white rounded-xl shadow p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-600 mb-1">Active</p>
-                <p className="text-3xl font-bold text-green-600">{stats.activeSubordinates}</p>
-              </div>
-              <div className="bg-green-100 p-3 rounded-lg">
-                <TrendingUp className="text-green-600" size={24} />
-              </div>
-            </div>
-          </div>
-
-          {/* Commission Rate */}
-          <div className="bg-white rounded-xl shadow p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-600 mb-1">Commission Rate</p>
-                <p className="text-3xl font-bold text-orange-600">{stats.totalCommission}%</p>
-              </div>
-              <div className="bg-orange-100 p-3 rounded-lg">
-                <DollarSign className="text-orange-600" size={24} />
-              </div>
-            </div>
-          </div>
-
-          {/* Monthly Rides */}
-          <div className="bg-white rounded-xl shadow p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-slate-600 mb-1">Monthly Rides</p>
-                <p className="text-3xl font-bold text-purple-600">{stats.monthlyRides}</p>
-              </div>
-              <div className="bg-purple-100 p-3 rounded-lg">
-                <Bike className="text-purple-600" size={24} />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {activeTab === 'subordinates' && (
-          /* Higher-level Chairperson - Manage Subordinates */
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-xl font-bold text-slate-800">Your Chairpersons</h3>
-                <p className="text-sm text-slate-600">
-                  {selectedAssignment ? `Managing ${formatRegionType(selectedAssignment.region_type)} level` : 'Select a role'}
-                </p>
-              </div>
-              {selectedAssignment?.region_type !== 'stage' && (
-                <button
-                  onClick={() => setShowAssignModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
-                >
-                  <UserPlus size={18} />
-                  <span className="hidden sm:inline">Assign Chairperson</span>
-                  <span className="sm:hidden">Assign</span>
-                </button>
-              )}
-            </div>
-
+            {/* Chairpersons List */}
             {selectedAssignment?.region_type === 'stage' ? (
-              <div className="text-center py-12">
-                <Bike className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+              <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl shadow-lg p-12 text-center border-2 border-dashed border-slate-300">
+                <div className="bg-white rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4 shadow-md">
+                  <Bike className="w-10 h-10 text-blue-500" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">Switch to Riders</h3>
                 <p className="text-slate-600 mb-2">Stage chairpersons don't assign subordinate chairpersons</p>
-                <p className="text-sm text-slate-500 mb-4">As a stage chairperson, you manage riders instead</p>
+                <p className="text-sm text-slate-500 mb-6">As a stage chairperson, you manage riders instead</p>
                 <button
                   onClick={() => setActiveTab('riders')}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl hover:shadow-lg transition-all font-semibold"
                 >
-                  <Bike size={18} />
+                  <Bike size={20} />
                   Go to Riders
                 </button>
               </div>
             ) : subordinates.length === 0 ? (
-              <div className="text-center py-12">
-                <Users className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-600 mb-2">No chairpersons assigned yet</p>
-                <p className="text-sm text-slate-500">Click "Assign Chairperson" to add your first subordinate</p>
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {subordinates.map((subordinate) => (
-                <div
-                  key={subordinate.id}
-                  className="flex items-center justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                      {subordinate.full_name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <h4 className="font-semibold text-slate-800">{subordinate.full_name}</h4>
-                      <p className="text-sm text-slate-600">{subordinate.email}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
-                          {formatRole(subordinate.role)}
-                        </span>
-                        <span className="text-xs text-slate-500">{subordinate.region_name}</span>
-                        <span className={`text-xs px-2 py-1 rounded ${
-                          subordinate.is_active 
-                            ? 'bg-green-100 text-green-700' 
-                            : 'bg-red-100 text-red-700'
-                        }`}>
-                          {subordinate.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right">
-                      <p className="text-sm text-slate-600">Commission</p>
-                      <p className="font-semibold text-orange-600">{subordinate.commission_rate}%</p>
-                    </div>
-                    <ChevronRight className="text-slate-400" size={20} />
-                  </div>
+              <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl shadow-lg p-8 text-center border-2 border-slate-200">
+                <div className="bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3 shadow-md">
+                  <Users className="w-8 h-8 text-blue-400" />
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-        )}
-
-        {activeTab === 'riders' && allAssignments.some(a => a.region_type === 'stage') && (
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-xl font-bold text-slate-800">Your Riders</h3>
-                <p className="text-sm text-slate-600">
-                  From {allAssignments.filter(a => a.region_type === 'stage').length} stage assignment{allAssignments.filter(a => a.region_type === 'stage').length !== 1 ? 's' : ''}
-                </p>
-              </div>
-              {selectedAssignment?.region_type === 'stage' && (
-                <button 
-                  onClick={() => setShowAssignRiderModal(true)}
-                  className="flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                <h3 className="text-lg font-bold text-slate-800 mb-1">No Chairpersons Yet</h3>
+                <p className="text-slate-600 mb-1 text-sm">Start building your team</p>
+                <p className="text-xs text-slate-500 mb-4">Click "Assign" to add your first subordinate chairperson</p>
+                <button
+                  onClick={() => setShowAssignModal(true)}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-lg hover:shadow-lg transition-all font-semibold text-sm"
                 >
-                  <UserPlus size={18} />
-                  <span className="hidden sm:inline">Assign Rider</span>
-                  <span className="sm:hidden">Assign</span>
+                  <UserPlus size={16} />
+                  Assign First Chairperson
                 </button>
-              )}
-            </div>
-
-            {riders.length === 0 ? (
-              <div className="text-center py-12">
-                <Bike className="w-16 h-16 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-600 mb-2">No riders assigned yet</p>
-                <p className="text-sm text-slate-500">
-                  {selectedAssignment?.region_type === 'stage' 
-                    ? 'Click "Assign Rider" to add your first rider' 
-                    : 'Select a stage assignment to assign riders'}
-                </p>
               </div>
             ) : (
-              <div className="space-y-3">
-                {riders.map((rider) => (
+              <div className="space-y-2">
+                {subordinates.map((subordinate, index) => (
                   <div
-                    key={rider.id}
-                    className="flex items-center justify-between p-4 bg-slate-50 rounded-lg hover:bg-slate-100 transition-colors"
+                    key={subordinate.id}
+                    className="group bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border-2 border-slate-100 hover:border-blue-300"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="w-12 h-12 bg-gradient-to-br from-green-400 to-blue-400 rounded-full flex items-center justify-center text-white font-bold text-lg">
-                        {rider.full_name.charAt(0).toUpperCase()}
-                      </div>
-                      <div>
-                        <h4 className="font-semibold text-slate-800">{rider.full_name}</h4>
-                        <p className="text-sm text-slate-600">{rider.email}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded capitalize">
-                            {rider.vehicle_type}
-                          </span>
-                          <span className="text-xs text-slate-500">{rider.plate_number}</span>
-                          <span className={`text-xs px-2 py-1 rounded ${
-                            rider.status === 'active'
-                              ? 'bg-green-100 text-green-700'
-                              : rider.status === 'pending'
-                              ? 'bg-yellow-100 text-yellow-700'
-                              : 'bg-red-100 text-red-700'
-                          }`}>
-                            {rider.status}
-                          </span>
+                    <div className="flex items-center gap-2 p-2">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        {/* Avatar with Gradient */}
+                        <div className="relative flex-shrink-0">
+                          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-500 rounded-lg flex items-center justify-center text-white font-bold text-base shadow-lg transform group-hover:scale-110 transition-transform">
+                            {subordinate.full_name.charAt(0).toUpperCase()}
+                          </div>
+                          {/* Status Indicator */}
+                          <div className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
+                            subordinate.is_active ? 'bg-green-500' : 'bg-red-500'
+                          } shadow-md`}></div>
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-bold text-slate-800 text-sm mb-0.5 truncate leading-none">
+                            {subordinate.full_name}
+                          </h4>
+                          <p className="text-xs text-slate-600 mb-1 truncate">{subordinate.email}</p>
+                          
+                          {/* Badges */}
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="inline-flex items-center gap-0.5 text-[10px] bg-gradient-to-r from-blue-500 to-indigo-500 text-white px-2 py-0.5 rounded-full font-medium">
+                              <User size={10} />
+                              {formatRole(subordinate.role)}
+                            </span>
+                            <span className="inline-flex items-center gap-0.5 text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-medium">
+                              <MapPin size={10} />
+                              {subordinate.region_name}
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p className="text-sm text-slate-600">Rating</p>
-                        <p className="font-semibold text-orange-600">⭐ {rider.rating.toFixed(1)}</p>
+
+                      {/* Commission & Arrow */}
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <div className="text-center bg-gradient-to-br from-orange-50 to-yellow-50 px-2 py-1 rounded-lg border border-orange-200">
+                          <p className="text-[9px] text-slate-600 font-medium">Rate</p>
+                          <p className="text-base font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent leading-none">
+                            {subordinate.commission_rate}%
+                          </p>
+                        </div>
+                        <ChevronRight className="text-slate-300 group-hover:text-blue-500 transition-colors" size={16} />
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm text-slate-600">Rides</p>
-                        <p className="font-semibold text-slate-800">{rider.completed_rides}</p>
-                      </div>
-                      <ChevronRight className="text-slate-400" size={20} />
                     </div>
                   </div>
                 ))}
               </div>
             )}
-          </div>
+          </>
+        )}
+
+        {activeTab === 'riders' && allAssignments.some(a => a.region_type === 'stage') && (
+          <>
+            {/* Enhanced Header Section with Green Gradient */}
+            <div className="bg-gradient-to-br from-green-500 via-emerald-500 to-teal-500 rounded-xl shadow-xl p-3 mb-3 text-white relative overflow-hidden">
+              {/* Decorative Background */}
+              <div className="absolute top-0 right-0 opacity-10">
+                <Bike size={120} className="transform -rotate-12" />
+              </div>
+              
+              <div className="relative z-10">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <Bike size={24} />
+                    <div>
+                      <h2 className="text-lg sm:text-xl font-bold leading-none">Your Riders</h2>
+                      <p className="text-white/90 text-[10px] sm:text-xs">
+                        From {allAssignments.filter(a => a.region_type === 'stage').length} stage assignment{allAssignments.filter(a => a.region_type === 'stage').length !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  {selectedAssignment?.region_type === 'stage' && (
+                    <button 
+                      onClick={() => setShowAssignRiderModal(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-green-600 rounded-lg hover:bg-green-50 transition-all shadow-lg font-semibold text-xs flex-shrink-0"
+                    >
+                      <UserPlus size={16} />
+                      <span>Assign</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Quick Stats Row */}
+                <div className="grid grid-cols-4 gap-2">
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <Bike size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">{riders.length}</p>
+                    <p className="text-[9px] text-white/80">Total</p>
+                  </div>
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <Check size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">
+                      {riders.filter(r => r.status === 'active').length}
+                    </p>
+                    <p className="text-[9px] text-white/80">Active</p>
+                  </div>
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <Calendar size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">
+                      {riders.filter(r => r.status === 'pending').length}
+                    </p>
+                    <p className="text-[9px] text-white/80">Pending</p>
+                  </div>
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <TrendingUp size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">
+                      {riders.reduce((sum, r) => sum + (r.completed_rides || 0), 0)}
+                    </p>
+                    <p className="text-[9px] text-white/80">Rides</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Riders List */}
+            {riders.length === 0 ? (
+              <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl shadow-lg p-8 text-center border-2 border-slate-200">
+                <div className="bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3 shadow-md">
+                  <Bike className="w-8 h-8 text-green-400" />
+                </div>
+                <h3 className="text-lg font-bold text-slate-800 mb-1">No Riders Yet</h3>
+                <p className="text-slate-600 mb-1 text-sm">
+                  {selectedAssignment?.region_type === 'stage' 
+                    ? 'Start building your rider network' 
+                    : 'Select a stage assignment to manage riders'}
+                </p>
+                <p className="text-xs text-slate-500 mb-4">
+                  {selectedAssignment?.region_type === 'stage' 
+                    ? 'Click "Assign" to add your first rider' 
+                    : 'Switch to a stage role to assign riders'}
+                </p>
+                {selectedAssignment?.region_type === 'stage' && (
+                  <button
+                    onClick={() => setShowAssignRiderModal(true)}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-lg hover:shadow-lg transition-all font-semibold text-sm"
+                  >
+                    <UserPlus size={16} />
+                    Assign First Rider
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {riders.map((rider) => (
+                  <div
+                    key={rider.id}
+                    className="group bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border-2 border-slate-100 hover:border-green-300"
+                  >
+                    <div className="flex items-center gap-2 p-2">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        {/* Avatar with Gradient */}
+                        <div className="relative flex-shrink-0">
+                          <div className="w-10 h-10 bg-gradient-to-br from-green-500 via-emerald-500 to-teal-500 rounded-lg flex items-center justify-center text-white font-bold text-base shadow-lg transform group-hover:scale-110 transition-transform">
+                            {rider.full_name.charAt(0).toUpperCase()}
+                          </div>
+                          {/* Status Indicator */}
+                          <div className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white shadow-md ${
+                            rider.status === 'active' ? 'bg-green-500' : 
+                            rider.status === 'pending' ? 'bg-yellow-500' : 'bg-red-500'
+                          }`}></div>
+                        </div>
+
+                        {/* Info */}
+                        <div className="flex-1 min-w-0">
+                          <h4 className="font-bold text-slate-800 text-sm mb-0.5 truncate leading-none">
+                            {rider.full_name}
+                          </h4>
+                          <p className="text-xs text-slate-600 mb-1 truncate">{rider.email}</p>
+                          
+                          {/* Badges */}
+                          <div className="flex flex-wrap items-center gap-1">
+                            <span className="inline-flex items-center gap-0.5 text-[10px] bg-gradient-to-r from-green-500 to-emerald-500 text-white px-2 py-0.5 rounded-full font-medium capitalize">
+                              <Bike size={10} />
+                              {rider.vehicle_type}
+                            </span>
+                            <span className="inline-flex items-center text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-medium uppercase">
+                              {rider.plate_number}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Rating & Rides */}
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <div className="text-center bg-gradient-to-br from-yellow-50 to-orange-50 px-2 py-1 rounded-lg border border-yellow-200">
+                          <p className="text-xs font-bold text-orange-600 leading-none">⭐ {rider.rating.toFixed(1)}</p>
+                          <p className="text-[9px] text-slate-600">{rider.completed_rides}</p>
+                        </div>
+                        <ChevronRight className="text-slate-300 group-hover:text-green-500 transition-colors" size={16} />
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
         {activeTab === 'commission' && (
-          /* Commission Summary */
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <h3 className="text-lg font-bold text-slate-800 mb-4">Commission Summary</h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center pb-3 border-b">
-                  <span className="text-slate-600">This Month</span>
-                  <span className="font-semibold text-slate-800">UGX 0</span>
+          <>
+            {/* Enhanced Header with Purple Gradient */}
+            <div className="bg-gradient-to-br from-purple-500 via-purple-400 to-pink-500 rounded-xl shadow-xl p-3 mb-3 text-white relative overflow-hidden">
+              {/* Decorative Background */}
+              <div className="absolute top-0 right-0 opacity-10">
+                <DollarSign size={120} className="transform rotate-12" />
+              </div>
+              
+              <div className="relative z-10">
+                <div className="flex items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-2">
+                    <DollarSign size={24} />
+                    <div>
+                      <h2 className="text-lg sm:text-xl font-bold leading-none">Commission Overview</h2>
+                      <p className="text-white/90 text-[10px] sm:text-xs">Track your earnings and rates</p>
+                    </div>
+                  </div>
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 flex-shrink-0">
+                    <CreditCard size={18} />
+                  </div>
                 </div>
-                <div className="flex justify-between items-center pb-3 border-b">
-                  <span className="text-slate-600">Last Month</span>
-                  <span className="font-semibold text-slate-800">UGX 0</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-slate-600">Total Earned</span>
-                  <span className="font-bold text-orange-600">UGX 0</span>
+
+                {/* Quick Stats Row */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <DollarSign size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">{stats.totalCommission.toFixed(1)}%</p>
+                    <p className="text-[9px] text-white/80">Avg Rate</p>
+                  </div>
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <Calendar size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">{stats.monthlyRides}</p>
+                    <p className="text-[9px] text-white/80">Rides</p>
+                  </div>
+                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
+                    <TrendingUp size={14} className="mx-auto mb-0.5" />
+                    <p className="text-base sm:text-lg font-bold leading-none">UGX 0</p>
+                    <p className="text-[9px] text-white/80">Earned</p>
+                  </div>
                 </div>
               </div>
-              <p className="text-xs text-slate-500 mt-4">
-                Commission tracking coming soon...
-              </p>
             </div>
 
-            <div className="bg-white rounded-xl shadow-lg p-6">
-              <h3 className="text-lg font-bold text-slate-800 mb-4">Recent Activity</h3>
-              <div className="space-y-3">
-                <p className="text-slate-600 text-center py-8">
-                  No recent activity
-                </p>
+            {/* Commission Cards Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+              {/* Commission Summary Card */}
+              <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-slate-100">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="bg-gradient-to-br from-purple-100 to-pink-100 p-3 rounded-xl">
+                    <BarChart3 className="text-purple-600" size={28} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-800">Commission Summary</h3>
+                    <p className="text-sm text-slate-600">Your earnings breakdown</p>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-blue-500 rounded-lg p-2">
+                        <Calendar className="text-white" size={20} />
+                      </div>
+                      <span className="text-slate-700 font-medium">This Month</span>
+                    </div>
+                    <span className="font-bold text-slate-800 text-lg">UGX 0</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl border border-purple-100">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-purple-500 rounded-lg p-2">
+                        <Calendar className="text-white" size={20} />
+                      </div>
+                      <span className="text-slate-700 font-medium">Last Month</span>
+                    </div>
+                    <span className="font-bold text-slate-800 text-lg">UGX 0</span>
+                  </div>
+                  
+                  <div className="flex justify-between items-center p-4 bg-gradient-to-r from-orange-50 to-yellow-50 rounded-xl border-2 border-orange-200">
+                    <div className="flex items-center gap-3">
+                      <div className="bg-gradient-to-r from-orange-500 to-yellow-500 rounded-lg p-2">
+                        <DollarSign className="text-white" size={20} />
+                      </div>
+                      <span className="text-slate-700 font-bold">Total Earned</span>
+                    </div>
+                    <span className="font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent text-xl">
+                      UGX 0
+                    </span>
+                  </div>
+                </div>
+
+                <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+                  <p className="text-sm text-amber-800 flex items-center gap-2">
+                    <span>💡</span>
+                    <span className="font-medium">Commission tracking coming soon...</span>
+                  </p>
+                </div>
               </div>
-              <p className="text-xs text-slate-500 mt-4">
-                Activity tracking coming soon...
-              </p>
+
+              {/* Recent Activity Card */}
+              <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-slate-100">
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="bg-gradient-to-br from-green-100 to-emerald-100 p-3 rounded-xl">
+                    <TrendingUp className="text-green-600" size={28} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-slate-800">Recent Activity</h3>
+                    <p className="text-sm text-slate-600">Latest transactions</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-center justify-center py-12">
+                  <div className="bg-slate-100 rounded-full w-16 h-16 flex items-center justify-center mb-4">
+                    <BarChart3 className="text-slate-400" size={32} />
+                  </div>
+                  <p className="text-slate-600 font-medium mb-2">No activity yet</p>
+                  <p className="text-sm text-slate-500 text-center max-w-xs">
+                    Your commission activity will appear here once rides start generating earnings
+                  </p>
+                </div>
+
+                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+                  <p className="text-sm text-blue-800 flex items-center gap-2">
+                    <span>📊</span>
+                    <span className="font-medium">Activity tracking coming soon...</span>
+                  </p>
+                </div>
+              </div>
             </div>
-          </div>
+
+            {/* Commission Rates by Assignment */}
+            <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-slate-100">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="bg-gradient-to-br from-orange-100 to-yellow-100 p-3 rounded-xl">
+                  <MapPin className="text-orange-600" size={28} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-bold text-slate-800">Commission Rates by Role</h3>
+                  <p className="text-sm text-slate-600">Your rates across different assignments</p>
+                </div>
+              </div>
+
+              {allAssignments.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-slate-500">No assignments found</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {allAssignments.map((assignment, index) => (
+                    <div
+                      key={assignment.id}
+                      className="group bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-5 border-2 border-slate-200 hover:border-orange-300 hover:shadow-lg transition-all"
+                    >
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="bg-white rounded-lg p-2 shadow-sm">
+                          <MapPin className="text-orange-500" size={20} />
+                        </div>
+                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                          index === 0 
+                            ? 'bg-orange-100 text-orange-700' 
+                            : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {index === 0 ? '⭐ Primary' : 'Secondary'}
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-slate-800 mb-1 capitalize">
+                        {formatRole(assignment.role)}
+                      </h4>
+                      <p className="text-sm text-slate-600 mb-3 capitalize">
+                        {formatRegionType(assignment.region_type)}
+                      </p>
+                      <div className="flex items-center justify-between pt-3 border-t border-slate-300">
+                        <span className="text-sm text-slate-600 font-medium">Commission</span>
+                        <span className="text-2xl font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
+                          {assignment.commission_rate}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
       </div>
 

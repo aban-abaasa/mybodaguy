@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --open",
+    "dev:clean": "taskkill /F /IM node.exe & vite --open",
     "build": "vite build",
     "lint": "tsc -p . -noEmit --pretty false && vite build",
     "db:init": "node backend/initialize_db.js",
