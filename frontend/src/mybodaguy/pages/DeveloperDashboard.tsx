@@ -3,11 +3,14 @@ import {
   Bike, Users, MapPin, DollarSign, Settings,
   TrendingUp, LogOut, Menu, X, Shield, Search,
   MessageSquare, RefreshCw, Globe, Lock, Trash2, Send, CheckCircle, Mail, Gift,
+  ShoppingBag, ChevronRight,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '../services/userService';
 import RegionsManagement from '../components/RegionsManagement';
 import IcanCoinCard from '../components/IcanCoinCard';
+import SupermarketProductManager from '../components/SupermarketProductManager';
+import { supabase } from '../services/supabaseClient';
 import {
   devListAllLandingMessages,
   devDeleteLandingMessage,
@@ -76,6 +79,7 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
     { id: 'users', label: 'Users', icon: Users },
     { id: 'regions', label: 'Regions', icon: MapPin },
     { id: 'commissions', label: 'Commissions', icon: DollarSign },
+    { id: 'supermarkets', label: 'Supermarkets', icon: ShoppingBag },
     { id: 'public-board', label: 'Public Board', icon: MessageSquare },
     { id: 'messages', label: 'Messages', icon: Mail },
     { id: 'settings', label: 'Settings', icon: Settings },
@@ -90,7 +94,7 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
             <div className="flex items-center gap-3">
               <Bike size={28} />
               <div>
-                <h1 className="text-xl font-bold">My Boda Guy</h1>
+                <h1 className="text-xl font-bold">BodaGo</h1>
                 <p className="text-xs opacity-90">Developer Panel</p>
               </div>
             </div>
@@ -142,6 +146,7 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
           {activeTab === 'users' && <UsersTab users={users} loading={loading} onReload={loadUsers} />}
           {activeTab === 'regions' && <RegionsManagement />}
           {activeTab === 'commissions' && <CommissionsTab />}
+          {activeTab === 'supermarkets' && <SupermarketsTab />}
           {activeTab === 'public-board' && <PublicBoardTab />}
           {activeTab === 'messages' && <MessagesTab />}
           {activeTab === 'settings' && <SettingsTab />}
@@ -168,7 +173,7 @@ function OverviewTab({ onSwitchToRegions, userId }: { onSwitchToRegions: () => v
         <Bike className="w-16 h-16 text-orange-500 mx-auto mb-4" />
         <h3 className="text-2xl font-bold text-slate-800 mb-2">Welcome to Developer Panel</h3>
         <p className="text-slate-600 mb-4">
-          You have full control over the My Boda Guy platform. Start by setting up geographic regions 
+          You have full control over the BodaGo platform. Start by setting up geographic regions 
           and assigning chairpersons.
         </p>
         <div className="flex flex-wrap gap-4 justify-center">
@@ -519,7 +524,7 @@ function MessagesTab() {
     if (!body || !selectedId || sending) return;
     setSending(true);
     try {
-      const msg = await sendChatMessage(selectedId, { senderRole: 'dev', senderName: 'My Boda Guy Team', body });
+      const msg = await sendChatMessage(selectedId, { senderRole: 'dev', senderName: 'BodaGo Team', body });
       setMessages((prev) => [...prev, msg]);
       setReply('');
     } catch (e) {
@@ -603,7 +608,7 @@ function MessagesTab() {
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleReply(); }}
-                placeholder="Reply as My Boda Guy Team…"
+                placeholder="Reply as BodaGo Team…"
                 className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
               />
               <button
@@ -722,7 +727,7 @@ function PublicBoardTab() {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Landing Page Messages</h2>
           <p className="text-sm text-slate-600 mt-1">
-            Community board messages posted from the My Boda Guy landing page.
+            Community board messages posted from the BodaGo landing page.
           </p>
         </div>
         <button
@@ -825,7 +830,7 @@ function PublicBoardTab() {
                       <div key={r.id} className={`flex items-start justify-between gap-2 rounded-lg px-3 py-2 ${r.sender_role === 'dev' ? 'bg-orange-50' : 'bg-slate-50'}`}>
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-xs font-semibold text-slate-800">{r.sender_role === 'dev' ? 'My Boda Guy Team' : (r.name || 'Website visitor')}</p>
+                            <p className="text-xs font-semibold text-slate-800">{r.sender_role === 'dev' ? 'BodaGo Team' : (r.name || 'Website visitor')}</p>
                             {r.reward_reason && (
                               <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
                                 🪙 Correct answer
@@ -893,7 +898,7 @@ function PublicBoardTab() {
                           value={replyDraft}
                           onChange={(e) => setReplyDraft(e.target.value)}
                           onKeyDown={(e) => { if (e.key === 'Enter') handleReply(m.id); }}
-                          placeholder="Reply as My Boda Guy Team…"
+                          placeholder="Reply as BodaGo Team…"
                           className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
                         />
                         <button
@@ -915,6 +920,135 @@ function PublicBoardTab() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+interface SupermarketRow {
+  id: string;
+  name: string;
+  location: string | null;
+  owner_user_id: string | null;
+}
+
+function SupermarketsTab() {
+  const [supermarkets, setSupermarkets] = useState<SupermarketRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<SupermarketRow | null>(null);
+  const [ownerEmail, setOwnerEmail] = useState('');
+  const [savingOwner, setSavingOwner] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('supermarkets')
+      .select('id, name, location, owner_user_id')
+      .order('name');
+    if (error) {
+      toast.error('Failed to load supermarkets');
+    } else {
+      setSupermarkets(data || []);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const assignOwner = async () => {
+    if (!selected || !ownerEmail.trim()) return;
+    setSavingOwner(true);
+    try {
+      const { data: authUsers, error: authError } = await supabase.rpc('get_all_auth_users');
+      if (authError) throw authError;
+      const match = (authUsers || []).find((u: any) => u.email?.toLowerCase() === ownerEmail.trim().toLowerCase());
+      if (!match) throw new Error('No user found with that email — they need to sign up first');
+
+      const { error } = await supabase
+        .from('supermarkets')
+        .update({ owner_user_id: match.id })
+        .eq('id', selected.id);
+      if (error) throw error;
+
+      toast.success(`${ownerEmail} can now manage ${selected.name}'s products`);
+      setOwnerEmail('');
+      load();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to assign owner');
+    } finally {
+      setSavingOwner(false);
+    }
+  };
+
+  if (selected) {
+    return (
+      <div>
+        <button
+          onClick={() => setSelected(null)}
+          className="text-sm text-orange-600 hover:text-orange-700 mb-4 flex items-center gap-1"
+        >
+          ← Back to Supermarkets
+        </button>
+
+        <div className="bg-slate-50 rounded-lg p-4 mb-6">
+          <p className="text-sm font-medium text-slate-700 mb-2">Store Owner Access</p>
+          <p className="text-xs text-slate-500 mb-3">
+            {selected.owner_user_id
+              ? 'This store already has an assigned owner. Enter a different email to reassign.'
+              : 'No owner assigned yet — this store has no self-service product manager.'}
+          </p>
+          <div className="flex gap-2">
+            <input
+              value={ownerEmail}
+              onChange={(e) => setOwnerEmail(e.target.value)}
+              placeholder="owner@example.com"
+              className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-400 outline-none"
+            />
+            <button
+              onClick={assignOwner}
+              disabled={savingOwner || !ownerEmail.trim()}
+              className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-medium hover:bg-orange-600 disabled:opacity-50"
+            >
+              {savingOwner ? 'Saving…' : 'Assign'}
+            </button>
+          </div>
+        </div>
+
+        <SupermarketProductManager supermarketId={selected.id} supermarketName={selected.name} />
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-slate-800 mb-6">Supermarkets</h2>
+      {loading ? (
+        <p className="text-center text-slate-400 py-10">Loading…</p>
+      ) : supermarkets.length === 0 ? (
+        <p className="text-center text-slate-500 py-10">No supermarkets found.</p>
+      ) : (
+        <div className="space-y-2">
+          {supermarkets.map((sm) => (
+            <button
+              key={sm.id}
+              onClick={() => setSelected(sm)}
+              className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 rounded-lg transition-colors text-left"
+            >
+              <div>
+                <p className="font-semibold text-slate-800">{sm.name}</p>
+                <p className="text-xs text-slate-500">{sm.location || 'No location set'}</p>
+                <p className="text-xs mt-0.5">
+                  {sm.owner_user_id ? (
+                    <span className="text-green-600">Owner assigned</span>
+                  ) : (
+                    <span className="text-slate-400">No owner — manage products directly</span>
+                  )}
+                </p>
+              </div>
+              <ChevronRight className="text-slate-400" size={18} />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -24,7 +24,7 @@ export default function SignInPage({ onBack }: SignInPageProps) {
         toast.success('Account created! Please check your email to verify.');
       } else {
         await authService.signIn(email, password);
-        toast.success('Welcome to My Boda Guy!');
+        toast.success('Welcome to BodaGo!');
       }
     } catch (error: any) {
       toast.error(error.message || 'Authentication failed');
@@ -67,7 +67,7 @@ export default function SignInPage({ onBack }: SignInPageProps) {
             <Bike size={40} className="text-white" />
           </div>
           <h1 className="text-3xl font-bold text-slate-800 mb-2">
-            {isSignUp ? 'Join My Boda Guy' : 'Welcome Back'}
+            {isSignUp ? 'Join BodaGo' : 'Welcome Back'}
           </h1>
           <p className="text-slate-600">
             {isSignUp ? 'Create your account to get started' : 'Sign in to continue'}

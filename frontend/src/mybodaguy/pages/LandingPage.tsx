@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Bike, MapPin, DollarSign, Users, Shield, TrendingUp, Globe, Lock, Send, User as UserIcon, Mail, ThumbsUp, X } from 'lucide-react';
+import { Bike, MapPin, DollarSign, Users, Shield, TrendingUp, Globe, Lock, Send, User as UserIcon, Mail, ThumbsUp, X, Car, Package, Plane } from 'lucide-react';
 import { authService } from '../services/authService';
 import { userService } from '../services/userService';
 import {
@@ -282,7 +282,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
               <Bike size={24} className="text-white" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold text-slate-800">My Boda Guy</h1>
+              <h1 className="text-2xl font-bold text-slate-800">BodaGo</h1>
               <p className="text-sm text-slate-600">Your Trusted Ride Partner</p>
             </div>
           </div>
@@ -309,7 +309,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
             onClick={onGetStarted}
             className="px-8 py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold text-lg rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-2xl"
           >
-            Join My Boda Guy Today
+            Join BodaGo Today
           </button>
         </div>
       </section>
@@ -317,7 +317,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
       {/* Features */}
       <section className="container mx-auto px-4 py-16">
         <h3 className="text-3xl font-bold text-center text-slate-800 mb-12">
-          Why Choose My Boda Guy?
+          Why Choose BodaGo?
         </h3>
         <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
           <FeatureCard
@@ -353,6 +353,39 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
         </div>
       </section>
 
+      {/* Beyond boda rides */}
+      <section className="container mx-auto px-4 py-16">
+        <div className="text-center mb-12 max-w-2xl mx-auto">
+          <span className="inline-block px-4 py-1.5 bg-orange-100 text-orange-600 text-xs font-bold uppercase tracking-wider rounded-full mb-4">
+            Coming soon
+          </span>
+          <h3 className="text-3xl font-bold text-slate-800 mb-3">
+            Beyond boda rides — going global.
+          </h3>
+          <p className="text-lg text-slate-600">
+            BodaGo is expanding past local motorcycle rides into a full logistics network:
+            private vehicle bookings, package shipping, and air travel.
+          </p>
+        </div>
+        <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+          <FeatureCard
+            icon={<Car className="text-orange-500" size={32} />}
+            title="Private Vehicles"
+            description="Book a car or van for longer trips and larger groups, not just a boda."
+          />
+          <FeatureCard
+            icon={<Package className="text-orange-500" size={32} />}
+            title="Global Shipping"
+            description="Send packages across town or across borders, with door-to-door tracking."
+          />
+          <FeatureCard
+            icon={<Plane className="text-orange-500" size={32} />}
+            title="Air Travel"
+            description="Book flights and air cargo alongside your everyday rides, all in one app."
+          />
+        </div>
+      </section>
+
       {/* How It Works */}
       <section className="container mx-auto px-4 py-16">
         <h3 className="text-3xl font-bold text-center text-slate-800 mb-12">
@@ -384,7 +417,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
             Ready to Get Started?
           </h3>
           <p className="text-xl text-slate-600 mb-8">
-            Join thousands of riders and customers using My Boda Guy every day
+            Join thousands of riders and customers using BodaGo every day
           </p>
           <button
             onClick={onGetStarted}
@@ -477,18 +510,18 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
                     <span className="flex items-center gap-2 text-sm font-medium text-slate-800">
                       <Lock className="h-4 w-4" /> Private
                     </span>
-                    <span className="mt-1 block text-xs leading-5 text-slate-500">Only you and the My Boda Guy team can see this.</span>
+                    <span className="mt-1 block text-xs leading-5 text-slate-500">Only you and the BodaGo team can see this.</span>
                   </span>
                 </label>
               </div>
             ) : identity ? (
               <p className="mt-4 text-xs leading-5 text-slate-500">
-                Messages here are public — anyone can see them, but the My Boda Guy team can remove any message.
+                Messages here are public — anyone can see them, but the BodaGo team can remove any message.
                 Connect your ICAN wallet from your dashboard to unlock private messages.
               </p>
             ) : (
               <p className="mt-4 text-xs leading-5 text-slate-500">
-                Messages here are public — anyone can see them, but the My Boda Guy team can remove any message.
+                Messages here are public — anyone can see them, but the BodaGo team can remove any message.
                 Sign in with an ICAN wallet to choose public or private for your own messages.
               </p>
             )}
@@ -541,11 +574,11 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
           <div>
             <p className="text-sm uppercase tracking-wide text-orange-500 font-semibold">Community board</p>
             <h3 className="mt-1 text-3xl font-bold text-slate-800">
-              Public questions from the My Boda Guy community.
+              Public questions from the BodaGo community.
             </h3>
           </div>
           <p className="max-w-2xl text-sm text-slate-600 md:text-right">
-            Anyone can read these. The My Boda Guy team can remove any message.
+            Anyone can read these. The BodaGo team can remove any message.
           </p>
         </div>
 
@@ -604,7 +637,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
                         <div className="flex items-center justify-between gap-2">
                           <div className="flex items-center gap-2">
                             <p className={`text-xs font-semibold ${r.sender_role === 'dev' ? 'text-orange-600' : 'text-slate-800'}`}>
-                              {r.sender_role === 'dev' ? 'My Boda Guy Team' : (r.name || 'Website visitor')}
+                              {r.sender_role === 'dev' ? 'BodaGo Team' : (r.name || 'Website visitor')}
                             </p>
                             {r.reward_reason && (
                               <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
@@ -741,7 +774,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
       {/* Footer */}
       <footer className="container mx-auto px-4 py-8 border-t border-slate-200">
         <div className="text-center text-slate-600">
-          <p>&copy; 2026 My Boda Guy. All rights reserved.</p>
+          <p>&copy; 2026 BodaGo. All rights reserved.</p>
           <p className="text-sm mt-2">Your Trusted Ride Partner in Uganda</p>
         </div>
       </footer>

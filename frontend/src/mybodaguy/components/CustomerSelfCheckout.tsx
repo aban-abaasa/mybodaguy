@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Camera, CameraOff, ScanLine, X, Plus, Minus, Trash2,
   ShoppingCart, CheckCircle, Loader, AlertCircle, Coins,
-  ReceiptText, QrCode,
+  ReceiptText, QrCode, Store,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../../services/supabaseClient';
@@ -13,6 +13,7 @@ import {
   ICAN_TO_UGX,
   type ICANBalance,
 } from '../services/icanWalletService';
+import ProductPicker, { CartLine } from './ProductPicker';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,13 @@ interface CheckoutReceipt {
 
 type ScannerState = 'idle' | 'scanning' | 'product_found' | 'cart' | 'checkout' | 'complete';
 type PaymentMethod = 'cash' | 'card' | 'mobile_money' | 'ican';
+type ShopMode = 'scan' | 'browse';
+
+interface SupermarketRow {
+  id: string;
+  name: string;
+  location: string | null;
+}
 
 // Extend Window for BarcodeDetector (not in standard TS lib yet)
 declare global {
@@ -88,12 +96,20 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [icanBalance, setIcanBalance] = useState<ICANBalance | null>(null);
   const [detectorSupported, setDetectorSupported] = useState(false);
 
+  // Browse-a-store mode — real inventory picker as an alternative to scanning
+  const [shopMode, setShopMode] = useState<ShopMode>('scan');
+  const [supermarkets, setSupermarkets] = useState<SupermarketRow[]>([]);
+  const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectorRef = useRef<any>(null);
   const rafRef = useRef<number>(0);
   const lastBarcodeRef = useRef('');
   const lastScanTimeRef = useRef(0);
+  // Tracks which cart product_ids came from the browse picker, so its
+  // onCartChange can resync just those lines without touching scanned items.
+  const browsedIdsRef = useRef<Set<string>>(new Set());
 
   // ── ICAN balance ─────────────────────────────────────────────────────────────
 
@@ -109,9 +125,26 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     setDetectorSupported('BarcodeDetector' in window);
   }, []);
 
+  // ── Supermarket list — the customer must pick one before scanning or
+  // browsing, so lookups/checkout are scoped to a real store, not left
+  // pre-selected to whichever store happened to load first ────────────────
+
+  useEffect(() => {
+    supabase
+      .from('supermarkets')
+      .select('id, name, location')
+      .eq('is_active', true)
+      .order('name')
+      .then(({ data }) => setSupermarkets(data || []));
+  }, []);
+
   // ── Camera start / stop ───────────────────────────────────────────────────
 
   const startCamera = useCallback(async () => {
+    if (!selectedSupermarketId) {
+      toast.error('Choose a store first');
+      return;
+    }
     setScanError('');
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
@@ -136,7 +169,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
         : 'Camera unavailable. Use manual barcode entry.');
       setState('idle');
     }
-  }, [detectorSupported]);
+  }, [detectorSupported, selectedSupermarketId]);
 
   const stopCamera = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -186,11 +219,18 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
 
   async function lookupProduct(scan: string) {
     if (!scan.trim()) return;
+    if (!selectedSupermarketId) {
+      toast.error('Choose a store first');
+      return;
+    }
     setLooking(true);
     setScanError('');
     setFoundProduct(null);
 
-    const { data, error } = await supabase.rpc('lookup_product_by_barcode', { p_scan: scan.trim() });
+    const { data, error } = await supabase.rpc('lookup_product_by_barcode', {
+      p_scan: scan.trim(),
+      p_supermarket_id: selectedSupermarketId,
+    });
 
     setLooking(false);
 
@@ -236,6 +276,36 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     setState('cart');
     toast.success(`${product.name} added to cart`);
   }
+
+  // Browse mode's ProductPicker manages its own quantities and reports the
+  // full line list on every change — merge those lines into the same cart
+  // used for scanning, without touching any scanned-in items. Same
+  // public.products.id underlies both paths, so no id translation needed.
+  const handleBrowseCartChange = useCallback((lines: CartLine[]) => {
+    setCart(prev => {
+      const nonBrowsed = prev.filter(i => !browsedIdsRef.current.has(i.product.product_id));
+      const browsedItems: CartItem[] = lines.map(l => ({
+        product: {
+          product_id: l.product.id,
+          name: l.product.name,
+          sku: l.product.sku || l.product.id,
+          barcode: '',
+          selling_price: Number(l.product.price_ugx),
+          tax_rate: l.product.tax_rate,
+          category_name: l.product.category || '',
+          brand: '',
+          images: l.product.image_url ? [{ url: l.product.image_url }] : null,
+          available_stock: l.product.stock_qty,
+          in_stock: l.product.stock_qty > 0,
+        },
+        quantity: l.qty,
+        line_total: Number(l.product.price_ugx) * l.qty,
+      }));
+      browsedIdsRef.current = new Set(lines.map(l => l.product.id));
+      return [...nonBrowsed, ...browsedItems];
+    });
+    if (lines.length > 0) setState(s => (s === 'idle' ? 'cart' : s));
+  }, []);
 
   function updateQty(productId: string, delta: number) {
     setCart(prev =>
@@ -387,8 +457,76 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       {/* ── Idle / Scan entry ──────────────────────────────────────────── */}
       {(state === 'idle' || state === 'product_found' || state === 'cart' || state === 'checkout') && (
         <>
+          {/* Store picker — required before scanning OR browsing, so lookups
+              and checkout are always scoped to a real, chosen supermarket */}
+          {state !== 'scanning' && (
+            <div className="bg-white rounded-2xl shadow-md p-4">
+              <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 flex items-center gap-1.5">
+                <Store size={13} /> Shopping at
+              </label>
+              <select
+                value={selectedSupermarketId}
+                onChange={e => setSelectedSupermarketId(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300"
+              >
+                <option value="">Choose your store…</option>
+                {supermarkets.map(sm => (
+                  <option key={sm.id} value={sm.id}>{sm.name}{sm.location ? ` — ${sm.location}` : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Scan vs Browse mode toggle */}
+          {state !== 'scanning' && (
+            <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
+              <button
+                onClick={() => setShopMode('scan')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  shopMode === 'scan' ? 'bg-white shadow text-slate-800' : 'text-slate-500'
+                }`}
+              >
+                <ScanLine size={15} /> Scan
+              </button>
+              <button
+                onClick={() => setShopMode('browse')}
+                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                  shopMode === 'browse' ? 'bg-white shadow text-slate-800' : 'text-slate-500'
+                }`}
+              >
+                <Store size={15} /> Browse Store
+              </button>
+            </div>
+          )}
+
+          {/* Browse-a-store panel — real inventory, no scanning needed */}
+          {shopMode === 'browse' && state !== 'scanning' && (
+            <div className="bg-white rounded-2xl shadow-md p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                  <Store className="text-orange-500" size={20} />
+                  Shop a Store
+                </h3>
+                {cart.length > 0 && (
+                  <button
+                    onClick={() => setState('cart')}
+                    className="flex items-center gap-1 text-sm text-orange-600 font-semibold"
+                  >
+                    <ShoppingCart size={16} />
+                    Cart ({cart.length})
+                  </button>
+                )}
+              </div>
+              {selectedSupermarketId ? (
+                <ProductPicker supermarketId={selectedSupermarketId} onCartChange={handleBrowseCartChange} />
+              ) : (
+                <p className="text-sm text-slate-400 text-center py-4">Choose a store above to see its products.</p>
+              )}
+            </div>
+          )}
+
           {/* Camera scanning panel */}
-          {state === 'scanning' || (
+          {shopMode === 'scan' && (state === 'scanning' || (
             <div className="bg-white rounded-2xl shadow-md p-5">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
@@ -406,10 +544,16 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                 )}
               </div>
 
+              {!selectedSupermarketId && (
+                <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
+                  Choose a store above before scanning.
+                </p>
+              )}
+
               {/* Camera button */}
               <button
                 onClick={startCamera}
-                disabled={looking}
+                disabled={looking || !selectedSupermarketId}
                 className="w-full flex items-center justify-center gap-3 py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all mb-3 disabled:opacity-50"
               >
                 <Camera size={22} />
@@ -423,12 +567,13 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                   placeholder="Type or paste barcode / SKU"
                   value={manualBarcode}
                   onChange={e => setManualBarcode(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && lookupProduct(manualBarcode)}
-                  className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300"
+                  onKeyDown={e => e.key === 'Enter' && selectedSupermarketId && lookupProduct(manualBarcode)}
+                  disabled={!selectedSupermarketId}
+                  className="flex-1 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-300 disabled:bg-slate-50 disabled:text-slate-400"
                 />
                 <button
                   onClick={() => lookupProduct(manualBarcode)}
-                  disabled={!manualBarcode.trim() || looking}
+                  disabled={!manualBarcode.trim() || looking || !selectedSupermarketId}
                   className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-semibold hover:bg-orange-600 disabled:opacity-40"
                 >
                   {looking ? <Loader size={16} className="animate-spin" /> : <QrCode size={16} />}
@@ -442,7 +587,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                 </div>
               )}
             </div>
-          )}
+          ))}
         </>
       )}
 
@@ -626,13 +771,13 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             </div>
           </div>
 
-          {/* Scan more */}
+          {/* Add more items — scan or keep browsing, depending on mode */}
           <div className="px-5 py-3 border-t border-slate-100">
             <button
-              onClick={() => { setState('idle'); startCamera(); }}
+              onClick={() => { setState('idle'); if (shopMode === 'scan') startCamera(); }}
               className="w-full py-2.5 border-2 border-dashed border-orange-300 text-orange-600 font-semibold rounded-xl hover:bg-orange-50 transition-colors text-sm flex items-center justify-center gap-2"
             >
-              <ScanLine size={16} /> Scan More Items
+              {shopMode === 'browse' ? <><Store size={16} /> Add More Items</> : <><ScanLine size={16} /> Scan More Items</>}
             </button>
           </div>
 
@@ -705,7 +850,9 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             <ShoppingCart className="text-orange-300" size={32} />
           </div>
           <h4 className="font-semibold text-slate-700 mb-1">Your cart is empty</h4>
-          <p className="text-sm text-slate-500">Scan a barcode to add items</p>
+          <p className="text-sm text-slate-500">
+            {shopMode === 'browse' ? 'Tap a product above to add it' : 'Scan a barcode to add items'}
+          </p>
         </div>
       )}
     </div>

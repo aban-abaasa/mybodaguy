@@ -1,15 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import * as React from 'react';
-import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package } from 'lucide-react';
+import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import { searchLocations, Location } from '../data/mockLocations';
 import { supabase } from '../services/supabaseClient';
 import { trackRideCall, trackUIInteraction } from '../../services/featureAnalyticsService';
+import RideCommsBar from './RideCommsBar';
+import ProductPicker, { CartLine } from './ProductPicker';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
 type DeliveryMode = 'supermarket' | 'normal';
 type PowerFilter = 'any' | 'electric' | 'fuel';
+type ModePreference = 'all' | 'normal' | 'vip' | 'discount' | 'return';
 
 interface MatchedRider {
   rider_id: string;
@@ -42,9 +45,14 @@ interface Supermarket {
 
 interface EnhancedRideRequestProps {
   customerId: string;
+  /** Locks the flow to 'ride' or 'delivery' and hides the toggle — used to
+   * keep "Book a Ride" and "Delivery" as separate tabs/experiences while
+   * both still run on this one real matching-engine implementation. Omit
+   * to show the toggle and let the customer switch freely. */
+  fixedServiceType?: ServiceType;
 }
 
-export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestProps) {
+export default function EnhancedRideRequest({ customerId, fixedServiceType }: EnhancedRideRequestProps) {
   const [pickup, setPickup] = useState('');
   const [dropoff, setDropoff] = useState('');
   const [pickupSuggestions, setPickupSuggestions] = useState<Location[]>([]);
@@ -59,14 +67,24 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
   const [rideStatus, setRideStatus] = useState<RideStatus | null>(null);
   const [waitingTimer, setWaitingTimer] = useState(30);
   const [rideId, setRideId] = useState<string | null>(null);
+  const [riderUserId, setRiderUserId] = useState<string | null>(null);
+  const [customerName, setCustomerName] = useState('Customer');
 
   // Service options — real vehicle/weather filters matched against riders' actual registered attributes
-  const [serviceType, setServiceType] = useState<ServiceType>('ride');
+  const [serviceType, setServiceType] = useState<ServiceType>(fixedServiceType || 'ride');
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('normal');
   const [supermarkets, setSupermarkets] = useState<Supermarket[]>([]);
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
+  const [deliveryCart, setDeliveryCart] = useState<CartLine[]>([]);
   const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
+  const [modePreference, setModePreference] = useState<ModePreference>('all');
+
+  // Clear any selected products once the customer leaves the supermarket
+  // delivery flow or switches stores, so a stale cart never gets submitted.
+  useEffect(() => {
+    if (deliveryMode !== 'supermarket' || !selectedSupermarketId) setDeliveryCart([]);
+  }, [serviceType, deliveryMode, selectedSupermarketId]);
 
   // Customer's own registered areas — merged into the location suggestions
   const [customerAreas, setCustomerAreas] = useState<Location[]>([]);
@@ -226,6 +244,34 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
     return () => clearInterval(interval);
   }, [rideId, rideStatus, selectedRider]);
 
+  // Resolve the rider's real auth user id (MatchedRider.rider_id is the
+  // mbg_riders row id, not the auth id) so RideCommsBar can address them.
+  useEffect(() => {
+    if (!selectedRider?.rider_id) {
+      setRiderUserId(null);
+      return;
+    }
+    supabase
+      .from('mbg_riders')
+      .select('user_id')
+      .eq('id', selectedRider.rider_id)
+      .maybeSingle()
+      .then(({ data }) => setRiderUserId(data?.user_id || null));
+  }, [selectedRider?.rider_id]);
+
+  useEffect(() => {
+    if (!customerId) return;
+    supabase
+      .from('mbg_users')
+      .select('email, mbg_user_profiles(full_name)')
+      .eq('id', customerId)
+      .maybeSingle()
+      .then(({ data }) => {
+        const name = (data as any)?.mbg_user_profiles?.[0]?.full_name || data?.email?.split('@')[0] || 'Customer';
+        setCustomerName(name);
+      });
+  }, [customerId]);
+
   const mergeSuggestions = (query: string): Location[] => {
     const q = query.toLowerCase();
     const personal = customerAreas.filter(
@@ -336,6 +382,9 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
         p_dropoff_lng: selectedDropoff!.coordinates.lng,
         p_power_type_requested: powerFilter === 'any' ? null : powerFilter,
         p_umbrella_requested: umbrellaRequired,
+        p_order_notes: deliveryCart.length > 0
+          ? deliveryCart.map(l => `${l.qty}x ${l.product.name}`).join(', ')
+          : null,
       });
 
       if (error) throw error;
@@ -450,6 +499,10 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
         pickup={selectedPickup!}
         dropoff={selectedDropoff!}
         onCancel={handleCancelRide}
+        rideId={rideId}
+        customerId={customerId}
+        customerName={customerName}
+        riderUserId={riderUserId}
       />
     );
   }
@@ -460,6 +513,10 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
         rider={selectedRider}
         pickup={selectedPickup!}
         dropoff={selectedDropoff!}
+        rideId={rideId}
+        customerId={customerId}
+        customerName={customerName}
+        riderUserId={riderUserId}
       />
     );
   }
@@ -498,7 +555,10 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
           )}
         </div>
 
-        {/* Service type */}
+        {/* Service type — hidden when the parent tab already fixes it, so
+            "Book a Ride" and "Delivery" stay separate instead of one
+            screen that toggles between both */}
+        {!fixedServiceType && (
         <div className="grid grid-cols-2 gap-2 mb-4">
           <button
             onClick={() => setServiceType('ride')}
@@ -517,6 +577,7 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
             <Package size={16} /> Delivery
           </button>
         </div>
+        )}
 
         {/* Delivery mode + supermarket picker */}
         {serviceType === 'delivery' && (
@@ -540,19 +601,65 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
               </button>
             </div>
             {deliveryMode === 'supermarket' && (
-              <select
-                value={selectedSupermarketId}
-                onChange={(e) => setSelectedSupermarketId(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-              >
-                <option value="">Select a registered supermarket…</option>
-                {supermarkets.map(sm => (
-                  <option key={sm.id} value={sm.id}>{sm.name} — {sm.location}</option>
-                ))}
-              </select>
+              <>
+                <select
+                  value={selectedSupermarketId}
+                  onChange={(e) => setSelectedSupermarketId(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                >
+                  <option value="">Select a registered supermarket…</option>
+                  {supermarkets.map(sm => (
+                    <option key={sm.id} value={sm.id}>{sm.name} — {sm.location}</option>
+                  ))}
+                </select>
+
+                {selectedSupermarketId && (
+                  <ProductPicker supermarketId={selectedSupermarketId} onCartChange={setDeliveryCart} />
+                )}
+              </>
             )}
           </div>
         )}
+
+        {/* Ride mode preference — filters matched riders by their real pricing mode */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-slate-700 mb-2">Ride Type</label>
+          <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
+            {(
+              [
+                { id: 'all' as ModePreference, label: 'All', icon: null, badge: null },
+                { id: 'normal' as ModePreference, label: 'Normal', icon: DollarSign, badge: '0%' },
+                { id: 'vip' as ModePreference, label: 'VIP', icon: Crown, badge: '+10%' },
+                { id: 'discount' as ModePreference, label: 'Discount', icon: Tag, badge: '-10%' },
+              ] as const
+            ).map(opt => {
+              const Icon = opt.icon;
+              const isSelected = modePreference === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => setModePreference(opt.id)}
+                  className={`flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg text-[10px] sm:text-xs font-semibold border-2 transition-all ${
+                    isSelected ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+                  }`}
+                >
+                  {Icon && <Icon size={14} />}
+                  <span>{opt.label}</span>
+                  {opt.badge && <span className="text-[9px] opacity-75">{opt.badge}</span>}
+                </button>
+              );
+            })}
+          </div>
+          <button
+            onClick={() => setModePreference(modePreference === 'return' ? 'all' : 'return')}
+            className={`mt-1.5 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[10px] sm:text-xs font-semibold border-2 transition-all ${
+              modePreference === 'return' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-200 text-slate-500'
+            }`}
+          >
+            <Home size={14} />
+            <span>Return (rider going home) — -30%</span>
+          </button>
+        </div>
 
         {/* Vehicle / weather filters — matched against riders' real registered attributes */}
         <div className="grid grid-cols-3 gap-2 mb-4">
@@ -702,40 +809,60 @@ export default function EnhancedRideRequest({ customerId }: EnhancedRideRequestP
       </div>
 
       {/* Matched Riders */}
-      {matchedRiders.length > 0 && (
-        <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg sm:text-xl font-bold text-slate-800">
-              Available Riders ({matchedRiders.length})
-            </h3>
-            <p className="text-xs sm:text-sm text-slate-600">
-              Sorted by best match
-            </p>
-          </div>
+      {matchedRiders.length > 0 && (() => {
+        const displayedRiders = modePreference === 'all'
+          ? matchedRiders
+          : matchedRiders.filter(r => r.mode === modePreference);
 
-          <VipDemandInsight riders={matchedRiders} />
+        return (
+          <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-800">
+                Available Riders ({displayedRiders.length})
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-600">
+                Sorted by best match
+              </p>
+            </div>
 
-          <div className="space-y-3">
-            {matchedRiders.map((rider) => (
-              <RiderCard
-                key={rider.rider_id}
-                rider={rider}
-                onRequest={handleRequestRide}
-                isSelected={selectedRider?.rider_id === rider.rider_id}
-              />
-            ))}
-          </div>
+            <VipDemandInsight riders={matchedRiders} />
 
-          {/* Algorithm Info */}
-          <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-800">
-              <strong>Real Matching:</strong> Riders are ranked by real registered areas they know,
-              real GPS distance, rating, and their own vehicle/mode. Riders who know your destination
-              area appear first — no simulated data.
-            </p>
+            {displayedRiders.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-slate-500 text-sm mb-3">
+                  No {modePreference} riders available right now.
+                </p>
+                <button
+                  onClick={() => setModePreference('all')}
+                  className="px-4 py-2 bg-orange-100 text-orange-700 rounded-lg text-sm font-semibold hover:bg-orange-200 transition-colors"
+                >
+                  Show All Modes
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {displayedRiders.map((rider) => (
+                  <RiderCard
+                    key={rider.rider_id}
+                    rider={rider}
+                    onRequest={handleRequestRide}
+                    isSelected={selectedRider?.rider_id === rider.rider_id}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Algorithm Info */}
+            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                <strong>Real Matching:</strong> Riders are ranked by real registered areas they know,
+                real GPS distance, rating, and their own vehicle/mode. Riders who know your destination
+                area appear first — no simulated data.
+              </p>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
@@ -1046,12 +1173,20 @@ function RiderOnTheWay({
   rider,
   pickup,
   dropoff,
-  onCancel
+  onCancel,
+  rideId,
+  customerId,
+  customerName,
+  riderUserId
 }: {
   rider: MatchedRider;
   pickup: Location;
   dropoff: Location;
   onCancel: () => void;
+  rideId: string | null;
+  customerId: string;
+  customerName: string;
+  riderUserId: string | null;
 }) {
   return (
     <div className="space-y-6">
@@ -1087,9 +1222,17 @@ function RiderOnTheWay({
               <span>•</span>
               <span>{rider.total_rides} completed rides</span>
             </div>
-            <div className="flex items-center gap-2">
-              <CallButton phone={rider.phone} label="Call Rider" className="flex-1 px-4 py-2" />
-            </div>
+            {rideId && riderUserId ? (
+              <RideCommsBar
+                rideId={rideId}
+                selfUserId={customerId}
+                selfName={customerName}
+                peerUserId={riderUserId}
+                peerName={rider.full_name}
+              />
+            ) : (
+              <CallButton phone={rider.phone} label="Call Rider" className="w-full px-4 py-2" />
+            )}
           </div>
         </div>
 
@@ -1163,11 +1306,19 @@ function RiderOnTheWay({
 function JourneyStarted({
   rider,
   pickup,
-  dropoff
+  dropoff,
+  rideId,
+  customerId,
+  customerName,
+  riderUserId
 }: {
   rider: MatchedRider;
   pickup: Location;
   dropoff: Location;
+  rideId: string | null;
+  customerId: string;
+  customerName: string;
+  riderUserId: string | null;
 }) {
   const [journeyTime, setJourneyTime] = React.useState(0);
 
@@ -1245,7 +1396,7 @@ function JourneyStarted({
         </div>
 
         {/* Rider Info */}
-        <div className="border-t border-slate-200 pt-6">
+        <div className="border-t border-slate-200 pt-6 space-y-4">
           <div className="flex items-center gap-4">
             <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-lg">
               {rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
@@ -1256,8 +1407,17 @@ function JourneyStarted({
                 {rider.vehicle_color} {rider.vehicle_type} • {rider.plate_number}
               </div>
             </div>
-            <CallButton phone={rider.phone} className="px-4 py-2" />
+            {!(rideId && riderUserId) && <CallButton phone={rider.phone} className="px-4 py-2" />}
           </div>
+          {rideId && riderUserId && (
+            <RideCommsBar
+              rideId={rideId}
+              selfUserId={customerId}
+              selfName={customerName}
+              peerUserId={riderUserId}
+              peerName={rider.full_name}
+            />
+          )}
         </div>
 
         {/* Fare */}
@@ -1317,7 +1477,7 @@ function JourneyCompleted({
             You've arrived safely at your destination
           </p>
           <p className="text-base sm:text-lg opacity-90">
-            Thanks for riding with My Boda Guy
+            Thanks for riding with BodaGo
           </p>
         </div>
       </div>

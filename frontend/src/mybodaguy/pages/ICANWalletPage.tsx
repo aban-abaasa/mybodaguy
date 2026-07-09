@@ -26,7 +26,7 @@ const TX_LABELS: Record<string, string> = {
 
 const APP_LABELS: Record<string, string> = {
   ican: 'ICAN', 'digital-city-era': 'Supermarket',
-  'farm-agent': 'AgriBone', mybodaguy: 'My Boda Guy',
+  'farm-agent': 'AgriBone', mybodaguy: 'BodaGo',
 };
 
 function formatDate(ts: string) {
@@ -230,7 +230,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Bike className="w-6 h-6 text-orange-300" />
-              <span className="text-white font-semibold text-sm">My Boda Guy — ICAN Wallet</span>
+              <span className="text-white font-semibold text-sm">BodaGo — ICAN Wallet</span>
             </div>
             <div className="flex gap-2">
               <button onClick={() => setBalanceHidden(h => !h)}

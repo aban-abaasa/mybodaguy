@@ -136,7 +136,7 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
               <div className="flex items-center gap-1.5 xs:gap-2 sm:gap-3">
                 <Bike size={18} className="xs:w-5 xs:h-5 sm:w-7 sm:h-7" />
                 <div>
-                  <h1 className="text-sm xs:text-base sm:text-xl font-bold leading-tight">My Boda Guy</h1>
+                  <h1 className="text-sm xs:text-base sm:text-xl font-bold leading-tight">BodaGo</h1>
                   <p className="text-[9px] xs:text-[10px] sm:text-xs opacity-90 hidden xs:block">Chairperson Dashboard</p>
                 </div>
               </div>
@@ -389,6 +389,10 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
                     if (assignment) {
                       setSelectedAssignment(assignment);
                       setMyCommitteeInfo(assignment);
+                      // Stage chairpersons manage riders, not subordinate chairpersons
+                      if (assignment.region_type === 'stage') {
+                        setActiveTab('riders');
+                      }
                     }
                   }}
                   className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white text-slate-800"
@@ -513,6 +517,10 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
                 if (assignment) {
                   setSelectedAssignment(assignment);
                   setMyCommitteeInfo(assignment);
+                  // Stage chairpersons manage riders, not subordinate chairpersons
+                  if (assignment.region_type === 'stage') {
+                    setActiveTab('riders');
+                  }
                 }
               }}
               className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 bg-white text-slate-800"
@@ -613,17 +621,32 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
                   {selectedAssignment ? `Managing ${formatRegionType(selectedAssignment.region_type)} level` : 'Select a role'}
                 </p>
               </div>
-              <button 
-                onClick={() => setShowAssignModal(true)}
-                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
-              >
-                <UserPlus size={18} />
-                <span className="hidden sm:inline">Assign Chairperson</span>
-                <span className="sm:hidden">Assign</span>
-              </button>
+              {selectedAssignment?.region_type !== 'stage' && (
+                <button
+                  onClick={() => setShowAssignModal(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+                >
+                  <UserPlus size={18} />
+                  <span className="hidden sm:inline">Assign Chairperson</span>
+                  <span className="sm:hidden">Assign</span>
+                </button>
+              )}
             </div>
 
-            {subordinates.length === 0 ? (
+            {selectedAssignment?.region_type === 'stage' ? (
+              <div className="text-center py-12">
+                <Bike className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                <p className="text-slate-600 mb-2">Stage chairpersons don't assign subordinate chairpersons</p>
+                <p className="text-sm text-slate-500 mb-4">As a stage chairperson, you manage riders instead</p>
+                <button
+                  onClick={() => setActiveTab('riders')}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+                >
+                  <Bike size={18} />
+                  Go to Riders
+                </button>
+              </div>
+            ) : subordinates.length === 0 ? (
               <div className="text-center py-12">
                 <Users className="w-16 h-16 text-slate-300 mx-auto mb-4" />
                 <p className="text-slate-600 mb-2">No chairpersons assigned yet</p>

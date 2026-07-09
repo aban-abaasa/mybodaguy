@@ -16,197 +16,22 @@ interface CustomerDashboardProps {
   onSignOut: () => void;
 }
 
-type TabType = 'overview' | 'book-ride' | 'shop' | 'orders' | 'areas' | 'rewards' | 'profile';
+// Delivery is its own tab, separate from Book a Ride — both render
+// EnhancedRideRequest (the one real matching-engine implementation) but each
+// locks it to a single fixedServiceType so Book a Ride never shows the
+// delivery toggle and vice versa.
+type TabType = 'overview' | 'book-ride' | 'shop' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'profile';
 
 const ALL_TABS = [
   { id: 'overview'  as TabType, label: 'Overview',  emoji: '🏠' },
   { id: 'book-ride' as TabType, label: 'Book a Ride', emoji: '🏍️' },
   { id: 'shop'      as TabType, label: 'Shop',      emoji: '🛒' },
+  { id: 'delivery'  as TabType, label: 'Delivery',  emoji: '📦' },
   { id: 'orders'    as TabType, label: 'Orders',    emoji: '📋' },
   { id: 'areas'     as TabType, label: 'My Areas',  emoji: '📍' },
   { id: 'rewards'   as TabType, label: 'Rewards',   emoji: '🎁' },
   { id: 'profile'   as TabType, label: 'Profile',   emoji: '👤' },
 ];
-
-// ── Delivery request form ─────────────────────────────────────────────────────
-const STORES = ['Shoprite', 'Carrefour', 'Quality Supermarket', 'Game', 'Capital Shoppers', 'Uchumi'];
-
-function CustomerDeliveryTab({ user }: { user: any }) {
-  const [view, setView]               = useState<'form' | 'list'>('list');
-  const [deliveries, setDeliveries]   = useState<any[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [submitting, setSubmitting]   = useState(false);
-  const [form, setForm]               = useState({
-    store: STORES[0], name: user?.email?.split('@')[0] || '',
-    phone: '', address: '', items: '', total: '',
-  });
-
-  const UID_TAG = `uid:${user?.id}`;
-
-  const loadMyOrders = async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from('mybodaguy_delivery_requests')
-      .select('id, supermarket_name, delivery_address, status, total_ugx, delivery_fee_ican, created_at')
-      .ilike('delivery_notes', `%${UID_TAG}%`)
-      .order('created_at', { ascending: false })
-      .limit(20);
-    setDeliveries(data || []);
-    setLoading(false);
-  };
-
-  useEffect(() => { loadMyOrders(); }, [user?.id]);
-
-  const submit = async () => {
-    if (!form.phone || !form.address || !form.items) {
-      alert('Please fill in phone, address and items.'); return;
-    }
-    setSubmitting(true);
-    try {
-      const total = Number(form.total) || 0;
-      const fee   = Math.max(3000, total * 0.05); // 5% delivery fee, min 3k UGX
-      const { error } = await supabase.from('mybodaguy_delivery_requests').insert({
-        supermarket_name:  form.store,
-        pickup_address:    form.store + ', Kampala',
-        customer_name:     form.name,
-        customer_phone:    form.phone,
-        delivery_address:  form.address,
-        delivery_notes:    UID_TAG,
-        items_summary:     form.items,
-        total_ugx:         total,
-        delivery_fee_ugx:  fee,
-        delivery_fee_ican: fee / 5000,
-        status:            'pending',
-      });
-      if (error) throw error;
-      setView('list');
-      setForm(f => ({ ...f, phone: '', address: '', items: '', total: '' }));
-      loadMyOrders();
-    } catch (e: any) {
-      alert(e.message || 'Could not place order');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const STATUS_COLOR: Record<string, string> = {
-    pending:    'bg-yellow-100 text-yellow-700',
-    assigned:   'bg-blue-100 text-blue-700',
-    picked_up:  'bg-cyan-100 text-cyan-700',
-    in_transit: 'bg-indigo-100 text-indigo-700',
-    delivered:  'bg-emerald-100 text-emerald-700',
-    cancelled:  'bg-red-100 text-red-700',
-  };
-
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-          <Package size={20} className="text-blue-500" /> Supermarket Delivery
-        </h3>
-        <div className="flex gap-2">
-          <button onClick={() => setView('list')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${view === 'list' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-            My Orders
-          </button>
-          <button onClick={() => setView('form')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${view === 'form' ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
-            + New Order
-          </button>
-        </div>
-      </div>
-
-      {view === 'form' ? (
-        <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 space-y-4">
-          <h4 className="font-semibold text-slate-700">Place Delivery Order</h4>
-          <div>
-            <label className="text-xs text-slate-500 font-medium mb-1 block">Store</label>
-            <select value={form.store} onChange={e => setForm(f => ({ ...f, store: e.target.value }))}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400">
-              {STORES.map(s => <option key={s}>{s}</option>)}
-            </select>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-slate-500 font-medium mb-1 block">Your Name</label>
-              <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="Full name" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-            </div>
-            <div>
-              <label className="text-xs text-slate-500 font-medium mb-1 block">Phone *</label>
-              <input value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))}
-                placeholder="+256..." className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-            </div>
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 font-medium mb-1 block">Delivery Address *</label>
-            <input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))}
-              placeholder="Street, area, landmark" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 font-medium mb-1 block">Items Needed *</label>
-            <textarea value={form.items} onChange={e => setForm(f => ({ ...f, items: e.target.value }))}
-              rows={3} placeholder="e.g. 2x milk 1L, 1x bread loaf, 3x eggs..."
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none" />
-          </div>
-          <div>
-            <label className="text-xs text-slate-500 font-medium mb-1 block">Estimated Total (UGX)</label>
-            <input type="number" value={form.total} onChange={e => setForm(f => ({ ...f, total: e.target.value }))}
-              placeholder="0" className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400" />
-          </div>
-          <div className="flex gap-3">
-            <button onClick={() => setView('list')} className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">
-              Cancel
-            </button>
-            <button onClick={submit} disabled={submitting}
-              className="flex-1 py-2.5 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-xl text-sm hover:opacity-90 disabled:opacity-50">
-              {submitting ? 'Placing…' : '🏍️ Place Order'}
-            </button>
-          </div>
-          <p className="text-xs text-center text-slate-400">Delivery fee: 5% of order total (min UGX 3,000) · Paid in ICAN coins</p>
-        </div>
-      ) : (
-        <>
-          <button onClick={loadMyOrders} className="text-xs text-orange-500 flex items-center gap-1 hover:opacity-80">
-            <RefreshCw size={12} /> Refresh
-          </button>
-          {loading ? (
-            <p className="text-slate-500 text-sm text-center py-8">Loading your orders…</p>
-          ) : deliveries.length === 0 ? (
-            <div className="bg-white rounded-xl p-10 text-center shadow-sm border border-slate-100">
-              <Package className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-              <p className="text-slate-500 text-sm">No delivery orders yet.</p>
-              <button onClick={() => setView('form')}
-                className="mt-4 px-5 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg text-sm font-medium">
-                Place Your First Order
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {deliveries.map(d => (
-                <div key={d.id} className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <p className="font-semibold text-slate-800 text-sm">🏪 {d.supermarket_name}</p>
-                      <p className="text-xs text-slate-400 mt-0.5">{d.delivery_address}</p>
-                    </div>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-semibold capitalize ${STATUS_COLOR[d.status] || 'bg-slate-100 text-slate-500'}`}>
-                      {d.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>{new Date(d.created_at).toLocaleDateString()}</span>
-                    <span className="font-medium text-slate-700">UGX {Number(d.total_ugx || 0).toLocaleString()}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
 
 // ── Rewards (ICAN wallet history) ─────────────────────────────────────────────
 function RewardsTab({ user }: { user: any }) {
@@ -373,7 +198,7 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               <div className="flex items-center gap-2">
                 <Bike size={22} />
                 <div>
-                  <p className="font-bold leading-none text-sm">My Boda Guy</p>
+                  <p className="font-bold leading-none text-sm">BodaGo</p>
                   <p className="text-[10px] opacity-75">Your Trusted Partner</p>
                 </div>
               </div>
@@ -386,31 +211,6 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
                   <LogOut size={14} />
                   <span className="hidden sm:inline text-sm">Sign Out</span>
                 </button>
-                {/* 3-dot mobile menu trigger */}
-                <div className="relative sm:hidden" ref={menuRef}>
-                  <button onClick={() => setMobileMenu(o => !o)}
-                    className="p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors">
-                    {mobileMenuOpen ? <X size={18} /> : <MoreVertical size={18} />}
-                  </button>
-
-                  {mobileMenuOpen && (
-                    <div className="absolute right-0 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
-                      {ALL_TABS.map(tab => (
-                        <button key={tab.id} onClick={() => switchTab(tab.id)}
-                          className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors text-left
-                            ${activeTab === tab.id ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'}`}>
-                          <span>{tab.emoji}</span>
-                          {tab.label}
-                          {activeTab === tab.id && <CheckCircle size={14} className="ml-auto text-orange-500" />}
-                        </button>
-                      ))}
-                      <button onClick={() => { window.location.href = '/ican-wallet'; setMobileMenu(false); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-violet-600 hover:bg-violet-50 border-t border-slate-100">
-                        <span>₡</span> ICAN Wallet
-                      </button>
-                    </div>
-                  )}
-                </div>
               </div>
             </div>
           </div>
@@ -438,16 +238,34 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
           </div>
         </div>
 
-        {/* Mobile active-tab indicator bar */}
-        <div className="sm:hidden bg-white border-b border-orange-100 px-4 py-2 flex items-center justify-between">
+        {/* Mobile active-tab indicator bar — the one and only mobile menu trigger */}
+        <div className="sm:hidden bg-white border-b border-orange-100 px-4 py-2 flex items-center justify-between relative" ref={menuRef}>
           <span className="text-sm font-semibold text-slate-700">
             {ALL_TABS.find(t => t.id === activeTab)?.emoji}{' '}
             {ALL_TABS.find(t => t.id === activeTab)?.label}
           </span>
           <button onClick={() => setMobileMenu(o => !o)}
             className="text-xs text-orange-500 font-medium flex items-center gap-1">
-            <MoreVertical size={14} /> Menu
+            {mobileMenuOpen ? <X size={14} /> : <MoreVertical size={14} />} Menu
           </button>
+
+          {mobileMenuOpen && (
+            <div className="absolute right-4 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
+              {ALL_TABS.map(tab => (
+                <button key={tab.id} onClick={() => switchTab(tab.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors text-left
+                    ${activeTab === tab.id ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'}`}>
+                  <span>{tab.emoji}</span>
+                  {tab.label}
+                  {activeTab === tab.id && <CheckCircle size={14} className="ml-auto text-orange-500" />}
+                </button>
+              ))}
+              <button onClick={() => { window.location.href = '/ican-wallet'; setMobileMenu(false); }}
+                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-violet-600 hover:bg-violet-50 border-t border-slate-100">
+                <span>₡</span> ICAN Wallet
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -505,7 +323,15 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
         {/* Book Ride */}
         {activeTab === 'book-ride' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-            <EnhancedRideRequest customerId={user?.id} />
+            <EnhancedRideRequest customerId={user?.id} fixedServiceType="ride" />
+          </div>
+        )}
+
+        {/* Delivery — same real matching-engine flow as Book a Ride, locked
+            to delivery so the two never mix */}
+        {activeTab === 'delivery' && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            <EnhancedRideRequest customerId={user?.id} fixedServiceType="delivery" />
           </div>
         )}
 
@@ -516,56 +342,46 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
           </div>
         )}
 
-        {/* Orders — rides + deliveries */}
+        {/* Orders — real mbg_rides history (rides booked via Book a Ride) */}
         {activeTab === 'orders' && (
-          <div className="space-y-5">
-            {/* Rides & point-to-point deliveries — real mbg_rides data */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <Bike size={16} className="text-orange-500" /> Rides &amp; Deliveries
-              </h3>
-              {ridesLoading ? (
-                <p className="text-slate-400 text-sm">Loading…</p>
-              ) : rides.length === 0 ? (
-                <div className="text-center py-8">
-                  <Clock className="w-10 h-10 text-slate-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">No rides or deliveries yet.</p>
-                  <button onClick={() => setActiveTab('book-ride')}
-                    className="mt-3 px-5 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg text-sm font-medium">
-                    Book a Ride or Delivery
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  {rides.map(r => (
-                    <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
-                      <div>
-                        <p className="font-medium text-slate-800 text-sm flex items-center gap-1.5">
-                          {r.service_type === 'delivery' ? <Package size={14} className="text-blue-500" /> : <Bike size={14} className="text-orange-500" />}
-                          {r.pickup_location} → {r.dropoff_location}
-                        </p>
-                        <p className="text-xs text-slate-400 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-slate-800 text-sm">UGX {(r.fare || 0).toLocaleString()}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(r.status)}`}>{r.status}</span>
-                      </div>
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+              <Bike size={16} className="text-orange-500" /> Rides &amp; Deliveries
+            </h3>
+            {ridesLoading ? (
+              <p className="text-slate-400 text-sm">Loading…</p>
+            ) : rides.length === 0 ? (
+              <div className="text-center py-8">
+                <Clock className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-400 text-sm">No rides or deliveries yet.</p>
+                <button onClick={() => setActiveTab('book-ride')}
+                  className="mt-3 px-5 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg text-sm font-medium">
+                  Book a Ride or Delivery
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {rides.map(r => (
+                  <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+                    <div>
+                      <p className="font-medium text-slate-800 text-sm flex items-center gap-1.5">
+                        {r.service_type === 'delivery' ? <Package size={14} className="text-blue-500" /> : <Bike size={14} className="text-orange-500" />}
+                        {r.pickup_location} → {r.dropoff_location}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Shop-for-me supermarket delivery orders */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <Package size={16} className="text-blue-500" /> Shop-For-Me Delivery Orders
-              </h3>
-              <CustomerDeliveryTab user={user} />
-            </div>
+                    <div className="text-right">
+                      <p className="font-bold text-slate-800 text-sm">UGX {(r.fare || 0).toLocaleString()}</p>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(r.status)}`}>{r.status}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
+        {/* Delivery — Shop-For-Me supermarket delivery orders (separate from ride Orders) */}
         {/* My Areas */}
         {activeTab === 'areas' && <CustomerAreaManager customerId={user?.id} />}
 
@@ -584,7 +400,7 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               </div>
               <div>
                 <p className="font-semibold text-slate-800">{user?.email}</p>
-                <p className="text-sm text-slate-500 flex items-center gap-1"><CheckCircle size={12} className="text-green-500" /> My Boda Guy Customer</p>
+                <p className="text-sm text-slate-500 flex items-center gap-1"><CheckCircle size={12} className="text-green-500" /> BodaGo Customer</p>
               </div>
             </div>
             <div className="space-y-2 text-sm">

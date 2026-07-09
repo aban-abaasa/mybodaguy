@@ -2,9 +2,11 @@ import { useState, useEffect, useCallback } from 'react';
 import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
+import RideCommsBar from './RideCommsBar';
 
 interface RideRow {
   id: string;
+  customer_id: string;
   service_type: 'ride' | 'delivery';
   delivery_mode: 'supermarket' | 'normal' | null;
   pickup_location: string;
@@ -16,13 +18,21 @@ interface RideRow {
   duration_minutes: number | null;
   power_type_requested: string | null;
   umbrella_requested: boolean;
+  order_notes: string | null;
   created_at: string;
+}
+
+interface CustomerContact {
+  userId: string;
+  name: string;
 }
 
 export default function RiderRideRequests({ riderId }: { riderId: string }) {
   const [riderRowId, setRiderRowId] = useState<string | null>(null);
   const [pending, setPending] = useState<RideRow | null>(null);
   const [active, setActive] = useState<RideRow | null>(null);
+  const [activeCustomer, setActiveCustomer] = useState<CustomerContact | null>(null);
+  const [selfName, setSelfName] = useState('Rider');
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
 
@@ -41,11 +51,35 @@ export default function RiderRideRequests({ riderId }: { riderId: string }) {
 
     setPending(pendingRow || null);
     setActive(activeRow || null);
-    setLoading(false);
+
+    if (activeRow?.customer_id) {
+      const { data: customer } = await supabase
+        .from('mbg_customers')
+        .select('user_id, mbg_users(email, mbg_user_profiles(full_name))')
+        .eq('id', activeRow.customer_id)
+        .maybeSingle();
+      const cUser = (customer as any)?.mbg_users;
+      const name = cUser?.mbg_user_profiles?.[0]?.full_name || cUser?.email?.split('@')[0] || 'Customer';
+      setActiveCustomer(customer ? { userId: (customer as any).user_id, name } : null);
+    } else {
+      setActiveCustomer(null);
+    }
   }, [riderId]);
 
   useEffect(() => {
-    load();
+    supabase
+      .from('mbg_users')
+      .select('email, mbg_user_profiles(full_name)')
+      .eq('id', riderId)
+      .maybeSingle()
+      .then(({ data }) => {
+        const name = (data as any)?.mbg_user_profiles?.[0]?.full_name || data?.email?.split('@')[0] || 'Rider';
+        setSelfName(name);
+      });
+  }, [riderId]);
+
+  useEffect(() => {
+    load().finally(() => setLoading(false));
     const interval = setInterval(load, 4000);
     return () => clearInterval(interval);
   }, [load]);
@@ -164,6 +198,17 @@ export default function RiderRideRequests({ riderId }: { riderId: string }) {
 
           <RideSummary ride={active} />
 
+          {activeCustomer && (
+            <RideCommsBar
+              rideId={active.id}
+              selfUserId={riderId}
+              selfName={selfName}
+              peerUserId={activeCustomer.userId}
+              peerName={activeCustomer.name}
+              className="mt-4"
+            />
+          )}
+
           {active.status === 'accepted' ? (
             <button
               onClick={startTrip}
@@ -235,6 +280,15 @@ function RideSummary({ ride }: { ride: RideRow }) {
           </span>
         )}
       </div>
+      {ride.order_notes && (
+        <div className="flex items-start gap-2 pt-1">
+          <Package size={16} className="text-orange-500 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="text-xs text-slate-400">Items to buy</p>
+            <p className="text-sm font-medium text-slate-700">{ride.order_notes}</p>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between pt-2 border-t border-slate-100">
         <span className="text-xs text-slate-400">Your earning</span>
         <span className="text-lg font-bold text-orange-600">

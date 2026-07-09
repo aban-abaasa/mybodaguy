@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User, Package, Bell } from 'lucide-react';
+import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User, Package, Bell, ChevronDown } from 'lucide-react';
+import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
 import SupermarketPartnership from '../components/SupermarketPartnership';
@@ -7,7 +8,6 @@ import ProfileModal from '../components/ProfileModal';
 import RiderICANEarnings from '../components/RiderICANEarnings';
 import SupermarketDeliveryPool from '../components/SupermarketDeliveryPool';
 import RiderRideRequests from '../components/RiderRideRequests';
-import IcanCoinCard from '../components/IcanCoinCard';
 import { supabase } from '../services/supabaseClient';
 
 interface RiderDashboardProps {
@@ -53,10 +53,152 @@ function useLiveLocationPing(userId: string | undefined) {
   }, [userId]);
 }
 
+// On/off slider for the rider's working time — toggles mbg_riders.is_available,
+// the same flag the matching engine (mbg_find_available_riders) filters on.
+function WorkingTimeToggle({ userId }: { userId: string }) {
+  const [isAvailable, setIsAvailable] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!userId) return;
+    supabase
+      .from('mbg_riders')
+      .select('is_available')
+      .eq('user_id', userId)
+      .maybeSingle()
+      .then(({ data }) => {
+        setIsAvailable(!!data?.is_available);
+        setLoaded(true);
+      });
+  }, [userId]);
+
+  const toggle = async () => {
+    const next = !isAvailable;
+    setIsAvailable(next);
+    setSaving(true);
+    const { error } = await supabase
+      .from('mbg_riders')
+      .update({ is_available: next, updated_at: new Date().toISOString() })
+      .eq('user_id', userId);
+    setSaving(false);
+    if (error) {
+      setIsAvailable(!next);
+      toast.error(error.message || 'Failed to update working status');
+    } else {
+      toast.success(next ? "You're online — customers can now request rides" : "You're offline — no new requests will come in");
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={isAvailable}
+      onClick={toggle}
+      disabled={!loaded || saving}
+      className={`w-full rounded-lg xs:rounded-xl shadow-md p-3 xs:p-4 sm:p-6 flex items-center justify-between gap-3 transition-colors disabled:opacity-60 ${
+        isAvailable ? 'bg-gradient-to-r from-green-500 to-emerald-500' : 'bg-white border-2 border-slate-200'
+      }`}
+    >
+      <span className="min-w-0 text-left">
+        <span className={`block font-bold text-xs xs:text-sm sm:text-lg ${isAvailable ? 'text-white' : 'text-slate-800'}`}>
+          {isAvailable ? "You're Online" : "You're Offline"}
+        </span>
+        <span className={`block text-[9px] xs:text-[11px] sm:text-sm truncate ${isAvailable ? 'text-white/80' : 'text-slate-500'}`}>
+          {isAvailable ? 'Accepting ride requests' : 'Turn on to start working'}
+        </span>
+      </span>
+      <span
+        className={`relative flex-shrink-0 w-11 h-6 xs:w-14 xs:h-8 rounded-full transition-colors ${
+          isAvailable ? 'bg-white/30' : 'bg-slate-300'
+        }`}
+      >
+        <span
+          className={`absolute top-0.5 xs:top-1 left-0.5 xs:left-1 w-5 h-5 xs:w-6 xs:h-6 rounded-full bg-white shadow-md transition-transform ${
+            isAvailable ? 'translate-x-5 xs:translate-x-6' : 'translate-x-0'
+          }`}
+        />
+      </span>
+    </button>
+  );
+}
+
+// Compact "UGX 45k" style formatting for the earnings stat card.
+function formatEarnings(amount: number): string {
+  if (amount >= 1_000_000) return `UGX ${(amount / 1_000_000).toFixed(1)}M`;
+  if (amount >= 1000) return `UGX ${Math.round(amount / 1000)}k`;
+  return `UGX ${Math.round(amount)}`;
+}
+
+interface RiderStats {
+  earningsTodayUGX: number;
+  ridesDone: number;
+  rating: number;
+  mode: string;
+}
+
+// Pulls real numbers for the overview stat cards straight from Supabase:
+// mbg_riders for rating/completed_rides/mode, mbg_rides for today's fares.
+function useRiderStats(userId: string | undefined) {
+  const [stats, setStats] = useState<RiderStats | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+
+    const load = async () => {
+      setLoading(true);
+      const { data: riderRow } = await supabase
+        .from('mbg_riders')
+        .select('id, rating, completed_rides, mode')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (!riderRow) {
+        if (!cancelled) {
+          setStats({ earningsTodayUGX: 0, ridesDone: 0, rating: 0, mode: 'normal' });
+          setLoading(false);
+        }
+        return;
+      }
+
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+
+      const { data: todaysRides } = await supabase
+        .from('mbg_rides')
+        .select('fare')
+        .eq('rider_id', riderRow.id)
+        .eq('status', 'completed')
+        .gte('completed_at', startOfToday.toISOString());
+
+      if (cancelled) return;
+      const earningsTodayUGX = (todaysRides || []).reduce((sum, r: any) => sum + (Number(r.fare) || 0), 0);
+
+      setStats({
+        earningsTodayUGX,
+        ridesDone: riderRow.completed_rides || 0,
+        rating: Number(riderRow.rating) || 0,
+        mode: riderRow.mode || 'normal',
+      });
+      setLoading(false);
+    };
+
+    load();
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  return { stats, loading };
+}
+
 export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [quickStartOpen, setQuickStartOpen] = useState(false);
+  const { stats: riderStats, loading: riderStatsLoading } = useRiderStats(user?.id);
 
   useLiveLocationPing(user?.id);
 
@@ -220,75 +362,89 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
       <div className="container mx-auto px-2 xs:px-3 sm:px-4 py-3 xs:py-4 sm:py-8">
         {activeTab === 'overview' && (
           <div className="space-y-4 sm:space-y-6">
-            {/* Stats Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 sm:gap-6">
+            {/* Working Time — online/offline slider */}
+            <WorkingTimeToggle userId={user.id} />
+
+            {/* Stats Cards — live from Supabase (mbg_riders / mbg_rides) */}
+            <div className="grid grid-cols-2 xs:gap-3 gap-2 sm:grid-cols-4 sm:gap-6">
               <StatCard
                 title="Today's Earnings"
-                value="UGX 45k"
+                value={riderStatsLoading ? '…' : formatEarnings(riderStats?.earningsTodayUGX || 0)}
                 icon={<DollarSign size={20} className="sm:w-6 sm:h-6" />}
                 color="green"
               />
               <StatCard
                 title="Rides Done"
-                value="8"
+                value={riderStatsLoading ? '…' : String(riderStats?.ridesDone ?? 0)}
                 icon={<Bike size={20} className="sm:w-6 sm:h-6" />}
                 color="blue"
               />
               <StatCard
                 title="Rating"
-                value="4.8 ⭐"
+                value={riderStatsLoading ? '…' : `${(riderStats?.rating ?? 0).toFixed(1)} ⭐`}
                 icon={<TrendingUp size={20} className="sm:w-6 sm:h-6" />}
                 color="yellow"
               />
               <StatCard
                 title="Mode"
-                value="Normal"
+                value={riderStatsLoading ? '…' : (riderStats?.mode || 'normal').replace(/^\w/, c => c.toUpperCase())}
                 icon={<Settings size={20} className="sm:w-6 sm:h-6" />}
                 color="purple"
               />
-              <IcanCoinCard userId={user?.id} onGoToWallet={() => (window.location.href = '/ican-wallet')} />
             </div>
 
             {/* ICAN Wallet Earnings */}
             <RiderICANEarnings user={user} />
 
-            {/* Quick Actions */}
-            <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
-              <h3 className="text-lg sm:text-xl font-bold text-slate-800 mb-3 sm:mb-4">Quick Start</h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                <button
-                  onClick={() => setActiveTab('requests')}
-                  className="p-4 sm:p-6 bg-gradient-to-br from-orange-100 to-yellow-100 rounded-xl border-2 border-orange-300 hover:border-orange-400 transition-all text-left"
-                >
-                  <Bell className="text-orange-600 mb-2 sm:mb-3" size={24} />
-                  <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Ride Requests</h4>
-                  <p className="text-xs text-slate-600">Accept real requests near you</p>
-                </button>
-                <button
-                  onClick={() => setActiveTab('mode')}
-                  className="p-4 sm:p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl border-2 border-purple-200 hover:border-purple-400 transition-all text-left"
-                >
-                  <Settings className="text-purple-500 mb-2 sm:mb-3" size={24} />
-                  <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Set Work Mode</h4>
-                  <p className="text-xs text-slate-600">VIP, Normal, Discount, or Return</p>
-                </button>
-                <button
-                  onClick={() => setActiveTab('locations')}
-                  className="p-4 sm:p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border-2 border-blue-200 hover:border-blue-400 transition-all text-left"
-                >
-                  <Map className="text-blue-500 mb-2 sm:mb-3" size={24} />
-                  <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Manage Areas</h4>
-                  <p className="text-xs text-slate-600">Mark locations you know well</p>
-                </button>
-                <button
-                  onClick={() => setActiveTab('partnerships')}
-                  className="p-4 sm:p-6 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border-2 border-orange-200 hover:border-orange-400 transition-all text-left"
-                >
-                  <ShoppingBag className="text-orange-500 mb-2 sm:mb-3" size={24} />
-                  <h4 className="font-bold text-sm sm:text-base text-slate-800 mb-1">Partnerships</h4>
-                  <p className="text-xs text-slate-600">Work for supermarkets</p>
-                </button>
-              </div>
+            {/* Quick Actions — collapsible, compact on small phones */}
+            <div className="bg-white rounded-lg xs:rounded-xl shadow-lg overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setQuickStartOpen(o => !o)}
+                className="w-full flex items-center justify-between p-3 xs:p-4 sm:p-6"
+              >
+                <h3 className="text-sm xs:text-base sm:text-xl font-bold text-slate-800">Quick Start</h3>
+                <ChevronDown
+                  size={18}
+                  className={`text-slate-400 transition-transform xs:w-5 xs:h-5 ${quickStartOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+              {quickStartOpen && (
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 xs:gap-3 sm:gap-4 px-3 xs:px-4 sm:px-6 pb-3 xs:pb-4 sm:pb-6">
+                  <button
+                    onClick={() => setActiveTab('requests')}
+                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-orange-100 to-yellow-100 rounded-lg xs:rounded-xl border-2 border-orange-300 hover:border-orange-400 transition-all text-left"
+                  >
+                    <Bell className="text-orange-600 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
+                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Ride Requests</h4>
+                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">Accept real requests near you</p>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('mode')}
+                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg xs:rounded-xl border-2 border-purple-200 hover:border-purple-400 transition-all text-left"
+                  >
+                    <Settings className="text-purple-500 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
+                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Set Work Mode</h4>
+                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">VIP, Normal, Discount, or Return</p>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('locations')}
+                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg xs:rounded-xl border-2 border-blue-200 hover:border-blue-400 transition-all text-left"
+                  >
+                    <Map className="text-blue-500 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
+                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Manage Areas</h4>
+                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">Mark locations you know well</p>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('partnerships')}
+                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg xs:rounded-xl border-2 border-orange-200 hover:border-orange-400 transition-all text-left"
+                  >
+                    <ShoppingBag className="text-orange-500 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
+                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Partnerships</h4>
+                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">Work for supermarkets</p>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
