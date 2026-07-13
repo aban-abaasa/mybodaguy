@@ -9,10 +9,15 @@ interface Supermarket {
   location: string;
   address: string | null;
   phone: string | null;
+  business_type: string;
   is_applied: boolean;
   application_id?: string;
   application_status?: 'pending' | 'approved' | 'rejected';
 }
+
+const BUSINESS_TYPE_EMOJI: Record<string, string> = {
+  supermarket: '🏪', hotel: '🏨', boutique: '👗', restaurant_cafe: '🍽️',
+};
 
 interface SupermarketPartnershipProps {
   riderId: string;
@@ -33,7 +38,7 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
       const [{ data: markets, error: marketsError }, { data: applications, error: appsError }] = await Promise.all([
         supabase
           .from('supermarkets')
-          .select('id, name, location, address, phone')
+          .select('id, name, location, address, phone, business_type')
           .eq('is_active', true)
           .order('name', { ascending: true }),
         supabase
@@ -56,6 +61,7 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
             location: sm.location,
             address: sm.address,
             phone: sm.phone,
+            business_type: sm.business_type || 'supermarket',
             is_applied: !!app,
             application_id: app?.id,
             application_status: app?.status,
@@ -249,7 +255,7 @@ function SupermarketCard({
             <ShoppingBag className="text-orange-500" size={24} />
           </div>
           <div>
-            <h4 className="font-bold text-slate-800">{supermarket.name}</h4>
+            <h4 className="font-bold text-slate-800">{BUSINESS_TYPE_EMOJI[supermarket.business_type] || '🏪'} {supermarket.name}</h4>
             <div className="flex items-center gap-1 text-sm text-slate-600">
               <MapPin size={14} />
               {supermarket.location}
@@ -307,7 +313,7 @@ function ApplicationCard({
             <ShoppingBag className="text-orange-500" size={24} />
           </div>
           <div className="flex-1">
-            <h4 className="font-bold text-slate-800">{supermarket.name}</h4>
+            <h4 className="font-bold text-slate-800">{BUSINESS_TYPE_EMOJI[supermarket.business_type] || '🏪'} {supermarket.name}</h4>
             <div className="flex items-center gap-1 text-sm text-slate-600">
               <MapPin size={14} />
               {supermarket.location}

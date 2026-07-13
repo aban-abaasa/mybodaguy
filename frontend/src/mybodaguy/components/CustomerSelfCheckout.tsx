@@ -57,7 +57,23 @@ interface SupermarketRow {
   id: string;
   name: string;
   location: string | null;
+  business_type: string;
 }
+
+// Store type filter — supermarkets, hotels, boutiques, and restaurants/cafés
+// all live in the same `supermarkets` table (business_type column), so this
+// is purely a client-side filter over the one list already loaded.
+type BusinessTypeFilter = 'all' | 'supermarket' | 'hotel' | 'boutique' | 'restaurant_cafe';
+
+const BUSINESS_TYPE_FILTERS: { value: BusinessTypeFilter; label: string; emoji: string }[] = [
+  { value: 'all', label: 'All', emoji: '🏬' },
+  { value: 'supermarket', label: 'Supermarkets', emoji: '🏪' },
+  { value: 'hotel', label: 'Hotels', emoji: '🏨' },
+  { value: 'boutique', label: 'Boutiques', emoji: '👗' },
+  { value: 'restaurant_cafe', label: 'Restaurants', emoji: '🍽️' },
+];
+
+const typeEmoji = (t: string) => BUSINESS_TYPE_FILTERS.find(f => f.value === t)?.emoji || '🏪';
 
 // Extend Window for BarcodeDetector (not in standard TS lib yet)
 declare global {
@@ -100,6 +116,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [shopMode, setShopMode] = useState<ShopMode>('scan');
   const [supermarkets, setSupermarkets] = useState<SupermarketRow[]>([]);
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
+  const [typeFilter, setTypeFilter] = useState<BusinessTypeFilter>('all');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -132,11 +149,25 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   useEffect(() => {
     supabase
       .from('supermarkets')
-      .select('id, name, location')
+      .select('id, name, location, business_type')
       .eq('is_active', true)
       .order('name')
       .then(({ data }) => setSupermarkets(data || []));
   }, []);
+
+  // Store list filtered by the chosen business type — reset the current
+  // selection if it no longer belongs to the active filter.
+  const filteredSupermarkets = typeFilter === 'all'
+    ? supermarkets
+    : supermarkets.filter(sm => sm.business_type === typeFilter);
+
+  useEffect(() => {
+    if (!selectedSupermarketId) return;
+    if (!filteredSupermarkets.some(sm => sm.id === selectedSupermarketId)) {
+      setSelectedSupermarketId('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [typeFilter]);
 
   // ── Camera start / stop ───────────────────────────────────────────────────
 
@@ -460,20 +491,42 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           {/* Store picker — required before scanning OR browsing, so lookups
               and checkout are always scoped to a real, chosen supermarket */}
           {state !== 'scanning' && (
-            <div className="bg-white rounded-2xl shadow-md p-4">
-              <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 flex items-center gap-1.5">
-                <Store size={13} /> Shopping at
-              </label>
-              <select
-                value={selectedSupermarketId}
-                onChange={e => setSelectedSupermarketId(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300"
-              >
-                <option value="">Choose your store…</option>
-                {supermarkets.map(sm => (
-                  <option key={sm.id} value={sm.id}>{sm.name}{sm.location ? ` — ${sm.location}` : ''}</option>
+            <div className="bg-white rounded-2xl shadow-md p-4 space-y-3">
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                {BUSINESS_TYPE_FILTERS.map(f => (
+                  <button
+                    key={f.value}
+                    type="button"
+                    onClick={() => setTypeFilter(f.value)}
+                    className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+                      typeFilter === f.value ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    <span>{f.emoji}</span> {f.label}
+                  </button>
                 ))}
-              </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 flex items-center gap-1.5">
+                  <Store size={13} /> Shopping at
+                </label>
+                <select
+                  value={selectedSupermarketId}
+                  onChange={e => setSelectedSupermarketId(e.target.value)}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300"
+                >
+                  <option value="">Choose your store…</option>
+                  {filteredSupermarkets.map(sm => (
+                    <option key={sm.id} value={sm.id}>
+                      {typeEmoji(sm.business_type)} {sm.name}{sm.location ? ` — ${sm.location}` : ''}
+                    </option>
+                  ))}
+                </select>
+                {filteredSupermarkets.length === 0 && (
+                  <p className="text-xs text-slate-400 mt-1.5">No stores of this type yet.</p>
+                )}
+              </div>
             </div>
           )}
 

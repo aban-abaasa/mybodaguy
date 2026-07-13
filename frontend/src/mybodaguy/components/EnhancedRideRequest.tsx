@@ -41,7 +41,25 @@ interface Supermarket {
   address: string | null;
   latitude: number | null;
   longitude: number | null;
+  business_type: string;
 }
+
+// Store type filter — supermarkets, hotels, boutiques, and restaurants/cafés
+// all live in the same `supermarkets` table (business_type column). The
+// delivery_mode value stays 'supermarket' regardless of the target's actual
+// business_type (see mbg_request_ride / mbg_rides CHECK constraint) — it
+// just means "structured store delivery scoped to a supermarket_id".
+type BusinessTypeFilter = 'all' | 'supermarket' | 'hotel' | 'boutique' | 'restaurant_cafe';
+
+const BUSINESS_TYPE_FILTERS: { value: BusinessTypeFilter; label: string; emoji: string }[] = [
+  { value: 'all', label: 'All', emoji: '🏬' },
+  { value: 'supermarket', label: 'Supermarkets', emoji: '🏪' },
+  { value: 'hotel', label: 'Hotels', emoji: '🏨' },
+  { value: 'boutique', label: 'Boutiques', emoji: '👗' },
+  { value: 'restaurant_cafe', label: 'Restaurants', emoji: '🍽️' },
+];
+
+const typeEmoji = (t: string) => BUSINESS_TYPE_FILTERS.find(f => f.value === t)?.emoji || '🏪';
 
 interface EnhancedRideRequestProps {
   customerId: string;
@@ -75,6 +93,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('normal');
   const [supermarkets, setSupermarkets] = useState<Supermarket[]>([]);
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
+  const [storeTypeFilter, setStoreTypeFilter] = useState<BusinessTypeFilter>('all');
   const [deliveryCart, setDeliveryCart] = useState<CartLine[]>([]);
   const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
@@ -101,7 +120,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
   useEffect(() => {
     supabase
       .from('supermarkets')
-      .select('id, name, location, address, latitude, longitude')
+      .select('id, name, location, address, latitude, longitude, business_type')
       .eq('is_active', true)
       .order('name', { ascending: true })
       .then(async ({ data, error }) => {
@@ -111,7 +130,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
           console.warn('[EnhancedRideRequest] supermarkets geo columns unavailable, falling back:', error.message);
           const fallback = await supabase
             .from('supermarkets')
-            .select('id, name, location, address')
+            .select('id, name, location, address, business_type')
             .eq('is_active', true)
             .order('name', { ascending: true });
           setSupermarkets((fallback.data || []).map((sm: any) => ({ ...sm, latitude: null, longitude: null })));
@@ -120,6 +139,20 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
         setSupermarkets(data || []);
       });
   }, []);
+
+  // Store list filtered by the chosen business type — reset the current
+  // selection if it no longer belongs to the active filter.
+  const filteredStores = storeTypeFilter === 'all'
+    ? supermarkets
+    : supermarkets.filter(sm => sm.business_type === storeTypeFilter);
+
+  useEffect(() => {
+    if (!selectedSupermarketId) return;
+    if (!filteredStores.some(sm => sm.id === selectedSupermarketId)) {
+      setSelectedSupermarketId('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeTypeFilter]);
 
   useEffect(() => {
     if (!customerId) return;
@@ -589,7 +622,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
                   deliveryMode === 'supermarket' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
                 }`}
               >
-                🏪 From a Supermarket
+                🏬 From a Store
               </button>
               <button
                 onClick={() => setDeliveryMode('normal')}
@@ -602,16 +635,33 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
             </div>
             {deliveryMode === 'supermarket' && (
               <>
+                <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                  {BUSINESS_TYPE_FILTERS.map(f => (
+                    <button
+                      key={f.value}
+                      onClick={() => setStoreTypeFilter(f.value)}
+                      className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+                        storeTypeFilter === f.value ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
+                      }`}
+                    >
+                      <span>{f.emoji}</span> {f.label}
+                    </button>
+                  ))}
+                </div>
+
                 <select
                   value={selectedSupermarketId}
                   onChange={(e) => setSelectedSupermarketId(e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
                 >
-                  <option value="">Select a registered supermarket…</option>
-                  {supermarkets.map(sm => (
-                    <option key={sm.id} value={sm.id}>{sm.name} — {sm.location}</option>
+                  <option value="">Select a store…</option>
+                  {filteredStores.map(sm => (
+                    <option key={sm.id} value={sm.id}>{typeEmoji(sm.business_type)} {sm.name} — {sm.location}</option>
                   ))}
                 </select>
+                {filteredStores.length === 0 && (
+                  <p className="text-xs text-slate-400">No stores of this type yet.</p>
+                )}
 
                 {selectedSupermarketId && (
                   <ProductPicker supermarketId={selectedSupermarketId} onCartChange={setDeliveryCart} />
