@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Bike, Mail, Lock, User, ArrowLeft } from 'lucide-react';
+import { Bike, Mail, Lock, User, Globe, ArrowLeft } from 'lucide-react';
 import { authService } from '../services/authService';
 import { toast } from 'sonner';
+import { COUNTRY_NAMES as COUNTRIES } from '../data/countries';
 
 interface SignInPageProps {
   onBack: () => void;
@@ -12,6 +13,7 @@ export default function SignInPage({ onBack }: SignInPageProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [country, setCountry] = useState('Uganda');
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -20,7 +22,7 @@ export default function SignInPage({ onBack }: SignInPageProps) {
 
     try {
       if (isSignUp) {
-        await authService.signUp(email, password, fullName);
+        await authService.signUp(email, password, fullName, country);
         toast.success('Account created! Please check your email to verify.');
       } else {
         await authService.signIn(email, password);
@@ -93,6 +95,26 @@ export default function SignInPage({ onBack }: SignInPageProps) {
                     required
                   />
                 </div>
+              </div>
+            )}
+
+            {isSignUp && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Country
+                </label>
+                <div className="relative">
+                  <Globe className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                  <select
+                    value={country}
+                    onChange={(e) => setCountry(e.target.value)}
+                    className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition-all appearance-none bg-white"
+                    required
+                  >
+                    {COUNTRIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <p className="text-xs text-slate-500 mt-1">Helps us match you with drivers and destination pickups in the right place.</p>
               </div>
             )}
 

@@ -356,16 +356,22 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
       {/* Beyond boda rides */}
       <section className="container mx-auto px-4 py-16">
         <div className="text-center mb-12 max-w-2xl mx-auto">
-          <span className="inline-block px-4 py-1.5 bg-orange-100 text-orange-600 text-xs font-bold uppercase tracking-wider rounded-full mb-4">
-            Coming soon
+          <span className="inline-block px-4 py-1.5 bg-green-100 text-green-700 text-xs font-bold uppercase tracking-wider rounded-full mb-4">
+            Now live
           </span>
           <h3 className="text-3xl font-bold text-slate-800 mb-3">
             Beyond boda rides — going global.
           </h3>
           <p className="text-lg text-slate-600">
-            BodaGo is expanding past local motorcycle rides into a full logistics network:
-            private vehicle bookings, package shipping, and air travel.
+            Book one continuous journey: a boda to the airport, a real flight, and a driver
+            waiting for you the moment you land — anywhere in the world.
           </p>
+          <button
+            onClick={onGetStarted}
+            className="mt-6 bg-orange-500 hover:bg-orange-600 text-white font-semibold px-6 py-3 rounded-lg transition-colors"
+          >
+            Book a journey
+          </button>
         </div>
         <div className="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
           <FeatureCard
@@ -381,7 +387,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
           <FeatureCard
             icon={<Plane className="text-orange-500" size={32} />}
             title="Air Travel"
-            description="Book flights and air cargo alongside your everyday rides, all in one app."
+            description="Book a real flight alongside your everyday rides — a driver picks you up automatically when you land, all in one app."
           />
         </div>
       </section>

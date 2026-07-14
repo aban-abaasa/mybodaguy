@@ -12,14 +12,18 @@ export const authService = {
     return data;
   },
 
-  // Sign up with email and password
-  async signUp(email: string, password: string, fullName?: string) {
+  // Sign up with email and password. country is asked at signup so
+  // cross-border matching (mbg_riders.operator_country/service_countries,
+  // mbg_user_profiles.country) has real data from day one instead of
+  // defaulting every account to Uganda.
+  async signUp(email: string, password: string, fullName?: string, country?: string) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         data: {
           full_name: fullName || '',
+          country: country || 'Uganda',
         },
       },
     });

@@ -7,6 +7,7 @@ import {
 import { supabase } from '../../services/supabaseClient';
 import { getBalance, getTransactions, type ICANBalance, type ICANTransaction } from '../services/icanWalletService';
 import EnhancedRideRequest from '../components/EnhancedRideRequest';
+import BecomeOperatorForm from '../components/BecomeOperatorForm';
 import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
 import IcanCoinCard from '../components/IcanCoinCard';
 import CustomerAreaManager from '../components/CustomerAreaManager';
@@ -19,8 +20,10 @@ interface CustomerDashboardProps {
 // Delivery is its own tab, separate from Book a Ride — both render
 // EnhancedRideRequest (the one real matching-engine implementation) but each
 // locks it to a single fixedServiceType so Book a Ride never shows the
-// delivery toggle and vice versa.
-type TabType = 'overview' | 'book-ride' | 'shop' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'profile';
+// delivery toggle and vice versa. Book a Journey is inbuilt into Book a
+// Ride itself (a mode toggle inside EnhancedRideRequest, showJourneyOption)
+// rather than its own tab.
+type TabType = 'overview' | 'book-ride' | 'shop' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'become-operator' | 'profile';
 
 const ALL_TABS = [
   { id: 'overview'  as TabType, label: 'Overview',  emoji: '🏠' },
@@ -30,6 +33,7 @@ const ALL_TABS = [
   { id: 'orders'    as TabType, label: 'Orders',    emoji: '📋' },
   { id: 'areas'     as TabType, label: 'My Areas',  emoji: '📍' },
   { id: 'rewards'   as TabType, label: 'Rewards',   emoji: '🎁' },
+  { id: 'become-operator' as TabType, label: 'Become a Driver', emoji: '🚚' },
   { id: 'profile'   as TabType, label: 'Profile',   emoji: '👤' },
 ];
 
@@ -320,10 +324,12 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
           </div>
         )}
 
-        {/* Book Ride */}
+        {/* Book Ride — Book a Journey (multi-leg: boda to airport, real
+            flight, driver at destination) is inbuilt here as a mode toggle,
+            not a separate tab */}
         {activeTab === 'book-ride' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-            <EnhancedRideRequest customerId={user?.id} fixedServiceType="ride" />
+            <EnhancedRideRequest customerId={user?.id} fixedServiceType="ride" showJourneyOption />
           </div>
         )}
 
@@ -332,6 +338,14 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
         {activeTab === 'delivery' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
             <EnhancedRideRequest customerId={user?.id} fixedServiceType="delivery" />
+          </div>
+        )}
+
+        {/* Become a transport service provider — self-service application,
+            reviewed by a developer in DeveloperDashboard's Applications tab */}
+        {activeTab === 'become-operator' && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            <BecomeOperatorForm userId={user?.id} />
           </div>
         )}
 

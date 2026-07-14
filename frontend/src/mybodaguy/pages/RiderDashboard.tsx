@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User, Package, Bell, ChevronDown } from 'lucide-react';
+import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User, Package, Bell, ChevronDown, Car, Truck } from 'lucide-react';
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
@@ -55,32 +55,39 @@ function useLiveLocationPing(userId: string | undefined) {
 
 // On/off slider for the rider's working time — toggles mbg_riders.is_available,
 // the same flag the matching engine (mbg_find_available_riders) filters on.
-function WorkingTimeToggle({ userId }: { userId: string }) {
+// Scoped by vehicleType, not just userId — a person can hold more than one
+// mbg_riders row now (multi-vehicle), and only the ACTIVE one should ever
+// flip online; the inactive one(s) must stay offline regardless (enforced
+// server-side too, by mbg_switch_active_vehicle).
+function WorkingTimeToggle({ userId, vehicleType }: { userId: string; vehicleType: string | null }) {
   const [isAvailable, setIsAvailable] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!userId || !vehicleType) return;
     supabase
       .from('mbg_riders')
       .select('is_available')
       .eq('user_id', userId)
+      .eq('vehicle_type', vehicleType)
       .maybeSingle()
       .then(({ data }) => {
         setIsAvailable(!!data?.is_available);
         setLoaded(true);
       });
-  }, [userId]);
+  }, [userId, vehicleType]);
 
   const toggle = async () => {
+    if (!vehicleType) return;
     const next = !isAvailable;
     setIsAvailable(next);
     setSaving(true);
     const { error } = await supabase
       .from('mbg_riders')
       .update({ is_available: next, updated_at: new Date().toISOString() })
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .eq('vehicle_type', vehicleType);
     setSaving(false);
     if (error) {
       setIsAvailable(!next);
@@ -131,66 +138,98 @@ function formatEarnings(amount: number): string {
   return `UGX ${Math.round(amount)}`;
 }
 
+// Registered role is only visible via mbg_riders.vehicle_type/operator_type
+// (approved via "Become a Driver" -> dev panel review) — nothing in this
+// dashboard surfaced it before, so a car/van/truck operator saw the exact
+// same boda-branded screen as a motorcycle rider with no confirmation of
+// which role they actually hold.
+const VEHICLE_TYPE_META: Record<string, { label: string; icon: typeof Bike; use: string }> = {
+  motorcycle: { label: 'Motorcycle', icon: Bike, use: 'Boda passenger rides' },
+  bicycle:    { label: 'Bicycle',    icon: Bike, use: 'Short-distance passenger rides' },
+  tuktuk:     { label: 'Tuktuk',     icon: Car,  use: 'Passenger rides for small groups' },
+  car:        { label: 'Car',        icon: Car,  use: 'Passenger rides' },
+  van:        { label: 'Van',        icon: Truck, use: 'Goods delivery for supermarkera/supplier orders' },
+  truck:      { label: 'Truck',      icon: Truck, use: 'Larger goods delivery and cross-border cargo' },
+};
+
 interface RiderStats {
   earningsTodayUGX: number;
   ridesDone: number;
   rating: number;
   mode: string;
+  vehicleType: string | null;
+  operatorType: string | null;
 }
 
-// Pulls real numbers for the overview stat cards straight from Supabase:
-// mbg_riders for rating/completed_rides/mode, mbg_rides for today's fares.
+interface RiderVehicle {
+  vehicleType: string;
+  operatorType: string | null;
+}
+
+// Pulls real numbers for the overview stat cards straight from Supabase.
+// A person can hold more than one mbg_riders row now (multi-vehicle — see
+// ADD_MULTI_VEHICLE_SUPPORT.sql), so this fetches ALL of them plus
+// mbg_users.active_vehicle_type to know which one is currently live,
+// instead of assuming exactly one row per user.
 function useRiderStats(userId: string | undefined) {
   const [stats, setStats] = useState<RiderStats | null>(null);
+  const [allVehicles, setAllVehicles] = useState<RiderVehicle[]>([]);
+  const [activeVehicleType, setActiveVehicleType] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const load = async () => {
     if (!userId) return;
-    let cancelled = false;
+    setLoading(true);
 
-    const load = async () => {
-      setLoading(true);
-      const { data: riderRow } = await supabase
-        .from('mbg_riders')
-        .select('id, rating, completed_rides, mode')
-        .eq('user_id', userId)
-        .maybeSingle();
+    const [{ data: riderRows }, { data: mu }] = await Promise.all([
+      supabase.from('mbg_riders').select('id, rating, completed_rides, mode, vehicle_type, operator_type').eq('user_id', userId),
+      supabase.from('mbg_users').select('active_vehicle_type').eq('id', userId).maybeSingle(),
+    ]);
 
-      if (!riderRow) {
-        if (!cancelled) {
-          setStats({ earningsTodayUGX: 0, ridesDone: 0, rating: 0, mode: 'normal' });
-          setLoading(false);
-        }
-        return;
-      }
+    const rows = riderRows || [];
+    setAllVehicles(rows.map((r: any) => ({ vehicleType: r.vehicle_type, operatorType: r.operator_type })));
 
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-
-      const { data: todaysRides } = await supabase
-        .from('mbg_rides')
-        .select('fare')
-        .eq('rider_id', riderRow.id)
-        .eq('status', 'completed')
-        .gte('completed_at', startOfToday.toISOString());
-
-      if (cancelled) return;
-      const earningsTodayUGX = (todaysRides || []).reduce((sum, r: any) => sum + (Number(r.fare) || 0), 0);
-
-      setStats({
-        earningsTodayUGX,
-        ridesDone: riderRow.completed_rides || 0,
-        rating: Number(riderRow.rating) || 0,
-        mode: riderRow.mode || 'normal',
-      });
+    if (rows.length === 0) {
+      setActiveVehicleType(null);
+      setStats({ earningsTodayUGX: 0, ridesDone: 0, rating: 0, mode: 'normal', vehicleType: null, operatorType: null });
       setLoading(false);
-    };
+      return;
+    }
 
+    // Prefer mbg_users.active_vehicle_type; fall back to the only vehicle
+    // they have (covers accounts from before this column was backfilled).
+    const active = rows.find((r: any) => r.vehicle_type === mu?.active_vehicle_type) || rows[0];
+    setActiveVehicleType(active.vehicle_type);
+
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+
+    const { data: todaysRides } = await supabase
+      .from('mbg_rides')
+      .select('fare')
+      .eq('rider_id', active.id)
+      .eq('status', 'completed')
+      .gte('completed_at', startOfToday.toISOString());
+
+    const earningsTodayUGX = (todaysRides || []).reduce((sum, r: any) => sum + (Number(r.fare) || 0), 0);
+
+    setStats({
+      earningsTodayUGX,
+      ridesDone: active.completed_rides || 0,
+      rating: Number(active.rating) || 0,
+      mode: active.mode || 'normal',
+      vehicleType: active.vehicle_type || null,
+      operatorType: active.operator_type || null,
+    });
+    setLoading(false);
+  };
+
+  useEffect(() => {
     load();
-    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  return { stats, loading };
+  return { stats, loading, allVehicles, activeVehicleType, reload: load };
 }
 
 export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps) {
@@ -198,9 +237,26 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [quickStartOpen, setQuickStartOpen] = useState(false);
-  const { stats: riderStats, loading: riderStatsLoading } = useRiderStats(user?.id);
+  const { stats: riderStats, loading: riderStatsLoading, allVehicles, activeVehicleType, reload: reloadRiderStats } = useRiderStats(user?.id);
+  const [switchingVehicle, setSwitchingVehicle] = useState(false);
 
   useLiveLocationPing(user?.id);
+
+  const switchVehicle = async (vehicleType: string) => {
+    if (vehicleType === activeVehicleType || switchingVehicle) return;
+    setSwitchingVehicle(true);
+    try {
+      const { data, error } = await supabase.rpc('mbg_switch_active_vehicle', { p_vehicle_type: vehicleType });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Could not switch vehicle');
+      toast.success(`Switched to ${VEHICLE_TYPE_META[vehicleType]?.label || vehicleType} mode`);
+      await reloadRiderStats();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to switch vehicle');
+    } finally {
+      setSwitchingVehicle(false);
+    }
+  };
 
   return (
     <div>
@@ -362,8 +418,57 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
       <div className="container mx-auto px-2 xs:px-3 sm:px-4 py-3 xs:py-4 sm:py-8">
         {activeTab === 'overview' && (
           <div className="space-y-4 sm:space-y-6">
+            {/* Registered role — confirms which vehicle type this account
+                was approved for, since the rest of this dashboard doesn't
+                otherwise distinguish car/van/truck from a plain boda rider.
+                When someone holds more than one vehicle (multi-vehicle —
+                see ADD_MULTI_VEHICLE_SUPPORT.sql), this becomes a switcher
+                instead of a passive label. */}
+            {riderStats?.vehicleType && (() => {
+              const meta = VEHICLE_TYPE_META[riderStats.vehicleType] || { label: riderStats.vehicleType, icon: Bike, use: '' };
+              const Icon = meta.icon;
+
+              if (allVehicles.length <= 1) {
+                return (
+                  <div className="bg-white rounded-lg xs:rounded-xl shadow-lg p-3 xs:p-4 flex items-center gap-3">
+                    <div className="p-2 bg-orange-100 rounded-lg text-orange-600"><Icon size={20} /></div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">You're driving as: {meta.label}</p>
+                      <p className="text-xs text-slate-500">{meta.use}{riderStats.operatorType === 'cargo' ? ' · Cargo operator' : ''}</p>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div className="bg-white rounded-lg xs:rounded-xl shadow-lg p-3 xs:p-4">
+                  <p className="text-sm font-semibold text-slate-800 mb-2">Driving as:</p>
+                  <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${allVehicles.length}, minmax(0, 1fr))` }}>
+                    {allVehicles.map((v) => {
+                      const vMeta = VEHICLE_TYPE_META[v.vehicleType] || { label: v.vehicleType, icon: Bike, use: '' };
+                      const VIcon = vMeta.icon;
+                      const isActive = v.vehicleType === activeVehicleType;
+                      return (
+                        <button
+                          key={v.vehicleType}
+                          onClick={() => switchVehicle(v.vehicleType)}
+                          disabled={switchingVehicle}
+                          className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all disabled:opacity-50 ${
+                            isActive ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+                          }`}
+                        >
+                          <VIcon size={14} /> {vMeta.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-2">{meta.use}{riderStats.operatorType === 'cargo' ? ' · Cargo operator' : ''}</p>
+                </div>
+              );
+            })()}
+
             {/* Working Time — online/offline slider */}
-            <WorkingTimeToggle userId={user.id} />
+            <WorkingTimeToggle userId={user.id} vehicleType={activeVehicleType} />
 
             {/* Stats Cards — live from Supabase (mbg_riders / mbg_rides) */}
             <div className="grid grid-cols-2 xs:gap-3 gap-2 sm:grid-cols-4 sm:gap-6">
@@ -450,11 +555,11 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
         )}
 
         {activeTab === 'requests' && (
-          <RiderRideRequests riderId={user.id} />
+          <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} />
         )}
 
         {activeTab === 'mode' && (
-          <RiderModeSelector riderId={user.id} />
+          <RiderModeSelector riderId={user.id} vehicleType={activeVehicleType} />
         )}
 
         {activeTab === 'locations' && (
@@ -462,7 +567,7 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
         )}
 
         {activeTab === 'partnerships' && (
-          <SupermarketPartnership riderId={user.id} />
+          <SupermarketPartnership riderId={user.id} vehicleType={activeVehicleType} />
         )}
 
         {activeTab === 'deliveries' && (

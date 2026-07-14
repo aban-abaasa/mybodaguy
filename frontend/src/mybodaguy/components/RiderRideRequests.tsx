@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import RideCommsBar from './RideCommsBar';
+import { playNewJobChime } from '../services/notificationSound';
 
 interface RideRow {
   id: string;
@@ -27,7 +28,7 @@ interface CustomerContact {
   name: string;
 }
 
-export default function RiderRideRequests({ riderId }: { riderId: string }) {
+export default function RiderRideRequests({ riderId, vehicleType }: { riderId: string; vehicleType: string | null }) {
   const [riderRowId, setRiderRowId] = useState<string | null>(null);
   const [pending, setPending] = useState<RideRow | null>(null);
   const [active, setActive] = useState<RideRow | null>(null);
@@ -35,9 +36,20 @@ export default function RiderRideRequests({ riderId }: { riderId: string }) {
   const [selfName, setSelfName] = useState('Rider');
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
+  // Tracks which pending request we've already chimed for, so the sound
+  // fires once per new job — not on every 4-second poll while the same
+  // request is still sitting there waiting for a response.
+  const lastChimedRideId = useRef<string | null>(null);
 
+  // Scoped by vehicleType, not just riderId — a person can hold more than
+  // one mbg_riders row now (multi-vehicle), so requests must only be
+  // pulled for whichever vehicle is currently active.
   const load = useCallback(async () => {
-    const { data: rider } = await supabase.from('mbg_riders').select('id').eq('user_id', riderId).maybeSingle();
+    if (!vehicleType) {
+      setLoading(false);
+      return;
+    }
+    const { data: rider } = await supabase.from('mbg_riders').select('id').eq('user_id', riderId).eq('vehicle_type', vehicleType).maybeSingle();
     if (!rider?.id) {
       setLoading(false);
       return;
@@ -48,6 +60,13 @@ export default function RiderRideRequests({ riderId }: { riderId: string }) {
       supabase.from('mbg_rides').select('*').eq('rider_id', rider.id).eq('status', 'pending').maybeSingle(),
       supabase.from('mbg_rides').select('*').eq('rider_id', rider.id).in('status', ['accepted', 'in_progress']).maybeSingle(),
     ]);
+
+    if (pendingRow && pendingRow.id !== lastChimedRideId.current) {
+      playNewJobChime();
+      lastChimedRideId.current = pendingRow.id;
+    } else if (!pendingRow) {
+      lastChimedRideId.current = null;
+    }
 
     setPending(pendingRow || null);
     setActive(activeRow || null);
@@ -64,7 +83,7 @@ export default function RiderRideRequests({ riderId }: { riderId: string }) {
     } else {
       setActiveCustomer(null);
     }
-  }, [riderId]);
+  }, [riderId, vehicleType]);
 
   useEffect(() => {
     supabase

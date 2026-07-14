@@ -21,9 +21,10 @@ const BUSINESS_TYPE_EMOJI: Record<string, string> = {
 
 interface SupermarketPartnershipProps {
   riderId: string;
+  vehicleType: string | null;
 }
 
-export default function SupermarketPartnership({ riderId }: SupermarketPartnershipProps) {
+export default function SupermarketPartnership({ riderId, vehicleType }: SupermarketPartnershipProps) {
   const [supermarkets, setSupermarkets] = useState<Supermarket[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState<'available' | 'applied'>('available');
@@ -82,7 +83,10 @@ export default function SupermarketPartnership({ riderId }: SupermarketPartnersh
       const [{ data: authUser }, { data: profile }, { data: rider }] = await Promise.all([
         supabase.auth.getUser(),
         supabase.from('mbg_user_profiles').select('full_name, phone').eq('user_id', riderId).maybeSingle(),
-        supabase.from('mbg_riders').select('vehicle_type, license_number').eq('user_id', riderId).maybeSingle(),
+        // Scoped by vehicleType too — a person can hold more than one
+        // mbg_riders row now, so this must record the vehicle they're
+        // currently active as, not an arbitrary one of possibly several.
+        supabase.from('mbg_riders').select('vehicle_type, license_number').eq('user_id', riderId).eq('vehicle_type', vehicleType).maybeSingle(),
       ]);
 
       const { error } = await supabase.from('rider_supermarket_applications').insert({

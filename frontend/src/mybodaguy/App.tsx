@@ -5,10 +5,7 @@ import { authService } from "./services/authService";
 import { userService } from "./services/userService";
 import SignInPage from "./pages/SignInPage";
 import LandingPage from "./pages/LandingPage";
-import DeveloperDashboard from "./pages/DeveloperDashboard";
-import ChairpersonDashboard from "./pages/ChairpersonDashboard";
-import RiderDashboard from "./pages/RiderDashboard";
-import CustomerDashboard from "./pages/CustomerDashboard";
+import UnifiedDashboard from "./pages/UnifiedDashboard";
 
 export default function MyBodaGuyApp() {
   const [user, setUser] = useState<any>(null);
@@ -120,32 +117,31 @@ export default function MyBodaGuyApp() {
     );
   }
 
-  // Render role-specific dashboard
+  // Render the dashboard. Delegates to UnifiedDashboard rather than
+  // picking a single dashboard component directly: UnifiedDashboard reads
+  // mbg_users.user_roles (the real multi-role array — see
+  // ADD_OPERATOR_APPLICATION_MULTI_ROLE.sql) and renders its own header
+  // with role tabs whenever an account holds more than one role (e.g. a
+  // customer who became a driver). Rendering RiderDashboard directly here
+  // used to leave it with no header at all — RiderDashboard.tsx has none
+  // of its own, it's only ever meant to be wrapped by UnifiedDashboard's.
   const renderDashboard = () => {
-    switch (userRole) {
-      case 'developer':
-        return <DeveloperDashboard user={user} onSignOut={handleSignOut} />;
-      case 'chairperson':
-        return <ChairpersonDashboard user={user} onSignOut={handleSignOut} />;
-      case 'rider':
-        return <RiderDashboard user={user} onSignOut={handleSignOut} />;
-      case 'customer':
-        return <CustomerDashboard user={user} onSignOut={handleSignOut} />;
-      default:
-        return (
-          <div className="min-h-screen bg-white flex items-center justify-center">
-            <div className="text-center">
-              <h2 className="text-2xl font-bold text-slate-800 mb-4">Unknown Role</h2>
-              <button
-                onClick={handleSignOut}
-                className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
-              >
-                Sign Out
-              </button>
-            </div>
+    if (!['developer', 'chairperson', 'rider', 'customer'].includes(userRole || '')) {
+      return (
+        <div className="min-h-screen bg-white flex items-center justify-center">
+          <div className="text-center">
+            <h2 className="text-2xl font-bold text-slate-800 mb-4">Unknown Role</h2>
+            <button
+              onClick={handleSignOut}
+              className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
+            >
+              Sign Out
+            </button>
           </div>
-        );
+        </div>
+      );
     }
+    return <UnifiedDashboard user={user} onSignOut={handleSignOut} />;
   };
 
   return (

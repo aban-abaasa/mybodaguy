@@ -8,11 +8,15 @@ type PowerType = 'electric' | 'fuel';
 
 interface RiderModeSelectorProps {
   riderId: string;
+  vehicleType: string | null;
   currentMode?: RiderMode;
   onModeChange?: (mode: RiderMode, vipSurcharge?: number, discountRate?: number, returnDiscount?: number) => void;
 }
 
-export default function RiderModeSelector({ riderId, currentMode = 'normal', onModeChange }: RiderModeSelectorProps) {
+const BODA_VEHICLE_TYPES = ['motorcycle', 'bicycle', 'tuktuk'];
+
+export default function RiderModeSelector({ riderId, vehicleType, currentMode = 'normal', onModeChange }: RiderModeSelectorProps) {
+  const isBodaVehicle = !!vehicleType && BODA_VEHICLE_TYPES.includes(vehicleType);
   const [selectedMode, setSelectedMode] = useState<RiderMode>(currentMode);
   const [vipSurcharge, setVipSurcharge] = useState(10); // 0-20% extra for VIP
   const [discountRate, setDiscountRate] = useState(10); // 0-30% discount to attract customers
@@ -22,12 +26,20 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
+  // Scoped by vehicleType, not just riderId — a person can hold more than
+  // one mbg_riders row now (multi-vehicle); mode/power/umbrella settings
+  // belong to whichever vehicle is currently active, not all of them.
   useEffect(() => {
+    if (!vehicleType) {
+      setLoaded(true);
+      return;
+    }
     const loadRider = async () => {
       const { data, error } = await supabase
         .from('mbg_riders')
         .select('mode, vip_surcharge_pct, discount_pct, return_discount_pct, power_type, has_umbrella')
         .eq('user_id', riderId)
+        .eq('vehicle_type', vehicleType)
         .maybeSingle();
 
       if (!error && data) {
@@ -41,7 +53,7 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
       setLoaded(true);
     };
     loadRider();
-  }, [riderId]);
+  }, [riderId, vehicleType]);
 
   const modes = [
     {
@@ -79,7 +91,11 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
   ];
 
   const persistRiderSettings = async (updates: Record<string, any>) => {
-    const { error } = await supabase.from('mbg_riders').update(updates).eq('user_id', riderId);
+    if (!vehicleType) return;
+    // Without the vehicle_type filter this would silently apply to every
+    // vehicle this person holds, not just the one they're currently
+    // driving as.
+    const { error } = await supabase.from('mbg_riders').update(updates).eq('user_id', riderId).eq('vehicle_type', vehicleType);
     if (error) throw error;
   };
 
@@ -311,39 +327,42 @@ export default function RiderModeSelector({ riderId, currentMode = 'normal', onM
         </div>
       </div>
 
-      {/* My Vehicle — real attributes used by the matching engine */}
-      <div className="mt-3 sm:mt-4 md:mt-6 p-2.5 xs:p-3 sm:p-4 rounded-lg border-2 border-slate-200 bg-slate-50">
-        <h5 className="font-semibold text-[10px] xs:text-xs sm:text-sm text-slate-800 mb-2">My Vehicle</h5>
-        <div className="grid grid-cols-2 gap-2">
-          <button
-            onClick={togglePowerType}
-            disabled={!loaded}
-            className={`flex items-center justify-center gap-1.5 py-2 xs:py-2.5 rounded-lg text-[10px] xs:text-xs sm:text-sm font-semibold border-2 transition-all ${
-              powerType === 'electric'
-                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
-                : 'border-amber-500 bg-amber-50 text-amber-700'
-            }`}
-          >
-            {powerType === 'electric' ? <Zap size={14} /> : <Fuel size={14} />}
-            {powerType === 'electric' ? 'Electric' : 'Fuel'}
-          </button>
-          <button
-            onClick={toggleUmbrella}
-            disabled={!loaded}
-            className={`flex items-center justify-center gap-1.5 py-2 xs:py-2.5 rounded-lg text-[10px] xs:text-xs sm:text-sm font-semibold border-2 transition-all ${
-              hasUmbrella
-                ? 'border-blue-500 bg-blue-50 text-blue-700'
-                : 'border-slate-300 bg-white text-slate-500'
-            }`}
-          >
-            <Umbrella size={14} />
-            {hasUmbrella ? 'Rain Cover: Yes' : 'Rain Cover: No'}
-          </button>
+      {/* My Vehicle — power type / rain cover only apply to boda vehicles
+          (motorcycle/bicycle/tuktuk); a car/van/truck has neither concept. */}
+      {isBodaVehicle && (
+        <div className="mt-3 sm:mt-4 md:mt-6 p-2.5 xs:p-3 sm:p-4 rounded-lg border-2 border-slate-200 bg-slate-50">
+          <h5 className="font-semibold text-[10px] xs:text-xs sm:text-sm text-slate-800 mb-2">My Vehicle</h5>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={togglePowerType}
+              disabled={!loaded}
+              className={`flex items-center justify-center gap-1.5 py-2 xs:py-2.5 rounded-lg text-[10px] xs:text-xs sm:text-sm font-semibold border-2 transition-all ${
+                powerType === 'electric'
+                  ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                  : 'border-amber-500 bg-amber-50 text-amber-700'
+              }`}
+            >
+              {powerType === 'electric' ? <Zap size={14} /> : <Fuel size={14} />}
+              {powerType === 'electric' ? 'Electric' : 'Fuel'}
+            </button>
+            <button
+              onClick={toggleUmbrella}
+              disabled={!loaded}
+              className={`flex items-center justify-center gap-1.5 py-2 xs:py-2.5 rounded-lg text-[10px] xs:text-xs sm:text-sm font-semibold border-2 transition-all ${
+                hasUmbrella
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-slate-300 bg-white text-slate-500'
+              }`}
+            >
+              <Umbrella size={14} />
+              {hasUmbrella ? 'Rain Cover: Yes' : 'Rain Cover: No'}
+            </button>
+          </div>
+          <p className="text-[9px] xs:text-xs text-slate-500 mt-2">
+            Customers can filter for electric bikes or rain cover — keep this accurate so you only get matched to requests you can actually fulfil.
+          </p>
         </div>
-        <p className="text-[9px] xs:text-xs text-slate-500 mt-2">
-          Customers can filter for electric bikes or rain cover — keep this accurate so you only get matched to requests you can actually fulfil.
-        </p>
-      </div>
+      )}
 
       {/* Tips - Compact */}
       <div className="mt-2.5 xs:mt-3 sm:mt-4 p-2 xs:p-2.5 sm:p-3 bg-blue-50 border border-blue-200 rounded-lg">

@@ -6,7 +6,8 @@ export interface Rider {
   full_name: string;
   email: string;
   phone: string | null;
-  vehicle_type: 'motorcycle' | 'bicycle' | 'tuktuk';
+  vehicle_type: 'motorcycle' | 'bicycle' | 'tuktuk' | 'car' | 'van' | 'truck';
+  operator_type: 'passenger' | 'cargo';
   plate_number: string;
   license_number: string;
   vehicle_model: string | null;
@@ -23,7 +24,7 @@ export interface Rider {
 export interface AssignRiderParams {
   targetUserEmail: string;
   targetStageId: string;
-  vehicleType: 'motorcycle' | 'bicycle' | 'tuktuk';
+  vehicleType: 'motorcycle' | 'bicycle' | 'tuktuk' | 'car' | 'van' | 'truck';
   plateNumber: string;
   licenseNumber: string;
   licenseExpiry?: string;

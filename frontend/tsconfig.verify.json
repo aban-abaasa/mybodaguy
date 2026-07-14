@@ -1,0 +1,5 @@
+{
+  "extends": "./tsconfig.app.json",
+  "include": ["src/mybodaguy", "src/services", "src/vite-env.d.ts"],
+  "exclude": ["src/mybodaguy/pages/ChairpersonDashboard_ENHANCED.tsx"]
+}

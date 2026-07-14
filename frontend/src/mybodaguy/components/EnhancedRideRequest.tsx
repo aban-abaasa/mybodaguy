@@ -1,17 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
 import * as React from 'react';
-import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package, Tag } from 'lucide-react';
+import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package, Tag, Car, Truck, Plane } from 'lucide-react';
 import { toast } from 'sonner';
 import { searchLocations, Location } from '../data/mockLocations';
 import { supabase } from '../services/supabaseClient';
 import { trackRideCall, trackUIInteraction } from '../../services/featureAnalyticsService';
 import RideCommsBar from './RideCommsBar';
 import ProductPicker, { CartLine } from './ProductPicker';
+import LocationPickerMap from './LocationPickerMap';
+import JourneyBookingFlow from './JourneyBookingFlow';
+import { reverseGeocodeCountry, type CountryLookup } from '../services/geocodeService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
 type DeliveryMode = 'supermarket' | 'normal';
 type PowerFilter = 'any' | 'electric' | 'fuel';
+type VehicleTypeFilter = 'any' | 'motorcycle' | 'car' | 'van' | 'truck';
 type ModePreference = 'all' | 'normal' | 'vip' | 'discount' | 'return';
 
 interface MatchedRider {
@@ -68,9 +72,15 @@ interface EnhancedRideRequestProps {
    * both still run on this one real matching-engine implementation. Omit
    * to show the toggle and let the customer switch freely. */
   fixedServiceType?: ServiceType;
+  /** Surfaces "Book a Journey" (flight + boda + destination driver) as a
+   * mode alongside plain Ride, inbuilt into this same screen instead of a
+   * separate top-level tab. Only passed from the "Book a Ride" tab —
+   * Delivery doesn't offer it. */
+  showJourneyOption?: boolean;
 }
 
-export default function EnhancedRideRequest({ customerId, fixedServiceType }: EnhancedRideRequestProps) {
+export default function EnhancedRideRequest({ customerId, fixedServiceType, showJourneyOption }: EnhancedRideRequestProps) {
+  const [bookingMode, setBookingMode] = useState<'ride' | 'journey'>('ride');
   const [pickup, setPickup] = useState('');
   const [dropoff, setDropoff] = useState('');
   const [pickupSuggestions, setPickupSuggestions] = useState<Location[]>([]);
@@ -96,6 +106,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
   const [storeTypeFilter, setStoreTypeFilter] = useState<BusinessTypeFilter>('all');
   const [deliveryCart, setDeliveryCart] = useState<CartLine[]>([]);
   const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState<VehicleTypeFilter>('any');
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
   const [modePreference, setModePreference] = useState<ModePreference>('all');
 
@@ -105,6 +116,16 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
     if (deliveryMode !== 'supermarket' || !selectedSupermarketId) setDeliveryCart([]);
   }, [serviceType, deliveryMode, selectedSupermarketId]);
 
+  // Power-type/rain-cover filters are hidden outside the Boda filter — reset
+  // them too, so switching to Car/Van/Truck can't leave a stale boda-only
+  // filter silently attached to the next search.
+  useEffect(() => {
+    if (vehicleTypeFilter !== 'motorcycle') {
+      setPowerFilter('any');
+      setUmbrellaRequired(false);
+    }
+  }, [vehicleTypeFilter]);
+
   // Customer's own registered areas — merged into the location suggestions
   const [customerAreas, setCustomerAreas] = useState<Location[]>([]);
   const [defaultDropoff, setDefaultDropoff] = useState<Location | null>(null);
@@ -113,6 +134,48 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
   // location — the pickup field locks so the customer isn't asked to
   // re-enter something we already know.
   const [pickupIsAutoFromSupermarket, setPickupIsAutoFromSupermarket] = useState(false);
+
+  // Map-based location picking — an alternative to the typed-suggestion
+  // flow, not a replacement: either one ends up setting the same
+  // selectedPickup/selectedDropoff state the rest of this component reads.
+  const [showMap, setShowMap] = useState(true);
+  const [routeInfo, setRouteInfo] = useState<{ distanceKm: number; durationMin: number } | null>(null);
+
+  // Cross-border delivery detection — only meaningful for a plain "normal"
+  // delivery (a boda/car ride is inherently single-country, and supermarket
+  // delivery is always a known local store). Resolved lazily so the common
+  // same-country case never pays for two extra geocode calls.
+  const [pickupCountry, setPickupCountry] = useState<CountryLookup | null>(null);
+  const [dropoffCountry, setDropoffCountry] = useState<CountryLookup | null>(null);
+  const isNormalDelivery = serviceType === 'delivery' && deliveryMode === 'normal';
+
+  useEffect(() => {
+    if (!isNormalDelivery || !selectedPickup) {
+      setPickupCountry(null);
+      return;
+    }
+    reverseGeocodeCountry(selectedPickup.coordinates.lat, selectedPickup.coordinates.lng).then(setPickupCountry);
+  }, [isNormalDelivery, selectedPickup?.coordinates.lat, selectedPickup?.coordinates.lng]);
+
+  useEffect(() => {
+    if (!isNormalDelivery || !selectedDropoff) {
+      setDropoffCountry(null);
+      return;
+    }
+    reverseGeocodeCountry(selectedDropoff.coordinates.lat, selectedDropoff.coordinates.lng).then(setDropoffCountry);
+  }, [isNormalDelivery, selectedDropoff?.coordinates.lat, selectedDropoff?.coordinates.lng]);
+
+  const needsCrossBorderPath = isNormalDelivery && !!pickupCountry && !!dropoffCountry && pickupCountry.iso2 !== dropoffCountry.iso2;
+
+  const handleMapPickupChange = (location: Location) => {
+    setSelectedPickup(location);
+    setPickup(location.fullAddress);
+  };
+
+  const handleMapDropoffChange = (location: Location) => {
+    setSelectedDropoff(location);
+    setDropoff(location.fullAddress);
+  };
 
   const pickupRef = useRef<HTMLDivElement>(null);
   const dropoffRef = useRef<HTMLDivElement>(null);
@@ -362,20 +425,60 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
         service_type: serviceType,
       });
 
-      const { data, error } = await supabase.rpc('mbg_find_available_riders', {
-        p_pickup_lat: selectedPickup.coordinates.lat,
-        p_pickup_lng: selectedPickup.coordinates.lng,
-        p_dropoff_lat: selectedDropoff.coordinates.lat,
-        p_dropoff_lng: selectedDropoff.coordinates.lng,
-        p_dropoff_area: selectedDropoff.area,
-        p_power_type: powerFilter === 'any' ? null : powerFilter,
-        p_require_umbrella: umbrellaRequired,
-        p_exclude_rider_ids: [],
-        p_limit: 10,
-      });
-
-      if (error) throw error;
-      const riders = (data || []) as MatchedRider[];
+      let riders: MatchedRider[];
+      if (needsCrossBorderPath) {
+        // Cross-border normal delivery — matched against cargo couriers
+        // (van/truck), not boda/car passenger riders.
+        const { data, error } = await supabase.rpc('mbg_find_available_vehicles', {
+          p_pickup_lat: selectedPickup.coordinates.lat,
+          p_pickup_lng: selectedPickup.coordinates.lng,
+          p_dropoff_lat: selectedDropoff.coordinates.lat,
+          p_dropoff_lng: selectedDropoff.coordinates.lng,
+          p_country: pickupCountry!.name,
+          p_vehicle_types: ['van', 'truck'],
+          p_operator_type: 'cargo',
+          p_exclude_rider_ids: [],
+          p_limit: 10,
+        });
+        if (error) throw error;
+        // Synthesizes the boda-only fields (mode/power/umbrella/etc.) cargo
+        // couriers don't have, so the existing RiderCard UI can render them
+        // unchanged.
+        riders = (data || []).map((v: any) => ({
+          rider_id: v.rider_id,
+          full_name: v.full_name,
+          phone: v.phone,
+          rating: v.rating,
+          total_rides: 0,
+          vehicle_type: v.vehicle_type,
+          power_type: 'fuel',
+          has_umbrella: false,
+          plate_number: v.plate_number,
+          vehicle_color: '',
+          mode: 'normal',
+          distance_to_pickup_km: v.distance_to_pickup_km,
+          estimated_arrival_min: Math.max(5, Math.round((v.distance_to_pickup_km ?? 20) / 40 * 60)),
+          knows_destination: false,
+          fare: v.fare,
+          distance_km: v.distance_km,
+          time_multiplier: 1,
+        }));
+      } else {
+        const { data, error } = await supabase.rpc('mbg_find_available_riders', {
+          p_pickup_lat: selectedPickup.coordinates.lat,
+          p_pickup_lng: selectedPickup.coordinates.lng,
+          p_dropoff_lat: selectedDropoff.coordinates.lat,
+          p_dropoff_lng: selectedDropoff.coordinates.lng,
+          p_dropoff_area: selectedDropoff.area,
+          p_power_type: powerFilter === 'any' ? null : powerFilter,
+          p_require_umbrella: umbrellaRequired,
+          p_exclude_rider_ids: [],
+          p_limit: 10,
+          p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
+        });
+        if (error) throw error;
+        riders = (data || []) as MatchedRider[];
+      }
       setMatchedRiders(riders);
 
       await trackUIInteraction('success', 'riders_found', {
@@ -402,23 +505,38 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
     setWaitingTimer(30);
 
     try {
-      const { data, error } = await supabase.rpc('mbg_request_ride', {
-        p_service_type: serviceType,
-        p_delivery_mode: serviceType === 'delivery' ? deliveryMode : null,
-        p_supermarket_id: serviceType === 'delivery' && deliveryMode === 'supermarket' ? selectedSupermarketId : null,
-        p_rider_id: rider.rider_id,
-        p_pickup_location: selectedPickup!.fullAddress,
-        p_pickup_lat: selectedPickup!.coordinates.lat,
-        p_pickup_lng: selectedPickup!.coordinates.lng,
-        p_dropoff_location: selectedDropoff!.fullAddress,
-        p_dropoff_lat: selectedDropoff!.coordinates.lat,
-        p_dropoff_lng: selectedDropoff!.coordinates.lng,
-        p_power_type_requested: powerFilter === 'any' ? null : powerFilter,
-        p_umbrella_requested: umbrellaRequired,
-        p_order_notes: deliveryCart.length > 0
-          ? deliveryCart.map(l => `${l.qty}x ${l.product.name}`).join(', ')
-          : null,
-      });
+      const orderNotes = deliveryCart.length > 0
+        ? deliveryCart.map(l => `${l.qty}x ${l.product.name}`).join(', ')
+        : null;
+
+      const { data, error } = needsCrossBorderPath
+        ? await supabase.rpc('mbg_request_cross_border_delivery', {
+            p_rider_id: rider.rider_id,
+            p_pickup_location: selectedPickup!.fullAddress,
+            p_pickup_lat: selectedPickup!.coordinates.lat,
+            p_pickup_lng: selectedPickup!.coordinates.lng,
+            p_pickup_country: pickupCountry!.name,
+            p_dropoff_location: selectedDropoff!.fullAddress,
+            p_dropoff_lat: selectedDropoff!.coordinates.lat,
+            p_dropoff_lng: selectedDropoff!.coordinates.lng,
+            p_dropoff_country: dropoffCountry!.name,
+            p_order_notes: orderNotes,
+          })
+        : await supabase.rpc('mbg_request_ride', {
+            p_service_type: serviceType,
+            p_delivery_mode: serviceType === 'delivery' ? deliveryMode : null,
+            p_supermarket_id: serviceType === 'delivery' && deliveryMode === 'supermarket' ? selectedSupermarketId : null,
+            p_rider_id: rider.rider_id,
+            p_pickup_location: selectedPickup!.fullAddress,
+            p_pickup_lat: selectedPickup!.coordinates.lat,
+            p_pickup_lng: selectedPickup!.coordinates.lng,
+            p_dropoff_location: selectedDropoff!.fullAddress,
+            p_dropoff_lat: selectedDropoff!.coordinates.lat,
+            p_dropoff_lng: selectedDropoff!.coordinates.lng,
+            p_power_type_requested: powerFilter === 'any' ? null : powerFilter,
+            p_umbrella_requested: umbrellaRequired,
+            p_order_notes: orderNotes,
+          });
 
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Could not create the request');
@@ -485,6 +603,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
     setPickupIsAutoFromSupermarket(false);
+    setRouteInfo(null);
   };
 
   const handleCancelRide = async () => {
@@ -514,7 +633,25 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
     setPickupIsAutoFromSupermarket(false);
+    setRouteInfo(null);
   };
+
+  // Journey mode takes over the whole screen — it's a completely different
+  // multi-leg flow (flight + boda + destination driver), not a variant of
+  // the single-hop ride form below.
+  if (showJourneyOption && bookingMode === 'journey') {
+    return (
+      <div className="space-y-4">
+        <button
+          onClick={() => setBookingMode('ride')}
+          className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1 font-medium"
+        >
+          <ArrowLeft size={16} /> Back to Book a Ride
+        </button>
+        <JourneyBookingFlow customerId={customerId} />
+      </div>
+    );
+  }
 
   // Render different UI based on ride status
   if (rideStatus === 'waiting_acceptance' && selectedRider) {
@@ -569,6 +706,14 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
     <div className="space-y-6">
       {/* Search Form */}
       <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
+        {showJourneyOption && (
+          <button
+            onClick={() => setBookingMode('journey')}
+            className="w-full mb-4 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold border-2 border-dashed border-orange-300 text-orange-700 hover:bg-orange-50 transition-all"
+          >
+            <Plane size={16} /> Flying somewhere? Book a full journey instead
+          </button>
+        )}
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg sm:text-xl font-bold text-slate-800">
             {serviceType === 'ride'
@@ -671,6 +816,21 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
           </div>
         )}
 
+        {/* Cross-border delivery: mode/vehicle-type/power/rain-cover filters
+            below don't apply to cargo couriers, so hide them and explain
+            what's actually happening instead. */}
+        {needsCrossBorderPath && (
+          <div className="mb-4 p-3 rounded-lg border-2 border-orange-200 bg-orange-50 text-sm text-orange-800 flex items-start gap-2">
+            <Truck size={16} className="mt-0.5 shrink-0" />
+            <span>
+              Cross-border delivery ({pickupCountry?.name} → {dropoffCountry?.name}) — matched with cargo couriers
+              (van/truck), not boda/car riders. Ride-type and vehicle filters don't apply here.
+            </span>
+          </div>
+        )}
+
+        {!needsCrossBorderPath && (
+        <>
         {/* Ride mode preference — filters matched riders by their real pricing mode */}
         <div className="mb-4">
           <label className="block text-sm font-medium text-slate-700 mb-2">Ride Type</label>
@@ -711,31 +871,86 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
           </button>
         </div>
 
-        {/* Vehicle / weather filters — matched against riders' real registered attributes */}
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          {(['any', 'electric', 'fuel'] as PowerFilter[]).map(opt => (
+        {/* Ride type — Boda vs Car, matched against mbg_find_available_riders'
+            p_vehicle_types filter so a request actually only reaches
+            drivers of the chosen type, instead of any vehicle_type mixed
+            together with no way to tell them apart before choosing. */}
+        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-3">
+          {([
+            { id: 'any' as VehicleTypeFilter, label: 'Any Ride', icon: null },
+            { id: 'motorcycle' as VehicleTypeFilter, label: 'Boda', icon: Bike },
+            { id: 'car' as VehicleTypeFilter, label: 'Car', icon: Car },
+            { id: 'van' as VehicleTypeFilter, label: 'Van', icon: Truck },
+            { id: 'truck' as VehicleTypeFilter, label: 'Truck', icon: Truck },
+          ]).map(opt => (
             <button
-              key={opt}
-              onClick={() => setPowerFilter(opt)}
+              key={opt.id}
+              onClick={() => setVehicleTypeFilter(opt.id)}
               className={`flex items-center justify-center gap-1 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-                powerFilter === opt ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'
+                vehicleTypeFilter === opt.id ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
               }`}
             >
-              {opt === 'electric' ? <Zap size={14} /> : opt === 'fuel' ? <Fuel size={14} /> : null}
-              {opt === 'any' ? 'Any Vehicle' : opt === 'electric' ? 'Electric' : 'Fuel'}
+              {opt.icon && <opt.icon size={14} />}
+              {opt.label}
             </button>
           ))}
-          <button
-            onClick={() => setUmbrellaRequired(!umbrellaRequired)}
-            className={`col-span-3 flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-              umbrellaRequired ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
-            }`}
-          >
-            <Umbrella size={14} /> {umbrellaRequired ? 'Rain cover required' : 'Rain cover not required'}
-          </button>
         </div>
 
+        {/* Vehicle / weather filters — fuel/electric and rain cover only mean
+            anything for a boda (motorcycle/bicycle/tuktuk); a car/van/truck
+            has neither concept, so these only show for the Boda filter. */}
+        {vehicleTypeFilter === 'motorcycle' && (
+          <div className="grid grid-cols-3 gap-2 mb-4">
+            {(['any', 'electric', 'fuel'] as PowerFilter[]).map(opt => (
+              <button
+                key={opt}
+                onClick={() => setPowerFilter(opt)}
+                className={`flex items-center justify-center gap-1 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                  powerFilter === opt ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'
+                }`}
+              >
+                {opt === 'electric' ? <Zap size={14} /> : opt === 'fuel' ? <Fuel size={14} /> : null}
+                {opt === 'any' ? 'Any Vehicle' : opt === 'electric' ? 'Electric' : 'Fuel'}
+              </button>
+            ))}
+            <button
+              onClick={() => setUmbrellaRequired(!umbrellaRequired)}
+              className={`col-span-3 flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                umbrellaRequired ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              <Umbrella size={14} /> {umbrellaRequired ? 'Rain cover required' : 'Rain cover not required'}
+            </button>
+          </div>
+        )}
+        </>
+        )}
+
         <div className="space-y-4">
+          {/* Map picker — sets the same selectedPickup/selectedDropoff state
+              as typing a suggestion below; either method works, and they
+              stay in sync with each other. */}
+          <div className="flex items-center justify-between">
+            <label className="block text-sm font-medium text-slate-700">Pick locations on the map</label>
+            <button
+              type="button"
+              onClick={() => setShowMap(!showMap)}
+              className="text-xs text-orange-600 hover:text-orange-700 font-medium"
+            >
+              {showMap ? 'Hide map' : 'Show map'}
+            </button>
+          </div>
+          {showMap && (
+            <LocationPickerMap
+              pickup={selectedPickup}
+              dropoff={selectedDropoff}
+              onPickupChange={handleMapPickupChange}
+              onDropoffChange={handleMapDropoffChange}
+              onRouteInfo={(distanceKm, durationMin) => setRouteInfo({ distanceKm, durationMin })}
+              pickupLocked={pickupIsAutoFromSupermarket}
+            />
+          )}
+
           {/* Pickup Location */}
           <div ref={pickupRef} className="relative">
             <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
@@ -837,6 +1052,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType }: En
               </div>
             )}
           </div>
+
+          {routeInfo && (
+            <p className="text-xs text-slate-500 -mt-2">
+              Estimated road distance: <span className="font-semibold text-slate-700">{routeInfo.distanceKm.toFixed(1)} km</span>
+              {' '}(~{Math.round(routeInfo.durationMin)} min)
+            </p>
+          )}
 
           <button
             onClick={handleSearchRiders}

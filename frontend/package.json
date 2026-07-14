@@ -16,6 +16,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
     "clsx": "^2.1.1",
+    "leaflet": "^1.9.4",
     "lucide-react": "^1.8.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
@@ -25,6 +26,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.21.0",
+    "@types/leaflet": "^1.9.8",
     "@types/node": "^22.13.10",
     "@types/react": "^19.0.10",
     "@types/react-dom": "^19.0.4",

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Bike, Users, Settings, ChevronRight, User, Menu, X, LogOut, Wallet } from 'lucide-react';
 import { userService } from '../services/userService';
+import { supabase } from '../../services/supabaseClient';
 import ChairpersonDashboard from './ChairpersonDashboard';
 import RiderDashboard from './RiderDashboard';
 import DeveloperDashboard from './DeveloperDashboard';
@@ -15,10 +16,23 @@ interface UnifiedDashboardProps {
 
 type RoleType = 'developer' | 'chairperson' | 'rider' | 'customer' | 'ican-wallet';
 
+// Set this right before a reload to land on a specific role once, instead
+// of whatever the hardcoded developer>chairperson>rider>customer priority
+// would otherwise pick — see BecomeOperatorForm.tsx's "Open Driver
+// Dashboard" button, which needs to guarantee landing on Rider even for an
+// account that also holds a higher-priority role (e.g. chairperson) from
+// unrelated earlier testing.
+export const PREFERRED_ROLE_KEY = 'mbg_preferred_active_role';
+
 export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardProps) {
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const [activeRole, setActiveRole] = useState<RoleType>('customer');
   const [loading, setLoading] = useState(true);
+  // 'rider' is one role_type/user_roles value for both boda riders
+  // (motorcycle/bicycle/tuktuk) and car/van/truck operators approved via
+  // "Become a Driver" — the tab label distinguishes them without needing a
+  // separate role at the data-model level.
+  const [riderVehicleType, setRiderVehicleType] = useState<string | null>(null);
 
   useEffect(() => {
     loadUserRoles();
@@ -30,7 +44,28 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
       const roles = await userService.getUserRoles(user.id);
       console.log('[UnifiedDashboard] User roles:', roles);
       setUserRoles(roles);
-      
+
+      if (roles.includes('rider')) {
+        // Read the account-level pointer, not mbg_riders directly — since
+        // multi-vehicle support (ADD_MULTI_VEHICLE_SUPPORT.sql) a person can
+        // hold more than one mbg_riders row, so a plain
+        // .eq('user_id', ...).maybeSingle() would throw once they do.
+        const { data: mu } = await supabase.from('mbg_users').select('active_vehicle_type').eq('id', user.id).maybeSingle();
+        setRiderVehicleType(mu?.active_vehicle_type ?? null);
+      }
+
+      // A caller can request landing on a specific role after a reload
+      // (see BecomeOperatorForm.tsx's "Open Driver Dashboard" button) —
+      // otherwise the hardcoded priority below always wins, e.g. a newly
+      // approved rider who is ALSO a chairperson from unrelated earlier
+      // testing would always land back on Chairperson, never Rider.
+      const requestedRole = sessionStorage.getItem(PREFERRED_ROLE_KEY);
+      sessionStorage.removeItem(PREFERRED_ROLE_KEY);
+      if (requestedRole && roles.includes(requestedRole)) {
+        setActiveRole(requestedRole as RoleType);
+        return;
+      }
+
       // Set active role based on priority: developer > chairperson > rider > customer
       // NOTE: Chairpersons are always also riders, so show chairperson first
       if (roles.includes('developer')) {
@@ -60,7 +95,11 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
     switch (role) {
       case 'developer': return 'Developer';
       case 'chairperson': return 'Chairperson';
-      case 'rider': return 'Rider';
+      case 'rider':
+        if (riderVehicleType === 'car') return 'Car Driver';
+        if (riderVehicleType === 'van') return 'Van Driver';
+        if (riderVehicleType === 'truck') return 'Truck Driver';
+        return 'Rider';
       case 'customer': return 'Customer';
       case 'ican-wallet': return '₡ Wallet';
       default: return role;
@@ -94,14 +133,17 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
   }
 
   // If user has only one role, render that dashboard directly without tabs
-  if (userRoles.length === 1) {
+  // — except 'rider': RiderDashboard.tsx has no header of its own at all
+  // (it's only ever meant to be wrapped by the header below), so a
+  // rider-only account (no 'customer' role in user_roles — e.g. the
+  // multi-role array update hasn't landed yet, or ever ran) falls through
+  // to the full header treatment below instead of rendering headerless.
+  if (userRoles.length === 1 && activeRole !== 'rider') {
     switch (activeRole) {
       case 'developer':
         return <DeveloperDashboard user={user} onSignOut={onSignOut} />;
       case 'chairperson':
         return <ChairpersonDashboard user={user} onSignOut={onSignOut} />;
-      case 'rider':
-        return <RiderDashboard user={user} onSignOut={onSignOut} />;
       case 'customer':
         return <CustomerDashboard user={user} onSignOut={onSignOut} />;
     }

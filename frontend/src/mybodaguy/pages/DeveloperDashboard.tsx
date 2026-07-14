@@ -3,7 +3,7 @@ import {
   Bike, Users, MapPin, DollarSign, Settings,
   TrendingUp, LogOut, Menu, X, Shield, Search,
   MessageSquare, RefreshCw, Globe, Lock, Trash2, Send, CheckCircle, Mail, Gift,
-  ShoppingBag, ChevronRight,
+  ShoppingBag, ChevronRight, Truck, XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '../services/userService';
@@ -77,6 +77,7 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
   const tabs = [
     { id: 'overview', label: 'Overview', icon: TrendingUp },
     { id: 'users', label: 'Users', icon: Users },
+    { id: 'applications', label: 'Applications', icon: Truck },
     { id: 'regions', label: 'Regions', icon: MapPin },
     { id: 'commissions', label: 'Commissions', icon: DollarSign },
     { id: 'supermarkets', label: 'Supermarkets', icon: ShoppingBag },
@@ -144,6 +145,7 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
         <div className="bg-white rounded-xl shadow-lg p-6">
           {activeTab === 'overview' && <OverviewTab onSwitchToRegions={() => setActiveTab('regions')} userId={user?.id} />}
           {activeTab === 'users' && <UsersTab users={users} loading={loading} onReload={loadUsers} />}
+          {activeTab === 'applications' && <ApplicationsTab />}
           {activeTab === 'regions' && <RegionsManagement />}
           {activeTab === 'commissions' && <CommissionsTab />}
           {activeTab === 'supermarkets' && <SupermarketsTab />}
@@ -250,6 +252,266 @@ const ROLE_FILTER_OPTIONS = [
   { value: 'rider',                 label: 'Rider',             hint: '' },
   { value: 'customer',              label: 'Customer',          hint: '' },
 ];
+
+// Reviews "Become a transport service provider" self-applications
+// (BecomeOperatorForm.tsx, mbg_operator_applications) — approving one calls
+// mbg_review_operator_application, which creates the mbg_riders row itself,
+// so this tab only needs to call the RPC and refresh, no separate promotion
+// step in the Users tab.
+function ApplicationsTab() {
+  const [applications, setApplications] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const loadApplications = async () => {
+    setLoading(true);
+    const { data: apps } = await supabase.from('mbg_operator_applications').select('*').order('created_at', { ascending: false });
+    const appIds = (apps || []).map((a) => a.id);
+    const userIds = [...new Set((apps || []).map((a) => a.user_id))];
+    const [{ data: profiles }, { data: conversations }] = await Promise.all([
+      userIds.length
+        ? supabase.from('mbg_user_profiles').select('user_id, full_name').in('user_id', userIds)
+        : Promise.resolve({ data: [] as any[] }),
+      appIds.length
+        ? supabase.from('chat_conversations').select('id, application_id').in('application_id', appIds)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+    const nameByUserId = new Map((profiles || []).map((p) => [p.user_id, p.full_name]));
+    const conversationByAppId = new Map((conversations || []).map((c) => [c.application_id, c.id]));
+    setApplications((apps || []).map((a) => ({
+      ...a,
+      applicant: { full_name: nameByUserId.get(a.user_id) },
+      conversationId: conversationByAppId.get(a.id) || null,
+    })));
+    setLoading(false);
+  };
+
+  useEffect(() => { loadApplications(); }, []);
+
+  // Backfills a chat thread for applications submitted before
+  // ADD_OPERATOR_APPLICATION_CHAT_INTEGRATION.sql existed — those have no
+  // conversation yet (mbg_apply_as_operator only creates one going
+  // forward), which otherwise shows as "no conversation thread found"
+  // instead of a working reply box.
+  const startConversation = async (applicationId: string) => {
+    try {
+      const { data, error } = await supabase.rpc('mbg_ensure_operator_application_conversation', { p_application_id: applicationId });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Could not start conversation');
+      setApplications((prev) => prev.map((a) => (a.id === applicationId ? { ...a, conversationId: data.conversation_id } : a)));
+    } catch (err: any) {
+      toast.error(err.message || 'Could not start conversation');
+    }
+  };
+
+  const review = async (id: string, approve: boolean) => {
+    if (!approve && !window.confirm('Reject this application?')) return;
+    setBusyId(id);
+    try {
+      const reason = approve ? null : window.prompt('Reason for rejection (optional):') || null;
+      const { data, error } = await supabase.rpc('mbg_review_operator_application', {
+        p_application_id: id,
+        p_approve: approve,
+        p_rejection_reason: reason,
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Review failed');
+      toast.success(approve ? 'Application approved — operator is now active' : 'Application rejected');
+      await loadApplications();
+    } catch (err: any) {
+      toast.error(err.message || 'Review failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-slate-600">Loading applications...</p>
+      </div>
+    );
+  }
+
+  const pending = applications.filter((a) => a.status === 'pending');
+  const reviewed = applications.filter((a) => a.status !== 'pending');
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Operator Applications</h2>
+          <p className="text-sm text-slate-600 mt-1">Customers who applied to become a car/van/truck operator via "Become a Driver".</p>
+        </div>
+        <button onClick={loadApplications} className="px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all">
+          Refresh
+        </button>
+      </div>
+
+      <h3 className="font-semibold text-slate-700 mb-3">Pending ({pending.length})</h3>
+      {pending.length === 0 ? (
+        <p className="text-sm text-slate-400 mb-8">No pending applications.</p>
+      ) : (
+        <div className="space-y-3 mb-8">
+          {pending.map((app) => {
+            const isExpanded = expandedId === app.id;
+            return (
+              <div key={app.id} className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+                <div className="p-4 flex items-center justify-between gap-4">
+                  <div>
+                    <div className="font-semibold text-slate-800 capitalize">{app.vehicle_type} — {app.plate_number}</div>
+                    <div className="text-sm text-slate-500">{app.applicant?.full_name || app.user_id} · {app.operator_country}{app.operator_home_city ? `, ${app.operator_home_city}` : ''}</div>
+                    <div className="text-xs text-slate-400 mt-1">License: {app.license_number} · Applied {new Date(app.created_at).toLocaleDateString()}</div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    <button
+                      onClick={() => setExpandedId(isExpanded ? null : app.id)}
+                      className="px-3 py-2 bg-slate-100 text-slate-700 rounded-lg text-sm font-semibold flex items-center gap-1"
+                    >
+                      <Mail size={14} /> {isExpanded ? 'Hide' : 'Review & Message'}
+                    </button>
+                    <button
+                      disabled={busyId === app.id}
+                      onClick={() => review(app.id, true)}
+                      className="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-semibold flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <CheckCircle size={14} /> Approve
+                    </button>
+                    <button
+                      disabled={busyId === app.id}
+                      onClick={() => review(app.id, false)}
+                      className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-sm font-semibold flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <XCircle size={14} /> Reject
+                    </button>
+                  </div>
+                </div>
+                {isExpanded && (
+                  <div className="border-t border-slate-100 bg-slate-50 p-4 space-y-3">
+                    <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-slate-600">
+                      <span><span className="text-slate-400">Vehicle model:</span> {app.vehicle_model || '—'}</span>
+                      <span><span className="text-slate-400">Vehicle color:</span> {app.vehicle_color || '—'}</span>
+                      <span><span className="text-slate-400">Phone:</span> {app.phone || '—'}</span>
+                      <span><span className="text-slate-400">Notes:</span> {app.notes || '—'}</span>
+                    </div>
+                    {app.conversationId ? (
+                      <DeveloperApplicationThread conversationId={app.conversationId} />
+                    ) : (
+                      <div className="text-center py-3">
+                        <p className="text-xs text-slate-400 mb-2">This application predates messaging — no thread yet.</p>
+                        <button
+                          onClick={() => startConversation(app.id)}
+                          className="px-3 py-1.5 bg-orange-500 text-white rounded-lg text-xs font-semibold"
+                        >
+                          Start conversation
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <h3 className="font-semibold text-slate-700 mb-3">Reviewed</h3>
+      {reviewed.length === 0 ? (
+        <p className="text-sm text-slate-400">No reviewed applications yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {reviewed.map((app) => (
+            <div key={app.id} className="bg-slate-50 border border-slate-100 rounded-lg p-3 flex items-center justify-between text-sm">
+              <span className="capitalize">{app.vehicle_type} — {app.plate_number} ({app.applicant?.full_name || app.user_id})</span>
+              <span className={`font-semibold ${app.status === 'approved' ? 'text-green-600' : 'text-red-600'}`}>{app.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Inline review/reply thread embedded directly in the application card —
+// reuses the exact same chat_conversations/chat_messages data and
+// chatService.ts functions as the standalone Messages tab, just rendered
+// compactly so a developer can review + message without leaving this tab.
+function DeveloperApplicationThread({ conversationId }: { conversationId: string }) {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [reply, setReply] = useState('');
+  const [sending, setSending] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const msgs = await fetchChatMessages(conversationId);
+      if (cancelled) return;
+      setMessages(msgs);
+      await markConversationRead(conversationId, 'dev');
+    })();
+    const unsub = subscribeToChatMessages(conversationId, (msg) => {
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
+    });
+    return () => { cancelled = true; unsub(); };
+  }, [conversationId]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages.length]);
+
+  const send = async () => {
+    const body = reply.trim();
+    if (!body || sending) return;
+    setSending(true);
+    try {
+      const msg = await sendChatMessage(conversationId, { senderRole: 'dev', senderName: 'BodaGo Team', body });
+      setMessages((prev) => [...prev, msg]);
+      setReply('');
+    } catch (e) {
+      toast.error('Failed to send message');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  return (
+    <div className="border rounded-lg bg-white flex flex-col" style={{ maxHeight: 280 }}>
+      <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {messages.length === 0 ? (
+          <p className="text-xs text-slate-400 text-center">No messages yet.</p>
+        ) : (
+          messages.map((m) => {
+            const fromDev = m.sender_role === 'dev';
+            return (
+              <div key={m.id} className={`flex ${fromDev ? 'justify-end' : 'justify-start'}`}>
+                <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${fromDev ? 'bg-gradient-to-br from-orange-500 to-yellow-500 text-white' : 'bg-slate-100 text-slate-800'}`}>
+                  {!fromDev && <p className="mb-0.5 text-[10px] font-semibold uppercase text-slate-500">{m.sender_name || 'Applicant'}</p>}
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                </div>
+              </div>
+            );
+          })
+        )}
+        <div ref={bottomRef} />
+      </div>
+      <div className="border-t p-2 flex gap-2">
+        <input
+          className="flex-1 border rounded-lg p-2 text-sm bg-white text-slate-900 placeholder-slate-400"
+          placeholder="Message the applicant…"
+          value={reply}
+          onChange={(e) => setReply(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') send(); }}
+        />
+        <button onClick={send} disabled={sending || !reply.trim()} className="bg-orange-500 disabled:bg-slate-300 text-white rounded-lg px-3 flex items-center justify-center">
+          <Send size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function UsersTab({ users, loading, onReload }: { users: any[]; loading: boolean; onReload: () => void }) {
   const [searchQuery, setSearchQuery] = useState('');
@@ -478,10 +740,16 @@ function MessagesTab() {
   const [messages, setMessages] = useState<any[]>([]);
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
+  // Applications open their own automated thread the moment someone
+  // applies (see ADD_OPERATOR_APPLICATION_CHAT_INTEGRATION.sql) — reviewing
+  // and replying to those normally happens inline in the Applications tab
+  // itself, but this toggle lets a developer browse them here too (e.g.
+  // after they're already resolved).
+  const [kindFilter, setKindFilter] = useState<'support' | 'operator_application'>('support');
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
-    setConversations(await listConversations());
+    setConversations(await listConversations({ kind: undefined as any }));
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -496,6 +764,8 @@ function MessagesTab() {
       );
     });
   }, []);
+
+  const visibleConversations = conversations.filter((c) => (c.kind || 'support') === kindFilter);
 
   useEffect(() => {
     if (!selectedId) { setMessages([]); return; }
@@ -538,11 +808,22 @@ function MessagesTab() {
   return (
     <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
       <div className="rounded-xl border border-slate-200 overflow-hidden">
-        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 text-xs font-semibold uppercase tracking-wider text-slate-500">
-          Conversations ({conversations.length})
+        <div className="flex border-b border-slate-200">
+          <button
+            onClick={() => setKindFilter('support')}
+            className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider ${kindFilter === 'support' ? 'text-orange-600 border-b-2 border-orange-500' : 'text-slate-400'}`}
+          >
+            Support ({conversations.filter((c) => (c.kind || 'support') === 'support').length})
+          </button>
+          <button
+            onClick={() => setKindFilter('operator_application')}
+            className={`flex-1 px-3 py-2 text-xs font-semibold uppercase tracking-wider ${kindFilter === 'operator_application' ? 'text-orange-600 border-b-2 border-orange-500' : 'text-slate-400'}`}
+          >
+            Applications ({conversations.filter((c) => c.kind === 'operator_application').length})
+          </button>
         </div>
         <div className="max-h-[65vh] overflow-y-auto">
-          {conversations.map((c) => (
+          {visibleConversations.map((c) => (
             <button
               key={c.id}
               onClick={() => setSelectedId(c.id)}
@@ -555,6 +836,9 @@ function MessagesTab() {
                 {c.unread_by_dev && <span className="h-2 w-2 flex-shrink-0 rounded-full bg-red-500" />}
               </div>
               <p className="text-xs text-slate-500 truncate">{c.guest_email}</p>
+              {c.kind === 'operator_application' && c.subject && (
+                <p className="text-[10px] font-medium text-orange-600 capitalize mt-0.5">{c.subject}</p>
+              )}
               <div className="mt-1.5 flex items-center gap-2">
                 <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-medium capitalize text-slate-600">{c.portal}</span>
                 <span className="text-[10px] text-slate-400">{fmtChatTime(c.last_message_at)}</span>
@@ -562,8 +846,8 @@ function MessagesTab() {
               {c.last_message_preview && <p className="mt-1 truncate text-xs text-slate-500">{c.last_message_preview}</p>}
             </button>
           ))}
-          {conversations.length === 0 && (
-            <p className="px-4 py-10 text-center text-sm text-slate-500">No conversations yet.</p>
+          {visibleConversations.length === 0 && (
+            <p className="px-4 py-10 text-center text-sm text-slate-500">No {kindFilter === 'operator_application' ? 'application' : 'support'} conversations yet.</p>
           )}
         </div>
       </div>
