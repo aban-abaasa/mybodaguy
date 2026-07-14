@@ -109,6 +109,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<VehicleTypeFilter>('any');
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
   const [modePreference, setModePreference] = useState<ModePreference>('all');
+  // Wallet = charged automatically (fare + 7% convenience surcharge) the
+  // instant the trip completes. Cash = pay the rider directly in person —
+  // no surcharge, but the rider owes the commission out of pocket and must
+  // confirm receipt before taking new jobs (see mbg_confirm_cash_received).
+  const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'cash'>('wallet');
 
   // Clear any selected products once the customer leaves the supermarket
   // delivery flow or switches stores, so a stale cart never gets submitted.
@@ -536,6 +541,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             p_power_type_requested: powerFilter === 'any' ? null : powerFilter,
             p_umbrella_requested: umbrellaRequired,
             p_order_notes: orderNotes,
+            p_payment_method: paymentMethod,
           });
 
       if (error) throw error;
@@ -925,6 +931,36 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         )}
         </>
         )}
+
+        {/* Payment method — Wallet settles automatically the instant the
+            trip ends (fare + 7% convenience surcharge); Cash means paying
+            the rider directly in person, no surcharge. */}
+        <div className="mb-4">
+          <p className="text-xs font-semibold text-slate-500 mb-2">Payment method</p>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setPaymentMethod('wallet')}
+              className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                paymentMethod === 'wallet' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              🪙 ICANera Wallet
+            </button>
+            <button
+              onClick={() => setPaymentMethod('cash')}
+              className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              💵 Cash
+            </button>
+          </div>
+          {paymentMethod === 'wallet' ? (
+            <p className="text-[11px] text-slate-400 mt-1">Charged automatically when the trip ends (fare + 7% convenience fee).</p>
+          ) : (
+            <p className="text-[11px] text-slate-400 mt-1">Pay the rider directly in cash at the end of the trip.</p>
+          )}
+        </div>
 
         <div className="space-y-4">
           {/* Map picker — sets the same selectedPickup/selectedDropoff state
@@ -1501,6 +1537,7 @@ function RiderOnTheWay({
                 selfName={customerName}
                 peerUserId={riderUserId}
                 peerName={rider.full_name}
+                peerPhone={rider.phone}
               />
             ) : (
               <CallButton phone={rider.phone} label="Call Rider" className="w-full px-4 py-2" />
@@ -1688,6 +1725,7 @@ function JourneyStarted({
               selfName={customerName}
               peerUserId={riderUserId}
               peerName={rider.full_name}
+              peerPhone={rider.phone}
             />
           )}
         </div>

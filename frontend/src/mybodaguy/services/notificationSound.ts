@@ -46,3 +46,25 @@ export function playNewJobChime() {
   beep(now, 740, 0.16, audioCtx);
   beep(now + 0.18, 988, 0.22, audioCtx);
 }
+
+let jobRingInterval: number | null = null;
+
+/**
+ * Keeps playing the new-job chime every 2s, the same way CallController's
+ * incoming-call ringtone loops until the call is answered/declined — a
+ * single chime is too easy to miss if the rider isn't looking at the
+ * screen. Call stopJobRingLoop() the moment the request is accepted,
+ * declined, or disappears (expired/taken by someone else).
+ */
+export function startJobRingLoop() {
+  stopJobRingLoop();
+  playNewJobChime();
+  jobRingInterval = window.setInterval(playNewJobChime, 2000);
+}
+
+export function stopJobRingLoop() {
+  if (jobRingInterval !== null) {
+    window.clearInterval(jobRingInterval);
+    jobRingInterval = null;
+  }
+}

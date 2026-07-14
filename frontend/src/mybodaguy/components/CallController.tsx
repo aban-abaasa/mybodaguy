@@ -25,6 +25,8 @@ interface CallControllerProps {
   selfName: string;
   peerUserId: string;
   peerName: string;
+  /** Shown under peerName on every call screen (incoming/outgoing/active) so whoever's calling can see who they've actually got on the line — not just displayed via a separate tel: link. */
+  peerPhone?: string | null;
   /** Set to 'voice' or 'video' to place an outgoing call; consumed then cleared by the parent. */
   outgoingRequest: CallMode | null;
   onOutgoingConsumed: () => void;
@@ -76,7 +78,7 @@ function useRingtone() {
 }
 
 export default function CallController({
-  rideId, selfUserId, selfName, peerUserId, peerName, outgoingRequest, onOutgoingConsumed,
+  rideId, selfUserId, selfName, peerUserId, peerName, peerPhone, outgoingRequest, onOutgoingConsumed,
 }: CallControllerProps) {
   const [phase, setPhase] = useState<CallPhase>('idle');
   const [mode, setMode] = useState<CallMode>('voice');
@@ -332,6 +334,7 @@ export default function CallController({
               {peerName.charAt(0).toUpperCase()}
             </div>
             <h3 className="text-lg font-bold text-slate-800">{peerName}</h3>
+            {peerPhone && <p className="text-sm text-slate-400">{peerPhone}</p>}
             <p className="text-sm text-slate-500 mb-6">Incoming {mode === 'video' ? 'video' : 'voice'} call…</p>
             <div className="flex justify-center gap-6">
               <button onClick={declineIncoming} className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-lg">
@@ -350,6 +353,7 @@ export default function CallController({
               {peerName.charAt(0).toUpperCase()}
             </div>
             <h3 className="text-lg font-bold text-slate-800">{peerName}</h3>
+            {peerPhone && <p className="text-sm text-slate-400">{peerPhone}</p>}
             <p className="text-sm text-slate-500 mb-6">Calling…</p>
             <button onClick={cancelOutgoing} className="w-14 h-14 mx-auto rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-lg">
               <PhoneOff size={22} />
@@ -368,6 +372,9 @@ export default function CallController({
                   </div>
                 )}
                 <video ref={localVideoRef} autoPlay playsInline muted className="absolute bottom-3 right-3 w-20 h-28 object-cover rounded-lg border-2 border-white/70" />
+                <div className="absolute top-3 left-3 text-white text-sm font-semibold drop-shadow">
+                  {peerName}{peerPhone && <span className="block text-xs font-normal text-white/70">{peerPhone}</span>}
+                </div>
                 <button onClick={endActiveCall} className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/40 text-white flex items-center justify-center">
                   <X size={16} />
                 </button>
@@ -379,6 +386,7 @@ export default function CallController({
                   {peerName.charAt(0).toUpperCase()}
                 </div>
                 <h3 className="text-lg font-bold text-slate-800">{peerName}</h3>
+                {peerPhone && <p className="text-sm text-slate-400">{peerPhone}</p>}
                 <p className="text-sm text-slate-500">{remoteConnected ? formatDuration(callSeconds) : 'Connecting…'}</p>
               </div>
             )}

@@ -11,6 +11,7 @@ import BecomeOperatorForm from '../components/BecomeOperatorForm';
 import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
 import IcanCoinCard from '../components/IcanCoinCard';
 import CustomerAreaManager from '../components/CustomerAreaManager';
+import RideCommsBar from '../components/RideCommsBar';
 
 interface CustomerDashboardProps {
   user: any;
@@ -150,6 +151,11 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
   const [mobileMenuOpen, setMobileMenu] = useState(false);
   const [rides, setRides]               = useState<any[]>([]);
   const [ridesLoading, setRidesLoading] = useState(false);
+  const [customerName, setCustomerName] = useState('You');
+  // Contact info for whichever rider is on a still-in-progress ride, keyed
+  // by ride id — lets "Recent Rides"/"Orders" offer Call/Video/Chat/Send
+  // Money right from the list, not just from the live tracking screen.
+  const [activeRideContacts, setActiveRideContacts] = useState<Record<string, { userId: string; name: string; phone: string | null }>>({});
   const menuRef                         = useRef<HTMLDivElement>(null);
 
   // Close mobile menu on outside click
@@ -170,14 +176,49 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
       if (!cr?.id) { setRidesLoading(false); return; }
       const { data } = await supabase
         .from('mbg_rides')
-        .select('id, created_at, pickup_location, dropoff_location, status, fare, service_type')
+        .select('id, created_at, pickup_location, dropoff_location, status, fare, service_type, rider_id')
         .eq('customer_id', cr.id)
         .order('created_at', { ascending: false })
         .limit(20);
       setRides(data || []);
       setRidesLoading(false);
+
+      // Resolve contact info only for rides still actually in progress —
+      // that's the whole point: Call/Video/Chat/Send Money only make
+      // sense while there's a real rider to reach on the other end.
+      const activeRows = (data || []).filter(r => ['accepted', 'in_progress'].includes(r.status) && r.rider_id);
+      const contacts: Record<string, { userId: string; name: string; phone: string | null }> = {};
+      await Promise.all(activeRows.map(async (r) => {
+        const { data: rider } = await supabase
+          .from('mbg_riders')
+          .select('user_id, mbg_users(phone, email, mbg_user_profiles(full_name))')
+          .eq('id', r.rider_id)
+          .maybeSingle();
+        const rUser = (rider as any)?.mbg_users;
+        if (rider?.user_id) {
+          contacts[r.id] = {
+            userId: rider.user_id,
+            name: rUser?.mbg_user_profiles?.[0]?.full_name || rUser?.email?.split('@')[0] || 'Rider',
+            phone: rUser?.phone || null,
+          };
+        }
+      }));
+      setActiveRideContacts(contacts);
     };
     load();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('mbg_users')
+      .select('email, mbg_user_profiles(full_name)')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        const name = (data as any)?.mbg_user_profiles?.[0]?.full_name || data?.email?.split('@')[0] || 'You';
+        setCustomerName(name);
+      });
   }, [user?.id]);
 
   const statusColor = (s: string) => {
@@ -307,15 +348,32 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               ) : (
                 <div className="space-y-2">
                   {rides.slice(0, 5).map(r => (
-                    <div key={r.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                      <div>
-                        <p className="text-sm font-medium text-slate-700">{r.pickup_location} → {r.dropoff_location}</p>
-                        <p className="text-xs text-slate-400">{new Date(r.created_at).toLocaleDateString()}</p>
+                    <div key={r.id} className="py-2 border-b border-slate-50 last:border-0">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium text-slate-700">{r.pickup_location} → {r.dropoff_location}</p>
+                          <p className="text-xs text-slate-400">{new Date(r.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-slate-800">UGX {(r.fare || 0).toLocaleString()}</p>
+                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                            activeRideContacts[r.id] ? 'bg-emerald-100 text-emerald-700 animate-pulse' : statusColor(r.status)
+                          }`}>
+                            {activeRideContacts[r.id] ? '🟢 Active' : r.status}
+                          </span>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-slate-800">UGX {(r.fare || 0).toLocaleString()}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(r.status)}`}>{r.status}</span>
-                      </div>
+                      {activeRideContacts[r.id] && (
+                        <RideCommsBar
+                          rideId={r.id}
+                          selfUserId={user.id}
+                          selfName={customerName}
+                          peerUserId={activeRideContacts[r.id].userId}
+                          peerName={activeRideContacts[r.id].name}
+                          peerPhone={activeRideContacts[r.id].phone}
+                          className="mt-2"
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -376,18 +434,35 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
             ) : (
               <div className="space-y-2">
                 {rides.map(r => (
-                  <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
-                    <div>
-                      <p className="font-medium text-slate-800 text-sm flex items-center gap-1.5">
-                        {r.service_type === 'delivery' ? <Package size={14} className="text-blue-500" /> : <Bike size={14} className="text-orange-500" />}
-                        {r.pickup_location} → {r.dropoff_location}
-                      </p>
-                      <p className="text-xs text-slate-400 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
+                  <div key={r.id} className="p-3 bg-slate-50 rounded-xl">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="font-medium text-slate-800 text-sm flex items-center gap-1.5">
+                          {r.service_type === 'delivery' ? <Package size={14} className="text-blue-500" /> : <Bike size={14} className="text-orange-500" />}
+                          {r.pickup_location} → {r.dropoff_location}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-slate-800 text-sm">UGX {(r.fare || 0).toLocaleString()}</p>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                          activeRideContacts[r.id] ? 'bg-emerald-100 text-emerald-700 animate-pulse' : statusColor(r.status)
+                        }`}>
+                          {activeRideContacts[r.id] ? '🟢 Active' : r.status}
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-bold text-slate-800 text-sm">UGX {(r.fare || 0).toLocaleString()}</p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(r.status)}`}>{r.status}</span>
-                    </div>
+                    {activeRideContacts[r.id] && (
+                      <RideCommsBar
+                        rideId={r.id}
+                        selfUserId={user.id}
+                        selfName={customerName}
+                        peerUserId={activeRideContacts[r.id].userId}
+                        peerName={activeRideContacts[r.id].name}
+                        peerPhone={activeRideContacts[r.id].phone}
+                        className="mt-2"
+                      />
+                    )}
                   </div>
                 ))}
               </div>

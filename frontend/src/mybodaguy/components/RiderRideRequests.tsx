@@ -3,7 +3,7 @@ import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Um
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import RideCommsBar from './RideCommsBar';
-import { playNewJobChime } from '../services/notificationSound';
+import { startJobRingLoop, stopJobRingLoop } from '../services/notificationSound';
 
 interface RideRow {
   id: string;
@@ -26,6 +26,7 @@ interface RideRow {
 interface CustomerContact {
   userId: string;
   name: string;
+  phone: string | null;
 }
 
 export default function RiderRideRequests({ riderId, vehicleType }: { riderId: string; vehicleType: string | null }) {
@@ -36,6 +37,12 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
   const [selfName, setSelfName] = useState('Rider');
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
+  // Set right after completing a cash-paid trip — the rider is blocked
+  // (mbg_riders.is_available = false, server-side) from taking new jobs
+  // until they confirm they've actually been paid, which is also the
+  // moment the owed commission is debited from their own ICAN wallet.
+  const [cashConfirmPending, setCashConfirmPending] = useState<{ rideId: string; commissionDueUgx: number } | null>(null);
+  const [confirmingCash, setConfirmingCash] = useState(false);
   // Tracks which pending request we've already chimed for, so the sound
   // fires once per new job — not on every 4-second poll while the same
   // request is still sitting there waiting for a response.
@@ -62,9 +69,10 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
     ]);
 
     if (pendingRow && pendingRow.id !== lastChimedRideId.current) {
-      playNewJobChime();
+      startJobRingLoop();
       lastChimedRideId.current = pendingRow.id;
     } else if (!pendingRow) {
+      stopJobRingLoop();
       lastChimedRideId.current = null;
     }
 
@@ -74,16 +82,20 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
     if (activeRow?.customer_id) {
       const { data: customer } = await supabase
         .from('mbg_customers')
-        .select('user_id, mbg_users(email, mbg_user_profiles(full_name))')
+        .select('user_id, mbg_users(phone, email, mbg_user_profiles(full_name))')
         .eq('id', activeRow.customer_id)
         .maybeSingle();
       const cUser = (customer as any)?.mbg_users;
       const name = cUser?.mbg_user_profiles?.[0]?.full_name || cUser?.email?.split('@')[0] || 'Customer';
-      setActiveCustomer(customer ? { userId: (customer as any).user_id, name } : null);
+      setActiveCustomer(customer ? { userId: (customer as any).user_id, name, phone: cUser?.phone || null } : null);
     } else {
       setActiveCustomer(null);
     }
   }, [riderId, vehicleType]);
+
+  // Stop the ring loop the instant this component unmounts (e.g. rider
+  // navigates away while a job is still ringing) so it never plays forever.
+  useEffect(() => stopJobRingLoop, []);
 
   useEffect(() => {
     supabase
@@ -105,6 +117,7 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
 
   const respond = async (accept: boolean) => {
     if (!pending) return;
+    stopJobRingLoop();
     setActing(true);
     try {
       const { data, error } = await supabase.rpc('mbg_respond_to_ride', { p_ride_id: pending.id, p_accept: accept });
@@ -142,12 +155,36 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
       const { data, error } = await supabase.rpc('mbg_complete_ride', { p_ride_id: active.id });
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Could not complete trip');
-      toast.success(`✅ Trip complete! You earned UGX ${Number(data.rider_earning || 0).toLocaleString()}`);
+
+      if (data.payment_method === 'cash') {
+        // Rider already holds the cash — no automatic ICAN credit happens
+        // here. They must confirm before dispatch offers them a new job.
+        setCashConfirmPending({ rideId: active.id, commissionDueUgx: Number(data.commission_due_ugx || 0) });
+      } else {
+        toast.success(`✅ Trip complete! You earned UGX ${Number(data.rider_earning || 0).toLocaleString()}`);
+      }
       await load();
     } catch (e: any) {
       toast.error(e.message || 'Failed to complete trip');
     } finally {
       setActing(false);
+    }
+  };
+
+  const confirmCashReceived = async () => {
+    if (!cashConfirmPending) return;
+    setConfirmingCash(true);
+    try {
+      const { data, error } = await supabase.rpc('mbg_confirm_cash_received', { p_ride_id: cashConfirmPending.rideId });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Could not confirm');
+      toast.success(`✅ Confirmed — UGX ${Number(data.commission_paid_ugx || 0).toLocaleString()} paid from your wallet. You're back online.`);
+      setCashConfirmPending(null);
+      await load();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to confirm cash received');
+    } finally {
+      setConfirmingCash(false);
     }
   };
 
@@ -169,6 +206,64 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
 
   return (
     <div className="space-y-4">
+      {/* Full-screen ringing overlay — mirrors CallController's incoming-call
+          screen so a new job is as hard to miss as an incoming call. Keeps
+          ringing (startJobRingLoop, 2s loop) until accepted/declined. */}
+      {pending && (
+        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center">
+            <div className="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-orange-400 to-yellow-400 flex items-center justify-center text-white mb-4 animate-pulse">
+              {pending.service_type === 'delivery' ? <Package size={36} /> : <Bike size={36} />}
+            </div>
+            <h3 className="text-lg font-bold text-slate-800">
+              New {pending.service_type === 'delivery' ? 'Delivery' : 'Ride'} Request
+            </h3>
+            <p className="text-sm text-slate-500 mb-4">Ringing…</p>
+
+            <RideSummary ride={pending} />
+
+            <div className="flex justify-center gap-6 mt-6">
+              <button
+                onClick={() => respond(false)}
+                disabled={acting}
+                className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-lg disabled:opacity-50"
+              >
+                <X size={22} />
+              </button>
+              <button
+                onClick={() => respond(true)}
+                disabled={acting}
+                className="w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 text-white flex items-center justify-center shadow-lg disabled:opacity-50"
+              >
+                <Check size={22} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cash-settlement gate — the rider stays offline (server-enforced,
+          is_available = false) until they confirm they've actually been
+          paid, which is also the moment the owed commission leaves their
+          own wallet. Shown until resolved; no new jobs come in meanwhile. */}
+      {cashConfirmPending && (
+        <div className="border-2 border-amber-400 bg-amber-50 rounded-xl p-5 shadow-md">
+          <h4 className="font-bold text-amber-800 mb-1">💵 Confirm cash received</h4>
+          <p className="text-sm text-amber-700 mb-3">
+            You collected this fare in cash. Confirm you've been paid to settle the
+            {' '}<strong>UGX {cashConfirmPending.commissionDueUgx.toLocaleString()}</strong> commission from your ICAN wallet
+            and go back online for new requests.
+          </p>
+          <button
+            onClick={confirmCashReceived}
+            disabled={confirmingCash}
+            className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50"
+          >
+            {confirmingCash ? 'Confirming…' : "I've Received the Cash"}
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <h3 className="text-xl font-bold text-slate-800">Ride &amp; Delivery Requests</h3>
         <button onClick={load} className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1">
@@ -224,6 +319,7 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
               selfName={selfName}
               peerUserId={activeCustomer.userId}
               peerName={activeCustomer.name}
+              peerPhone={activeCustomer.phone}
               className="mt-4"
             />
           )}
