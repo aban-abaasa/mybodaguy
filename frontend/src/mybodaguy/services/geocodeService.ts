@@ -74,6 +74,48 @@ export interface CountryLookup {
  * démocratique du Congo" by default), which would silently break any
  * string-match against data/countries.ts's COUNTRIES list.
  */
+export interface CitySuggestion {
+  name: string;
+  displayName: string;
+  lat: number;
+  lng: number;
+}
+
+/**
+ * Real city/town/village search worldwide — no country whitelist, works for
+ * any of the ~195 real countries in data/countries.ts (or none at all, if
+ * countryIso2 is omitted). featureType=settlement scopes Nominatim's index
+ * to city/town/village-level places specifically, so results are actual
+ * places a customer would type as "where I live," not streets/POIs.
+ */
+export async function searchCities(query: string, countryIso2?: string): Promise<CitySuggestion[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const params = new URLSearchParams({
+    format: 'json',
+    limit: '8',
+    q: trimmed,
+    featureType: 'settlement',
+    addressdetails: '1',
+    'accept-language': 'en',
+  });
+  if (countryIso2) params.set('countrycodes', countryIso2.toLowerCase());
+
+  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) return [];
+
+  const results = await res.json();
+  return (results || []).map((r: any) => ({
+    name: r.address?.city || r.address?.town || r.address?.village || r.name || r.display_name.split(',')[0],
+    displayName: r.display_name,
+    lat: Number(r.lat),
+    lng: Number(r.lon),
+  }));
+}
+
 export async function reverseGeocodeCountry(lat: number, lng: number): Promise<CountryLookup | null> {
   const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1&accept-language=en`;
   try {

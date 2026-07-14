@@ -5,7 +5,7 @@ import {
   searchFlights, searchAirports, getJourneyQuote, confirmJourney, pollJourney, requestShipCargoJourney,
   type FlightOffer, type Journey, type JourneyQuote, type AirportSuggestion,
 } from '../services/journeyService';
-import { geocodeAddress, reverseGeocodeCountry, type CountryLookup } from '../services/geocodeService';
+import { geocodeAddress, reverseGeocodeCountry, searchCities, type CountryLookup, type CitySuggestion } from '../services/geocodeService';
 import { printFlightTicket, printShipTicket } from '../services/printTicket';
 import LocationPickerMap from './LocationPickerMap';
 import type { Location } from '../data/mockLocations';
@@ -94,6 +94,12 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
   const [manualPickup, setManualPickup] = useState<{ lat: number; lng: number; address: string } | null>(null);
   const [geocoding, setGeocoding] = useState(false);
   const [pickupVehicleType, setPickupVehicleType] = useState<'motorcycle' | 'car'>('motorcycle');
+  // Which country the journey actually STARTS in — was hardcoded to
+  // 'Uganda' throughout (geocoding, quote, and the leg mbg_dispatch_journey_leg
+  // matches against), even though the backend (mbg_find_available_vehicles,
+  // gated on r.service_countries) already supports any country. Defaults to
+  // Uganda since that's the primary market, but is now a real customer choice.
+  const [pickupCountry, setPickupCountry] = useState(COUNTRIES[0]);
 
   const [originIata, setOriginIata] = useState('EBB');
   const [originLabel, setOriginLabel] = useState<string | null>('Entebbe International Airport (EBB)');
@@ -137,6 +143,25 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
         setCustomerName(name);
       });
   }, [customerId]);
+
+  const isFirstPickupCountryRender = useRef(true);
+  useEffect(() => {
+    // Skip on mount — the initial EBB/Entebbe default already matches the
+    // initial pickupCountry (Uganda). Only re-sync when the customer
+    // actually changes it afterward, so a stale "Entebbe" origin never
+    // sticks around once they've picked a different departure country.
+    if (isFirstPickupCountryRender.current) {
+      isFirstPickupCountryRender.current = false;
+      return;
+    }
+    if (pickupCountry.iso2 === 'UG') {
+      setOriginIata('EBB');
+      setOriginLabel('Entebbe International Airport (EBB)');
+    } else {
+      setOriginIata('');
+      setOriginLabel(null);
+    }
+  }, [pickupCountry.iso2]);
 
   const selectedArea = areas.find((a) => a.id === selectedAreaId) || null;
   // Not every customer has a saved area yet — let them type a pickup point
@@ -188,7 +213,7 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
     setError(null);
     setGeocoding(true);
     try {
-      const result = await geocodeAddress(manualAddress, 'Uganda');
+      const result = await geocodeAddress(manualAddress, pickupCountry.name);
       if (!result) {
         setError("Couldn't find that address — try adding more detail (e.g. neighborhood, city).");
         return;
@@ -222,7 +247,7 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
     try {
       const { quote } = await getJourneyQuote({
         customerUserId: customerId,
-        pickup: { ...pickup, country: 'Uganda', vehicleType: pickupVehicleType },
+        pickup: { ...pickup, country: pickupCountry.name, vehicleType: pickupVehicleType },
         offer: selectedOffer,
         destination: { address: destAddress, country: destCountry, city: destCity, lat: destPin?.lat ?? null, lng: destPin?.lng ?? null },
         cargoWeightKg: flightCargoWeightKg ? Number(flightCargoWeightKg) : undefined,
@@ -350,6 +375,26 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
           <h3 className="font-semibold text-slate-700 flex items-center gap-2"><MapPin size={18} /> Pickup</h3>
 
           <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1.5">Which country are you starting from?</label>
+            <select
+              className="w-full border rounded-lg p-3 bg-white text-slate-900"
+              value={pickupCountry.iso2}
+              onChange={(e) => {
+                const next = COUNTRIES.find((c) => c.iso2 === e.target.value) || COUNTRIES[0];
+                setPickupCountry(next);
+                // A pickup address/pin found under the old country no longer
+                // applies once the country itself changes.
+                setManualPickup(null);
+                setSelectedAreaId('');
+              }}
+            >
+              {COUNTRIES.map((c) => (
+                <option key={c.iso2 || c.name} value={c.iso2}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
             <label className="block text-xs font-medium text-slate-500 mb-1.5">Ride to the airport</label>
             <div className="grid grid-cols-2 gap-2">
               <button
@@ -425,7 +470,7 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
           <h3 className="font-semibold text-slate-700 flex items-center gap-2"><Plane size={18} /> Flight</h3>
           <AirportPicker
             label="From"
-            defaultCountryIso2="UG"
+            defaultCountryIso2={pickupCountry.iso2 || 'UG'}
             selectedLabel={originLabel}
             onSelect={(iata, label) => { setOriginIata(iata); setOriginLabel(label); }}
           />
@@ -485,8 +530,21 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
       {step === 'destination' && (
         <div className="space-y-4">
           <h3 className="font-semibold text-slate-700 flex items-center gap-2"><Home size={18} /> Final destination</h3>
-          <input className="w-full border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400" placeholder="Country (e.g. USA)" value={destCountry} onChange={(e) => setDestCountry(e.target.value)} />
-          <input className="w-full border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400" placeholder="City (e.g. New York)" value={destCity} onChange={(e) => setDestCity(e.target.value)} />
+          <select
+            className="w-full border rounded-lg p-3 bg-white text-slate-900"
+            value={destCountry}
+            onChange={(e) => { setDestCountry(e.target.value); setDestCity(''); }}
+          >
+            <option value="">Select a country</option>
+            {COUNTRIES.map((c) => (
+              <option key={c.iso2 || c.name} value={c.name}>{c.name}</option>
+            ))}
+          </select>
+          <CitySearchInput
+            countryIso2={COUNTRIES.find((c) => c.name === destCountry)?.iso2}
+            value={destCity}
+            onChange={setDestCity}
+          />
           <input className="w-full border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400" placeholder="Hotel / room address" value={destAddress} onChange={(e) => setDestAddress(e.target.value)} />
           <p className="text-xs text-slate-500">A driver is dispatched automatically once you land — timed off your actual arrival, and re-timed automatically if your flight is delayed.</p>
 
@@ -734,6 +792,86 @@ function AirportPicker({
             >
               <div className="font-medium text-slate-800">{a.name} ({a.iataCode})</div>
               {a.cityName && <div className="text-xs text-slate-500">{a.cityName}</div>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Real city/town/village autocomplete (Nominatim, free — see geocodeService's
+// searchCities) scoped to whichever country was selected, so "get their
+// cities" works for any of the ~195 countries in data/countries.ts, not
+// just a hardcoded shortlist. Free typing is still allowed — a suggestion
+// just makes it a real, spellchecked place name.
+function CitySearchInput({
+  countryIso2,
+  value,
+  onChange,
+}: {
+  countryIso2?: string;
+  value: string;
+  onChange: (cityName: string) => void;
+}) {
+  const [suggestions, setSuggestions] = useState<CitySuggestion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (value.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        setSuggestions(await searchCities(value.trim(), countryIso2));
+        setShowSuggestions(true);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, countryIso2]);
+
+  return (
+    <div className="relative">
+      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+      <input
+        className="w-full border rounded-lg p-3 pl-8 bg-white text-slate-900 placeholder-slate-400"
+        placeholder="City (e.g. New York)"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => value.trim().length >= 2 && setShowSuggestions(true)}
+        onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+      />
+      {showSuggestions && (
+        <div className="absolute z-10 w-full mt-1 border rounded-lg bg-white shadow-md max-h-48 overflow-y-auto">
+          {loading && <div className="p-2.5 text-xs text-slate-400">Searching…</div>}
+          {!loading && suggestions.length === 0 && value.trim().length >= 2 && (
+            <div className="p-2.5 text-xs text-slate-400">No cities found — you can still type your own</div>
+          )}
+          {suggestions.map((c, i) => (
+            <button
+              key={`${c.name}-${i}`}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onChange(c.name);
+                setShowSuggestions(false);
+              }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-orange-50 border-b border-slate-100 last:border-b-0"
+            >
+              <div className="font-medium text-slate-800">{c.name}</div>
+              <div className="text-xs text-slate-500 truncate">{c.displayName}</div>
             </button>
           ))}
         </div>
