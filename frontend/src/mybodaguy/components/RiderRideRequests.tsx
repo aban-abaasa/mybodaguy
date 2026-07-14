@@ -39,8 +39,10 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
   const [acting, setActing] = useState(false);
   // Set right after completing a cash-paid trip — the rider is blocked
   // (mbg_riders.is_available = false, server-side) from taking new jobs
-  // until they confirm they've actually been paid, which is also the
-  // moment the owed commission is debited from their own ICAN wallet.
+  // until they confirm they've actually been paid. Confirming records the
+  // owed commission as a debt (mbg_riders.cash_commission_debt_ugx),
+  // recovered later from their next wallet-paid ride credit rather than
+  // debited from their wallet balance right now.
   const [cashConfirmPending, setCashConfirmPending] = useState<{ rideId: string; commissionDueUgx: number } | null>(null);
   const [confirmingCash, setConfirmingCash] = useState(false);
   // Tracks which pending request we've already chimed for, so the sound
@@ -178,7 +180,7 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
       const { data, error } = await supabase.rpc('mbg_confirm_cash_received', { p_ride_id: cashConfirmPending.rideId });
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Could not confirm');
-      toast.success(`✅ Confirmed — UGX ${Number(data.commission_paid_ugx || 0).toLocaleString()} paid from your wallet. You're back online.`);
+      toast.success(`✅ Confirmed — UGX ${Number(data.commission_debt_recorded_ugx || 0).toLocaleString()} will be deducted from your next wallet-paid ride. You're back online.`);
       setCashConfirmPending(null);
       await load();
     } catch (e: any) {
@@ -244,15 +246,18 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
 
       {/* Cash-settlement gate — the rider stays offline (server-enforced,
           is_available = false) until they confirm they've actually been
-          paid, which is also the moment the owed commission leaves their
-          own wallet. Shown until resolved; no new jobs come in meanwhile. */}
+          paid. Confirming doesn't touch their wallet balance directly —
+          the owed commission is recorded as a debt and quietly withheld
+          from their next wallet-paid ride instead, so there's no
+          insufficient-balance dead end. Shown until resolved; no new jobs
+          come in meanwhile. */}
       {cashConfirmPending && (
         <div className="border-2 border-amber-400 bg-amber-50 rounded-xl p-5 shadow-md">
           <h4 className="font-bold text-amber-800 mb-1">💵 Confirm cash received</h4>
           <p className="text-sm text-amber-700 mb-3">
             You collected this fare in cash. Confirm you've been paid to settle the
-            {' '}<strong>UGX {cashConfirmPending.commissionDueUgx.toLocaleString()}</strong> commission from your ICAN wallet
-            and go back online for new requests.
+            {' '}<strong>UGX {cashConfirmPending.commissionDueUgx.toLocaleString()}</strong> commission owed — it'll be
+            deducted from your next wallet-paid ride, not right now — and go back online for new requests.
           </p>
           <button
             onClick={confirmCashReceived}

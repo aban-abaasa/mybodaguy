@@ -568,6 +568,25 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     }
   };
 
+  // Lets the customer switch wallet <-> cash any time before the trip is
+  // marked complete — e.g. they decide at the destination they'd rather
+  // pay differently than what they picked when requesting the ride.
+  const handleChangePaymentMethod = async (method: 'wallet' | 'cash') => {
+    if (!rideId || method === paymentMethod) return;
+    try {
+      const { data, error } = await supabase.rpc('mbg_update_ride_payment_method', {
+        p_ride_id: rideId,
+        p_payment_method: method,
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Could not change payment method');
+      setPaymentMethod(method);
+      toast.success(`Payment method changed to ${method === 'wallet' ? 'ICANera Wallet' : 'Cash'}`);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to change payment method');
+    }
+  };
+
   const handleTimeout = async () => {
     if (rideId) {
       try {
@@ -679,6 +698,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         customerId={customerId}
         customerName={customerName}
         riderUserId={riderUserId}
+        paymentMethod={paymentMethod}
+        onChangePaymentMethod={handleChangePaymentMethod}
       />
     );
   }
@@ -693,6 +714,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         customerId={customerId}
         customerName={customerName}
         riderUserId={riderUserId}
+        paymentMethod={paymentMethod}
+        onChangePaymentMethod={handleChangePaymentMethod}
       />
     );
   }
@@ -1178,6 +1201,35 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 // Real call functionality: only render a working tel: link when the rider
 // actually has a phone number on file (mbg_user_profiles.phone falling back
 // to mbg_users.phone) — never a dead/broken "Call" button.
+// Lets the customer switch wallet <-> cash any time before the trip
+// completes — shown throughout the active ride, not just at request time,
+// so they can change their mind at the destination.
+function PaymentMethodSwitcher({ paymentMethod, onChange }: { paymentMethod: 'wallet' | 'cash'; onChange: (m: 'wallet' | 'cash') => void }) {
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-semibold text-slate-500 mb-2">Payment method</p>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => onChange('wallet')}
+          className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+            paymentMethod === 'wallet' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
+          }`}
+        >
+          🪙 ICANera Wallet
+        </button>
+        <button
+          onClick={() => onChange('cash')}
+          className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+            paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-200 text-slate-500'
+          }`}
+        >
+          💵 Cash
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CallButton({ phone, label = 'Call', className = '' }: { phone: string | null; label?: string; className?: string }) {
   if (!phone) {
     return (
@@ -1485,7 +1537,9 @@ function RiderOnTheWay({
   rideId,
   customerId,
   customerName,
-  riderUserId
+  riderUserId,
+  paymentMethod,
+  onChangePaymentMethod
 }: {
   rider: MatchedRider;
   pickup: Location;
@@ -1495,6 +1549,8 @@ function RiderOnTheWay({
   customerId: string;
   customerName: string;
   riderUserId: string | null;
+  paymentMethod: 'wallet' | 'cash';
+  onChangePaymentMethod: (m: 'wallet' | 'cash') => void;
 }) {
   return (
     <div className="space-y-6">
@@ -1597,6 +1653,7 @@ function RiderOnTheWay({
               UGX {rider.fare.toLocaleString()}
             </span>
           </div>
+          <PaymentMethodSwitcher paymentMethod={paymentMethod} onChange={onChangePaymentMethod} />
         </div>
       </div>
 
@@ -1619,7 +1676,9 @@ function JourneyStarted({
   rideId,
   customerId,
   customerName,
-  riderUserId
+  riderUserId,
+  paymentMethod,
+  onChangePaymentMethod
 }: {
   rider: MatchedRider;
   pickup: Location;
@@ -1628,6 +1687,8 @@ function JourneyStarted({
   customerId: string;
   customerName: string;
   riderUserId: string | null;
+  paymentMethod: 'wallet' | 'cash';
+  onChangePaymentMethod: (m: 'wallet' | 'cash') => void;
 }) {
   const [journeyTime, setJourneyTime] = React.useState(0);
 
@@ -1738,6 +1799,7 @@ function JourneyStarted({
               UGX {rider.fare.toLocaleString()}
             </span>
           </div>
+          <PaymentMethodSwitcher paymentMethod={paymentMethod} onChange={onChangePaymentMethod} />
         </div>
       </div>
 
