@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Bike, Clock, Star, LogOut, Package, ShoppingBag, History,
+  Bike, Clock, Star, Package, ShoppingBag, History,
   ShoppingCart, LayoutDashboard, Gift, User, Wallet, MoreVertical,
   X, TrendingUp, CheckCircle, ArrowDownLeft, ArrowUpRight, RefreshCw,
+  ChevronDown, ChevronUp, MapPin, Calendar,
 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 import { getBalance, getTransactions, type ICANBalance, type ICANTransaction } from '../services/icanWalletService';
@@ -150,6 +151,8 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
   const [mobileMenuOpen, setMobileMenu] = useState(false);
   const [rides, setRides]               = useState<any[]>([]);
   const [ridesLoading, setRidesLoading] = useState(false);
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [recentRidesExpanded, setRecentRidesExpanded] = useState(false);
   const menuRef                         = useRef<HTMLDivElement>(null);
 
   // Close mobile menu on outside click
@@ -192,36 +195,10 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50">
 
-      {/* ── Sticky 2-row Header ── */}
-      <header className="sticky top-0 z-50 shadow-md">
-
-        {/* Row 1 — brand + user + mobile 3-dot */}
-        <div className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
-          <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-14">
-              <div className="flex items-center gap-2">
-                <Bike size={22} />
-                <div>
-                  <p className="font-bold leading-none text-sm">BodaGo</p>
-                  <p className="text-[10px] opacity-75">Your Trusted Partner</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="hidden sm:block text-xs opacity-85 bg-white/20 px-2 py-1 rounded-full truncate max-w-[160px]">
-                  {user?.email}
-                </span>
-                <button onClick={onSignOut}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition-colors">
-                  <LogOut size={14} />
-                  <span className="hidden sm:inline text-sm">Sign Out</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Row 2 — nav tabs (hidden on mobile, shown via 3-dot) */}
-        <div className="hidden sm:block bg-white border-b border-orange-100">
+      {/* ── Tab Navigation (Desktop & Mobile) ── */}
+      <div className="sticky top-0 z-40 bg-white border-b border-orange-100 shadow-sm">
+        {/* Desktop Tabs */}
+        <div className="hidden sm:block">
           <div className="container mx-auto px-2">
             <nav className="flex overflow-x-auto scrollbar-hide gap-0.5 py-1">
               {ALL_TABS.map(tab => (
@@ -234,16 +211,12 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
                   <span>{tab.emoji}</span>{tab.label}
                 </button>
               ))}
-              <button onClick={() => (window.location.href = '/ican-wallet')}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-violet-600 hover:bg-violet-50 transition-all flex-shrink-0">
-                <Wallet size={14} /> ₡ ICAN Wallet
-              </button>
             </nav>
           </div>
         </div>
 
-        {/* Mobile active-tab indicator bar — the one and only mobile menu trigger */}
-        <div className="sm:hidden bg-white border-b border-orange-100 px-4 py-2 flex items-center justify-between relative" ref={menuRef}>
+        {/* Mobile Tab Selector */}
+        <div className="sm:hidden px-4 py-2 flex items-center justify-between relative" ref={menuRef}>
           <span className="text-sm font-semibold text-slate-700">
             {ALL_TABS.find(t => t.id === activeTab)?.emoji}{' '}
             {ALL_TABS.find(t => t.id === activeTab)?.label}
@@ -264,14 +237,10 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
                   {activeTab === tab.id && <CheckCircle size={14} className="ml-auto text-orange-500" />}
                 </button>
               ))}
-              <button onClick={() => { window.location.href = '/ican-wallet'; setMobileMenu(false); }}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-violet-600 hover:bg-violet-50 border-t border-slate-100">
-                <span>₡</span> ICAN Wallet
-              </button>
             </div>
           )}
         </div>
-      </header>
+      </div>
 
       {/* ── Tab Content ── */}
       <div className="container mx-auto px-4 py-5">
@@ -295,29 +264,120 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               ))}
             </div>
 
-            {/* Recent rides */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <History size={16} className="text-orange-500" /> Recent Rides
-              </h3>
-              {ridesLoading ? (
-                <p className="text-slate-400 text-sm">Loading…</p>
-              ) : rides.length === 0 ? (
-                <p className="text-slate-400 text-sm text-center py-6">No rides yet — book your first one!</p>
-              ) : (
-                <div className="space-y-2">
-                  {rides.slice(0, 5).map(r => (
-                    <div key={r.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                      <div>
-                        <p className="text-sm font-medium text-slate-700">{r.pickup_location} → {r.dropoff_location}</p>
-                        <p className="text-xs text-slate-400">{new Date(r.created_at).toLocaleDateString()}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-slate-800">UGX {(r.fare || 0).toLocaleString()}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(r.status)}`}>{r.status}</span>
-                      </div>
+            {/* Recent rides - COLLAPSIBLE SECTION */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+              {/* Section Header - Click to Expand/Collapse */}
+              <button
+                onClick={() => setRecentRidesExpanded(!recentRidesExpanded)}
+                className="w-full flex items-center justify-between p-3 md:p-5 text-left hover:bg-slate-50 transition-colors border-b border-slate-100"
+              >
+                <h3 className="font-bold text-slate-800 flex items-center gap-2 text-sm md:text-base">
+                  <History size={16} className="text-orange-500" /> Recent Rides
+                  {rides.length > 0 && (
+                    <span className="bg-orange-100 text-orange-600 text-xs md:text-sm font-bold px-2 py-0.5 rounded-full">
+                      {rides.length}
+                    </span>
+                  )}
+                </h3>
+                <div className="flex items-center gap-2">
+                  {ridesLoading && <RefreshCw size={14} className="text-slate-400 animate-spin" />}
+                  {recentRidesExpanded ? 
+                    <ChevronUp size={20} className="text-slate-400" /> : 
+                    <ChevronDown size={20} className="text-slate-400" />
+                  }
+                </div>
+              </button>
+
+              {/* Expanded Content */}
+              {recentRidesExpanded && (
+                <div className="p-3 md:p-5">
+                  {ridesLoading ? (
+                    <div className="flex items-center justify-center py-8 gap-2">
+                      <RefreshCw size={20} className="text-orange-500 animate-spin" />
+                      <p className="text-slate-400 text-sm">Loading rides...</p>
                     </div>
-                  ))}
+                  ) : rides.length === 0 ? (
+                    <div className="text-center py-8">
+                      <Bike className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                      <p className="text-slate-400 text-sm mb-3">No rides yet — book your first one!</p>
+                      <button 
+                        onClick={() => setActiveTab('book-ride')}
+                        className="px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg text-sm font-medium hover:shadow-lg transition-all"
+                      >
+                        Book a Ride
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {rides.slice(0, 5).map(r => {
+                        const isExpanded = expandedOrderId === r.id;
+                        return (
+                          <div key={r.id} className="border border-slate-200 rounded-lg overflow-hidden hover:border-orange-300 transition-all">
+                            {/* Collapsed View */}
+                            <button
+                              onClick={() => setExpandedOrderId(isExpanded ? null : r.id)}
+                              className="w-full flex items-center justify-between p-2 md:p-3 text-left hover:bg-slate-50 transition-colors"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <p className="text-xs md:text-sm font-medium text-slate-700 truncate flex items-center gap-1.5">
+                                  {r.service_type === 'delivery' ? 
+                                    <Package size={12} className="text-blue-500 flex-shrink-0" /> : 
+                                    <Bike size={12} className="text-orange-500 flex-shrink-0" />
+                                  }
+                                  {r.pickup_location} → {r.dropoff_location}
+                                </p>
+                                <p className="text-[10px] md:text-xs text-slate-400 mt-0.5">{new Date(r.created_at).toLocaleDateString()}</p>
+                              </div>
+                              <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                                <div className="text-right">
+                                  <p className="text-xs md:text-sm font-bold text-slate-800 leading-none">UGX {(r.fare || 0).toLocaleString()}</p>
+                                  <span className={`text-[10px] md:text-xs px-1.5 py-0.5 rounded-full font-medium mt-0.5 inline-block ${statusColor(r.status)}`}>
+                                    {r.status}
+                                  </span>
+                                </div>
+                                {isExpanded ? 
+                                  <ChevronUp size={14} className="text-slate-400" /> : 
+                                  <ChevronDown size={14} className="text-slate-400" />
+                                }
+                              </div>
+                            </button>
+
+                            {/* Expanded Details */}
+                            {isExpanded && (
+                              <div className="border-t border-slate-200 bg-slate-50 p-2 md:p-3 space-y-2">
+                                <div className="flex items-center gap-3 text-[10px] md:text-xs">
+                                  <div className="flex items-center gap-1">
+                                    {r.service_type === 'delivery' ? 
+                                      <Package size={12} className="text-blue-500" /> : 
+                                      <Bike size={12} className="text-orange-500" />
+                                    }
+                                    <span className="font-medium text-slate-700 capitalize">{r.service_type}</span>
+                                  </div>
+                                  <div className="flex items-center gap-1 text-slate-500">
+                                    <Calendar size={12} />
+                                    {new Date(r.created_at).toLocaleString()}
+                                  </div>
+                                </div>
+                                <div className="pt-2 border-t border-slate-200">
+                                  <p className="text-[9px] md:text-[10px] text-slate-400 font-mono">
+                                    Order ID: {r.id.slice(0, 8)}...
+                                  </p>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {rides.length > 5 && (
+                        <button
+                          onClick={() => setActiveTab('orders')}
+                          className="w-full py-2 text-sm text-orange-600 hover:text-orange-700 font-medium hover:bg-orange-50 rounded-lg transition-colors"
+                        >
+                          View All {rides.length} Orders →
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -358,8 +418,8 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
 
         {/* Orders — real mbg_rides history (rides booked via Book a Ride) */}
         {activeTab === 'orders' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-3 md:p-5">
+            <h3 className="font-bold text-slate-800 mb-3 md:mb-4 flex items-center gap-2 text-sm md:text-base">
               <Bike size={16} className="text-orange-500" /> Rides &amp; Deliveries
             </h3>
             {ridesLoading ? (
@@ -375,21 +435,109 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               </div>
             ) : (
               <div className="space-y-2">
-                {rides.map(r => (
-                  <div key={r.id} className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
-                    <div>
-                      <p className="font-medium text-slate-800 text-sm flex items-center gap-1.5">
-                        {r.service_type === 'delivery' ? <Package size={14} className="text-blue-500" /> : <Bike size={14} className="text-orange-500" />}
-                        {r.pickup_location} → {r.dropoff_location}
-                      </p>
-                      <p className="text-xs text-slate-400 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
+                {rides.map(r => {
+                  const isExpanded = expandedOrderId === r.id;
+                  return (
+                    <div key={r.id} className="border border-slate-200 rounded-lg md:rounded-xl overflow-hidden bg-slate-50 hover:border-orange-300 transition-all">
+                      {/* Collapsed Header - Tap to Expand */}
+                      <button
+                        onClick={() => setExpandedOrderId(isExpanded ? null : r.id)}
+                        className="w-full flex items-center justify-between p-2 md:p-3 text-left hover:bg-slate-100 transition-colors"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-slate-800 text-xs md:text-sm flex items-center gap-1.5 mb-0.5">
+                            {r.service_type === 'delivery' ? 
+                              <Package size={14} className="text-blue-500 flex-shrink-0" /> : 
+                              <Bike size={14} className="text-orange-500 flex-shrink-0" />
+                            }
+                            <span className="truncate">{r.pickup_location} → {r.dropoff_location}</span>
+                          </p>
+                          <p className="text-[10px] md:text-xs text-slate-400 leading-none">{new Date(r.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <div className="flex items-center gap-2 md:gap-3 flex-shrink-0 ml-2">
+                          <div className="text-right">
+                            <p className="font-bold text-slate-800 text-xs md:text-sm leading-none">UGX {(r.fare || 0).toLocaleString()}</p>
+                            <span className={`text-[10px] md:text-xs px-1.5 md:px-2 py-0.5 rounded-full font-medium mt-0.5 inline-block ${statusColor(r.status)}`}>
+                              {r.status}
+                            </span>
+                          </div>
+                          {isExpanded ? 
+                            <ChevronUp size={16} className="text-slate-400" /> : 
+                            <ChevronDown size={16} className="text-slate-400" />
+                          }
+                        </div>
+                      </button>
+
+                      {/* Expanded Details */}
+                      {isExpanded && (
+                        <div className="border-t border-slate-200 bg-white p-3 md:p-4 space-y-3">
+                          {/* Service Type & Date */}
+                          <div className="flex items-center gap-4 text-xs md:text-sm">
+                            <div className="flex items-center gap-1.5">
+                              {r.service_type === 'delivery' ? 
+                                <Package size={14} className="text-blue-500" /> : 
+                                <Bike size={14} className="text-orange-500" />
+                              }
+                              <span className="font-medium text-slate-700 capitalize">{r.service_type}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 text-slate-500">
+                              <Calendar size={14} />
+                              {new Date(r.created_at).toLocaleString()}
+                            </div>
+                          </div>
+
+                          {/* Locations */}
+                          <div className="space-y-2">
+                            <div className="flex items-start gap-2">
+                              <div className="w-6 h-6 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <MapPin className="text-green-600" size={12} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[10px] md:text-xs text-slate-500 leading-none">Pickup</p>
+                                <p className="font-medium text-slate-800 text-xs md:text-sm leading-none mt-0.5">{r.pickup_location}</p>
+                              </div>
+                            </div>
+
+                            <div className="ml-3 border-l-2 border-dashed border-slate-300 h-4"></div>
+
+                            <div className="flex items-start gap-2">
+                              <div className="w-6 h-6 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                                <MapPin className="text-red-600" size={12} />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-[10px] md:text-xs text-slate-500 leading-none">Drop-off</p>
+                                <p className="font-medium text-slate-800 text-xs md:text-sm leading-none mt-0.5">{r.dropoff_location}</p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Status & Fare */}
+                          <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+                            <div>
+                              <p className="text-[10px] md:text-xs text-slate-500 leading-none mb-1">Status</p>
+                              <span className={`text-xs md:text-sm px-2 md:px-3 py-1 rounded-full font-medium ${statusColor(r.status)}`}>
+                                {r.status}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-[10px] md:text-xs text-slate-500 leading-none mb-1">Fare</p>
+                              <p className="text-lg md:text-xl font-bold text-slate-800 leading-none">
+                                UGX {(r.fare || 0).toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Order ID */}
+                          <div className="pt-2 border-t border-slate-100">
+                            <p className="text-[9px] md:text-[10px] text-slate-400 font-mono">
+                              Order ID: {r.id.slice(0, 8)}...
+                            </p>
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="text-right">
-                      <p className="font-bold text-slate-800 text-sm">UGX {(r.fare || 0).toLocaleString()}</p>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(r.status)}`}>{r.status}</span>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

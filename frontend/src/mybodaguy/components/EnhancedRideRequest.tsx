@@ -1441,6 +1441,7 @@ function RideDeclined({ rider, onBackToRiders, onStartNew }: { rider: MatchedRid
 }
 
 // Rider On The Way Component (covers 'accepted' — rider confirmed and heading to pickup)
+// RESPONSIVE: Compact on mobile, spacious on desktop
 function RiderOnTheWay({
   rider,
   pickup,
@@ -1461,38 +1462,38 @@ function RiderOnTheWay({
   riderUserId: string | null;
 }) {
   return (
-    <div className="space-y-6">
-      {/* Header Status */}
-      <div className="bg-gradient-to-r from-green-500 to-emerald-500 rounded-xl shadow-xl p-6 text-white">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-3 h-3 bg-white rounded-full animate-pulse"></div>
-            <h2 className="text-xl sm:text-2xl font-bold">Rider On The Way</h2>
+    <div className="space-y-2 md:space-y-4">
+      {/* Header Status - RESPONSIVE */}
+      <div className="bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg md:rounded-xl shadow-xl p-3 md:p-5 text-white">
+        <div className="flex items-center justify-between mb-2 md:mb-3">
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="w-2 h-2 md:w-3 md:h-3 bg-white rounded-full animate-pulse"></div>
+            <h2 className="text-base md:text-2xl font-bold leading-none">Rider On The Way</h2>
           </div>
-          <div className="bg-white/20 px-4 py-2 rounded-lg">
-            <div className="text-sm opacity-90">Arriving in</div>
-            <div className="text-2xl font-bold">{rider.estimated_arrival_min} min</div>
+          <div className="bg-white/20 px-2 py-1 md:px-4 md:py-2 rounded-lg">
+            <div className="text-[9px] md:text-sm opacity-90 leading-none">Arriving in</div>
+            <div className="text-lg md:text-2xl font-bold leading-none mt-0.5">{rider.estimated_arrival_min} min</div>
           </div>
         </div>
-        <p className="opacity-90">Your rider is heading to your pickup location</p>
+        <p className="opacity-90 text-[10px] md:text-sm leading-none">Your rider is heading to your pickup location</p>
       </div>
 
-      {/* Rider Details Card */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
-        <h3 className="text-lg font-bold text-slate-800 mb-4">Rider Details</h3>
-        <div className="flex items-start gap-4 mb-6">
-          <div className="w-20 h-20 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg">
+      {/* Rider Details Card - RESPONSIVE */}
+      <div className="bg-white rounded-lg md:rounded-xl shadow-lg p-3 md:p-5">
+        <h3 className="text-sm md:text-lg font-bold text-slate-800 mb-2 md:mb-3 leading-none">Rider Details</h3>
+        <div className="flex items-start gap-2 md:gap-4 mb-3 md:mb-5">
+          <div className="w-14 h-14 md:w-20 md:h-20 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-base md:text-2xl shadow-lg flex-shrink-0">
             {rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
           </div>
-          <div className="flex-1">
-            <h4 className="text-xl font-bold text-slate-800">{rider.full_name}</h4>
-            <div className="flex items-center gap-3 text-sm text-slate-600 mb-2">
-              <div className="flex items-center gap-1">
-                <Star className="text-yellow-500 fill-yellow-500" size={16} />
-                <span className="font-semibold">{rider.rating}</span>
+          <div className="flex-1 min-w-0">
+            <h4 className="text-base md:text-xl font-bold text-slate-800 leading-none mb-1 truncate">{rider.full_name}</h4>
+            <div className="flex items-center gap-2 md:gap-3 text-[10px] md:text-sm text-slate-600 mb-2">
+              <div className="flex items-center gap-0.5 md:gap-1">
+                <Star className="text-yellow-500 fill-yellow-500" size={12} />
+                <span className="font-semibold leading-none">{rider.rating}</span>
               </div>
               <span>•</span>
-              <span>{rider.total_rides} completed rides</span>
+              <span className="leading-none">{rider.total_rides} rides</span>
             </div>
             {rideId && riderUserId ? (
               <RideCommsBar
@@ -1503,70 +1504,70 @@ function RiderOnTheWay({
                 peerName={rider.full_name}
               />
             ) : (
-              <CallButton phone={rider.phone} label="Call Rider" className="w-full px-4 py-2" />
+              <CallButton phone={rider.phone} label="Call Rider" className="w-full px-3 py-1.5 md:px-4 md:py-2 text-xs md:text-sm" />
             )}
           </div>
         </div>
 
-        {/* Vehicle Info */}
-        <div className="grid grid-cols-2 gap-4 mb-6 pb-6 border-b border-slate-200">
-          <div className="bg-slate-50 rounded-lg p-4">
-            <div className="text-sm text-slate-600 mb-1">Vehicle</div>
-            <div className="font-semibold text-slate-800">{rider.vehicle_color} {rider.vehicle_type}</div>
+        {/* Vehicle Info - RESPONSIVE */}
+        <div className="grid grid-cols-2 gap-2 md:gap-3 mb-3 md:mb-5 pb-3 md:pb-5 border-b border-slate-200">
+          <div className="bg-slate-50 rounded-lg p-2 md:p-3">
+            <div className="text-[10px] md:text-sm text-slate-600 mb-0.5 md:mb-1 leading-none">Vehicle</div>
+            <div className="font-semibold text-xs md:text-base text-slate-800 leading-none">{rider.vehicle_color} {rider.vehicle_type}</div>
           </div>
-          <div className="bg-slate-50 rounded-lg p-4">
-            <div className="text-sm text-slate-600 mb-1">Plate Number</div>
-            <div className="font-bold text-lg bg-yellow-400 text-slate-900 inline-block px-3 py-1 rounded">
+          <div className="bg-slate-50 rounded-lg p-2 md:p-3">
+            <div className="text-[10px] md:text-sm text-slate-600 mb-0.5 md:mb-1 leading-none">Plate Number</div>
+            <div className="font-bold text-xs md:text-lg bg-yellow-400 text-slate-900 inline-block px-2 py-0.5 md:px-3 md:py-1 rounded leading-none">
               {rider.plate_number}
             </div>
           </div>
         </div>
 
-        {/* Trip Details */}
-        <div className="space-y-4">
-          <h4 className="font-bold text-slate-800">Trip Details</h4>
-          <div className="space-y-3">
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                <MapPin className="text-green-600" size={18} />
+        {/* Trip Details - RESPONSIVE */}
+        <div className="space-y-2 md:space-y-3">
+          <h4 className="font-bold text-slate-800 text-xs md:text-base leading-none">Trip Details</h4>
+          <div className="space-y-2 md:space-y-3">
+            <div className="flex items-start gap-2 md:gap-3">
+              <div className="w-6 h-6 md:w-8 md:h-8 bg-green-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                <MapPin className="text-green-600" size={14} />
               </div>
-              <div className="flex-1">
-                <div className="text-sm text-slate-600">Pickup Location</div>
-                <div className="font-semibold text-slate-800">{pickup.name}</div>
-                <div className="text-sm text-slate-600">{pickup.fullAddress}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] md:text-sm text-slate-600 leading-none">Pickup Location</div>
+                <div className="font-semibold text-xs md:text-base text-slate-800 leading-none mt-0.5 truncate">{pickup.name}</div>
+                <div className="text-[10px] md:text-sm text-slate-600 leading-none mt-0.5 truncate">{pickup.fullAddress}</div>
               </div>
             </div>
 
-            <div className="ml-4 border-l-2 border-dashed border-slate-300 h-8"></div>
+            <div className="ml-3 md:ml-4 border-l-2 border-dashed border-slate-300 h-4 md:h-6"></div>
 
-            <div className="flex items-start gap-3">
-              <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0 mt-1">
-                <MapPin className="text-red-600" size={18} />
+            <div className="flex items-start gap-2 md:gap-3">
+              <div className="w-6 h-6 md:w-8 md:h-8 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                <MapPin className="text-red-600" size={14} />
               </div>
-              <div className="flex-1">
-                <div className="text-sm text-slate-600">Drop-off Location</div>
-                <div className="font-semibold text-slate-800">{dropoff.name}</div>
-                <div className="text-sm text-slate-600">{dropoff.fullAddress}</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] md:text-sm text-slate-600 leading-none">Drop-off Location</div>
+                <div className="font-semibold text-xs md:text-base text-slate-800 leading-none mt-0.5 truncate">{dropoff.name}</div>
+                <div className="text-[10px] md:text-sm text-slate-600 leading-none mt-0.5 truncate">{dropoff.fullAddress}</div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Fare */}
-        <div className="mt-6 pt-6 border-t border-slate-200">
+        {/* Fare - RESPONSIVE */}
+        <div className="mt-3 md:mt-5 pt-3 md:pt-5 border-t border-slate-200">
           <div className="flex items-center justify-between">
-            <span className="text-slate-600">Fare Amount</span>
-            <span className="text-2xl font-bold text-slate-800">
+            <span className="text-xs md:text-base text-slate-600">Fare Amount</span>
+            <span className="text-lg md:text-2xl font-bold text-slate-800">
               UGX {rider.fare.toLocaleString()}
             </span>
           </div>
         </div>
       </div>
 
-      {/* Cancel Ride */}
+      {/* Cancel Ride - RESPONSIVE */}
       <button
         onClick={onCancel}
-        className="w-full py-3 bg-red-50 text-red-600 font-semibold rounded-lg hover:bg-red-100 transition-all border-2 border-red-200"
+        className="w-full py-2 md:py-3 bg-red-50 text-red-600 font-semibold rounded-lg hover:bg-red-100 transition-all border border-red-200 text-xs md:text-base"
       >
         Cancel Ride
       </button>
