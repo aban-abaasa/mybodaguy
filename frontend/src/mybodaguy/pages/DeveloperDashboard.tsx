@@ -34,15 +34,105 @@ interface DeveloperDashboardProps {
   onSignOut: () => void;
 }
 
+type DevPermissions = { isMain: boolean; allowedTabs: string[] | null };
+type DevOperatorRow = { email: string; is_main: boolean; allowed_tabs: string[] | null; added_at: string };
+
+const ALL_DEV_TAB_IDS = ['overview', 'users', 'applications', 'regions', 'commissions', 'supermarkets', 'public-board', 'messages', 'settings'];
+
 export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboardProps) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // null allowedTabs = unrestricted (all tabs) — the graceful default
+  // shown while mbg_developer_self() is still loading, matching how
+  // pre-existing developers keep full access unless explicitly restricted.
+  const [permissions, setPermissions] = useState<DevPermissions>({ isMain: false, allowedTabs: null });
+  const [operators, setOperators] = useState<DevOperatorRow[]>([]);
+  const [operatorsLoaded, setOperatorsLoaded] = useState(false);
+  const [savingTabsFor, setSavingTabsFor] = useState<string | null>(null);
+
+  const isTabAllowed = (id: string) =>
+    permissions.isMain || permissions.allowedTabs == null || permissions.allowedTabs.includes(id);
+
   useEffect(() => {
     loadUsers();
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      const { data } = await supabase.rpc('mbg_developer_self');
+      const self = data?.[0];
+      if (self) setPermissions({ isMain: !!self.is_main, allowedTabs: self.allowed_tabs });
+    })();
+  }, []);
+
+  // If the tabs this developer is allowed to see change (e.g. the main
+  // developer just restricted them) and the currently-open tab is no
+  // longer one of them, fall back to whatever they can still see instead
+  // of showing a blank main area with no highlighted tab.
+  useEffect(() => {
+    const allowed = ALL_DEV_TAB_IDS.filter(isTabAllowed);
+    if (!allowed.includes(activeTab) && allowed.length > 0) {
+      setActiveTab(allowed[0]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permissions.isMain, permissions.allowedTabs]);
+
+  const loadOperators = useCallback(async () => {
+    if (!permissions.isMain) return;
+    const { data } = await supabase.rpc('mbg_list_developers');
+    setOperators(data || []);
+    setOperatorsLoaded(true);
+  }, [permissions.isMain]);
+
+  useEffect(() => {
+    if (permissions.isMain) loadOperators();
+  }, [permissions.isMain, loadOperators]);
+
+  const toggleOperatorTab = async (email: string, tabId: string, currentlyAllowed: boolean) => {
+    const op = operators.find(o => o.email === email);
+    if (!op) return;
+    const base = op.allowed_tabs == null ? [...ALL_DEV_TAB_IDS] : op.allowed_tabs;
+    const next = currentlyAllowed ? base.filter(t => t !== tabId) : [...base, tabId];
+
+    setSavingTabsFor(email);
+    try {
+      await supabase.rpc('mbg_set_developer_tabs', { target_email: email, tabs: next });
+      setOperators(prev => prev.map(o => o.email === email ? { ...o, allowed_tabs: next } : o));
+    } catch (e) {
+      console.error('Failed to update developer tabs:', e);
+    } finally {
+      setSavingTabsFor(null);
+    }
+  };
+
+  // Grant developer access by picking a real account — reuses `users`
+  // (already fetched via userService.getAllUsers() for the Users tab)
+  // client-side instead of a separate search RPC, so this can't fail for
+  // reasons unrelated to actually granting access.
+  const [accountQuery, setAccountQuery] = useState('');
+  const [grantingId, setGrantingId] = useState<string | null>(null);
+
+  const developerEmails = new Set(operators.map(o => o.email.toLowerCase()));
+  const accountResults = accountQuery.trim()
+    ? users
+        .filter((u) => u.email && u.email.toLowerCase().includes(accountQuery.trim().toLowerCase()))
+        .slice(0, 25)
+    : [];
+
+  const grantDeveloperTo = async (accountId: string) => {
+    setGrantingId(accountId);
+    try {
+      await roleService.promoteToDeveloper(accountId);
+      await loadOperators();
+    } catch (e) {
+      console.error('Failed to grant developer access:', e);
+    } finally {
+      setGrantingId(null);
+    }
+  };
 
   // Signal to ChatWidget that a real developer session is actively viewing
   // this dashboard, so the floating widget hides itself (mirrors the other
@@ -85,7 +175,11 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
     { id: 'public-board', label: 'Public Board', icon: MessageSquare },
     { id: 'messages', label: 'Messages', icon: Mail },
     { id: 'settings', label: 'Settings', icon: Settings },
-  ];
+  ].filter(t => isTabAllowed(t.id));
+
+  if (permissions.isMain) {
+    tabs.push({ id: 'operators', label: 'Developers', icon: Lock });
+  }
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -153,8 +247,137 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
           {activeTab === 'public-board' && <PublicBoardTab />}
           {activeTab === 'messages' && <MessagesTab />}
           {activeTab === 'settings' && <SettingsTab />}
+          {activeTab === 'operators' && permissions.isMain && (
+            <DeveloperAccessTab
+              operators={operators}
+              operatorsLoaded={operatorsLoaded}
+              savingTabsFor={savingTabsFor}
+              onToggleTab={toggleOperatorTab}
+              accountQuery={accountQuery}
+              accountResults={accountResults}
+              developerEmails={developerEmails}
+              grantingId={grantingId}
+              onSearch={setAccountQuery}
+              onGrant={grantDeveloperTo}
+            />
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+function DeveloperAccessTab({
+  operators,
+  operatorsLoaded,
+  savingTabsFor,
+  onToggleTab,
+  accountQuery,
+  accountResults,
+  developerEmails,
+  grantingId,
+  onSearch,
+  onGrant,
+}: {
+  operators: DevOperatorRow[];
+  operatorsLoaded: boolean;
+  savingTabsFor: string | null;
+  onToggleTab: (email: string, tabId: string, currentlyAllowed: boolean) => void;
+  accountQuery: string;
+  accountResults: any[];
+  developerEmails: Set<string>;
+  grantingId: string | null;
+  onSearch: (query: string) => void;
+  onGrant: (accountId: string) => void;
+}) {
+  return (
+    <div>
+      <h2 className="text-2xl font-bold text-slate-800 mb-2">Grant Access</h2>
+      <p className="text-sm text-slate-600 mb-4">
+        Search users already on this project to grant developer access to.
+      </p>
+      <input
+        type="text"
+        value={accountQuery}
+        onChange={(e) => onSearch(e.target.value)}
+        placeholder="Search by name or email…"
+        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-400 focus:border-transparent"
+      />
+      <div className="mt-3 mb-8 space-y-2">
+        {accountResults.map((acc) => {
+          const alreadyDeveloper = developerEmails.has((acc.email || '').toLowerCase());
+          const fullName = acc.mbg_user_profiles?.[0]?.full_name;
+          return (
+            <div key={acc.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-800">{fullName || acc.email}</p>
+                <p className="truncate text-[11px] text-slate-500">{acc.email}</p>
+              </div>
+              <button
+                onClick={() => onGrant(acc.id)}
+                disabled={alreadyDeveloper || grantingId === acc.id}
+                className="flex-shrink-0 text-xs px-3 py-1.5 bg-violet-100 text-violet-700 rounded-md hover:bg-violet-200 transition-colors font-medium disabled:opacity-40"
+              >
+                {alreadyDeveloper ? 'Already has access' : grantingId === acc.id ? 'Granting…' : 'Grant access'}
+              </button>
+            </div>
+          );
+        })}
+        {accountQuery && accountResults.length === 0 && (
+          <p className="text-xs text-slate-500">No matching accounts found.</p>
+        )}
+      </div>
+
+      <h2 className="text-2xl font-bold text-slate-800 mb-2">Developer Access</h2>
+      <p className="text-sm text-slate-600 mb-6">
+        Choose which tabs each developer can see. The main developer always sees everything.
+        A developer with no tabs checked sees nothing until you grant some.
+      </p>
+
+      {!operatorsLoaded ? (
+        <p className="text-sm text-slate-500">Loading…</p>
+      ) : (
+        <div className="space-y-4">
+          {operators.map((op) => (
+            <div key={op.email} className="border border-slate-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-sm font-semibold text-slate-800">{op.email}</p>
+                {op.is_main ? (
+                  <span className="text-xs px-2.5 py-1 rounded-full bg-orange-100 text-orange-700 font-semibold uppercase tracking-wide">
+                    Main developer
+                  </span>
+                ) : (
+                  <span className="text-xs text-slate-500">
+                    {op.allowed_tabs == null ? 'All tabs' : `${op.allowed_tabs.length} tab${op.allowed_tabs.length === 1 ? '' : 's'}`}
+                  </span>
+                )}
+              </div>
+              {!op.is_main && (
+                <div className="flex flex-wrap gap-2">
+                  {ALL_DEV_TAB_IDS.map((tabId) => {
+                    const allowed = op.allowed_tabs == null || op.allowed_tabs.includes(tabId);
+                    return (
+                      <button
+                        key={tabId}
+                        onClick={() => onToggleTab(op.email, tabId, allowed)}
+                        disabled={savingTabsFor === op.email}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium capitalize transition-colors disabled:opacity-40 ${
+                          allowed
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {tabId.replace('-', ' ')}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+          {operators.length === 0 && <p className="text-sm text-slate-500">No developers yet.</p>}
+        </div>
+      )}
     </div>
   );
 }
