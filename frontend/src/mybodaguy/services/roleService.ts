@@ -61,6 +61,18 @@ export const roleService = {
     return data;
   },
 
+  // Grant developer/dev-panel access to another user (Developer only —
+  // enforced server-side inside the RPC, see backend/database/
+  // ADD_DEVELOPER_SELF_SERVICE_ACCESS.sql). Uses an RPC rather than a
+  // plain `.update()` because granting also needs to record the user's
+  // email in mbg_developer_emails, so they keep developer access if they
+  // ever sign in via a different provider (e.g. Google) that lands on a
+  // different auth.users row for the same email.
+  async promoteToDeveloper(userId: string) {
+    const { error } = await supabase.rpc('mbg_promote_to_developer', { target_user_id: userId });
+    if (error) throw error;
+  },
+
   // Demote user back to customer (Developer only)
   async demoteToCustomer(userId: string) {
     const { error } = await supabase

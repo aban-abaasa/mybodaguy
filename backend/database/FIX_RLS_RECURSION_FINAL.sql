@@ -57,6 +57,7 @@ CREATE POLICY mbg_users_service_role ON public.mbg_users
 DROP POLICY IF EXISTS mbg_committee_members_service_role         ON public.mbg_committee_members;
 DROP POLICY IF EXISTS mbg_committee_members_read_own             ON public.mbg_committee_members;
 DROP POLICY IF EXISTS mbg_committee_members_read_assigned        ON public.mbg_committee_members;
+DROP POLICY IF EXISTS mbg_committee_members_read_developer       ON public.mbg_committee_members;
 DROP POLICY IF EXISTS mbg_committee_members_read_subordinates    ON public.mbg_committee_members;
 DROP POLICY IF EXISTS mbg_committee_members_insert               ON public.mbg_committee_members;
 DROP POLICY IF EXISTS mbg_committee_members_insert_authenticated ON public.mbg_committee_members;

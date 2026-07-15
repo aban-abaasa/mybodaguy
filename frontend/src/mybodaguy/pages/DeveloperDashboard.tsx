@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '../services/userService';
+import { roleService } from '../services/roleService';
 import RegionsManagement from '../components/RegionsManagement';
 import IcanCoinCard from '../components/IcanCoinCard';
 import SupermarketProductManager from '../components/SupermarketProductManager';
@@ -516,6 +517,21 @@ function DeveloperApplicationThread({ conversationId }: { conversationId: string
 function UsersTab({ users, loading, onReload }: { users: any[]; loading: boolean; onReload: () => void }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+
+  const makeDeveloper = async (userId: string, email: string) => {
+    if (!window.confirm(`Grant developer/dev-panel access to ${email}?`)) return;
+    setPromotingId(userId);
+    try {
+      await roleService.promoteToDeveloper(userId);
+      toast.success(`${email} is now a developer`);
+      onReload();
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to grant developer access');
+    } finally {
+      setPromotingId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -683,19 +699,30 @@ function UsersTab({ users, loading, onReload }: { users: any[]; loading: boolean
                       {new Date(user.created_at).toLocaleDateString()}
                     </td>
                     <td className="py-3 px-4">
-                      {user.role_type === 'customer' && user.email !== 'abanabaasa2@gmail.com' && (
-                        <button className="text-xs px-3 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors font-medium">
-                          Promote
-                        </button>
-                      )}
-                      {user.role_type === 'developer' && (
-                        <span className="text-xs text-slate-400">Super Admin</span>
-                      )}
-                      {user.role_type === 'chairperson' && (
-                        <span className="text-xs text-slate-400">
-                          {CHAIR_HIERARCHY.indexOf(eRole as ChairLevel) === 0 ? 'Top Level' : 'Chairperson'}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {user.role_type === 'customer' && user.email !== 'abanabaasa2@gmail.com' && (
+                          <button className="text-xs px-3 py-1 bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 transition-colors font-medium">
+                            Promote
+                          </button>
+                        )}
+                        {user.role_type === 'developer' && (
+                          <span className="text-xs text-slate-400">Super Admin</span>
+                        )}
+                        {user.role_type === 'chairperson' && (
+                          <span className="text-xs text-slate-400">
+                            {CHAIR_HIERARCHY.indexOf(eRole as ChairLevel) === 0 ? 'Top Level' : 'Chairperson'}
+                          </span>
+                        )}
+                        {user.role_type !== 'developer' && (
+                          <button
+                            onClick={() => makeDeveloper(user.id, user.email)}
+                            disabled={promotingId === user.id}
+                            className="text-xs px-3 py-1 bg-violet-100 text-violet-700 rounded-md hover:bg-violet-200 transition-colors font-medium disabled:opacity-50"
+                          >
+                            {promotingId === user.id ? 'Granting…' : 'Make Developer'}
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
