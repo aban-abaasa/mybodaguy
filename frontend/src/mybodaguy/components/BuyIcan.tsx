@@ -5,7 +5,9 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { buyICAN, ICAN_TO_UGX, formatICAN } from '../services/icanWalletService';
+import { ICAN_TO_UGX, SOURCE_APP, formatICAN } from '../services/icanWalletService';
+import { supabase } from '../services/supabaseClient';
+import { payWithFlutterwave, generateTxRef } from '../services/flutterwaveClient';
 
 interface BuyIcanProps {
   userId: string;
@@ -28,12 +30,40 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
 
     setProcessing(true);
     try {
-      await buyICAN({
-        userId,
-        icanAmount,
-        paymentRef: `MBG-BUY-${Date.now()}`,
+      const { data: userData } = await supabase.auth.getUser();
+      const txRef = generateTxRef('MBG-BUY');
+
+      const payment = await payWithFlutterwave({
+        amount: parseFloat(ugxAmount),
+        currency: 'UGX',
+        customerEmail: userData?.user?.email,
+        customerName: userData?.user?.user_metadata?.full_name,
+        title: 'BodaGo ICAN Wallet',
+        description: `Buy ${formatICAN(icanAmount)} ICAN`,
+        txRef,
       });
-      
+
+      if (payment.status === 'cancelled') {
+        toast.info('Payment cancelled');
+        return;
+      }
+      if (payment.status !== 'successful' || !payment.transaction_id) {
+        toast.error('Payment was not successful');
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke('verify-flutterwave-payment', {
+        body: {
+          transaction_id: payment.transaction_id,
+          tx_ref: txRef,
+          ican_amount: icanAmount,
+          source_app: SOURCE_APP,
+        },
+      });
+
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Payment verification failed');
+
       toast.success(`Successfully bought ${formatICAN(icanAmount)} ICAN!`);
       setUgxAmount('');
       if (onSuccess) onSuccess();

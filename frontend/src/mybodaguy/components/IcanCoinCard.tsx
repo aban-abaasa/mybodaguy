@@ -15,7 +15,7 @@ export default function IcanCoinCard({ userId, onGoToWallet }: Props) {
       .from('ican_user_wallets')
       .select('ican_balance')
       .eq('user_id', userId)
-      .single()
+      .maybeSingle()
       .then(({ data }) => setBalance(data?.ican_balance ?? 0));
   }, [userId]);
 
