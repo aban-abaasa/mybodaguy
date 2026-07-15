@@ -15,9 +15,29 @@
 -- either the signup form (email/password path) or CountryGate (OAuth path)
 -- actually sets it. Existing rows already defaulted to 'Uganda' are left
 -- alone — there's no way to tell which of those were a real choice.
+--
+-- IMPORTANT: handle_new_auth_user_mbg() has TWO versions in this repo —
+-- the original single-hardcoded-email one (COMPLETE_MYBODAGUY_SETUP.sql)
+-- and a newer allowlist-based one (ADD_DEVELOPER_SELF_SERVICE_ACCESS.sql,
+-- checks mbg_developer_emails so bodagoera@gmail.com also gets 'developer').
+-- This migration builds on the allowlist version — CREATE OR REPLACE-ing
+-- back to the single-email check would silently strip bodagoera@gmail.com's
+-- developer access. The table create+seed below is repeated from that file
+-- (IF NOT EXISTS / ON CONFLICT DO NOTHING) so this migration doesn't depend
+-- on run order against it.
 -- ============================================================================
 
 ALTER TABLE public.mbg_user_profiles ALTER COLUMN country DROP DEFAULT;
+
+CREATE TABLE IF NOT EXISTS public.mbg_developer_emails (
+  email    TEXT PRIMARY KEY,
+  added_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+INSERT INTO public.mbg_developer_emails (email) VALUES
+  ('abanabaasa2@gmail.com'),
+  ('bodagoera@gmail.com')
+ON CONFLICT (email) DO NOTHING;
 
 CREATE OR REPLACE FUNCTION public.handle_new_auth_user_mbg()
 RETURNS TRIGGER
@@ -28,7 +48,10 @@ AS $$
 DECLARE
   user_role mbg_user_role_type;
 BEGIN
-  IF NEW.email = 'abanabaasa2@gmail.com' THEN
+  IF EXISTS (
+    SELECT 1 FROM public.mbg_developer_emails
+    WHERE lower(email) = lower(COALESCE(NEW.email, ''))
+  ) THEN
     user_role := 'developer';
   ELSE
     user_role := 'customer';
@@ -38,7 +61,10 @@ BEGIN
   VALUES (NEW.id, COALESCE(NEW.email, ''), user_role)
   ON CONFLICT (id) DO UPDATE
     SET email = EXCLUDED.email,
-        role_type = user_role,
+        role_type = CASE
+          WHEN public.mbg_users.role_type = 'developer' THEN 'developer'
+          ELSE EXCLUDED.role_type
+        END,
         updated_at = NOW();
 
   INSERT INTO public.mbg_user_profiles (user_id, full_name, country)

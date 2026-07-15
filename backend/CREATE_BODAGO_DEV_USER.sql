@@ -22,15 +22,24 @@ begin
   if v_user_id is null then
     v_user_id := gen_random_uuid();
 
+    -- email_change/*_token_new/*_token_current/phone_change/phone_change_token/
+    -- reauthentication_token must be '' rather than left to default to NULL —
+    -- GoTrue scans them as non-nullable strings and fails to read the row at
+    -- all (fetch/login/session errors) if any of them is NULL. See
+    -- FIX_NULL_AUTH_TOKEN_COLUMNS.sql for the same fix applied retroactively.
     insert into auth.users (
       instance_id, id, aud, role, email, encrypted_password,
       email_confirmed_at, confirmation_token, recovery_token,
+      email_change, email_change_token_new, email_change_token_current,
+      phone_change, phone_change_token, reauthentication_token,
       raw_app_meta_data, raw_user_meta_data,
       created_at, updated_at
     ) values (
       '00000000-0000-0000-0000-000000000000', v_user_id, 'authenticated', 'authenticated',
       v_email, crypt(v_password, gen_salt('bf')),
       now(), '', '',
+      '', '', '',
+      '', '', '',
       '{"provider":"email","providers":["email"]}', '{"full_name":"Bodago Dev"}',
       now(), now()
     );
@@ -48,6 +57,14 @@ begin
     update auth.users
       set encrypted_password = crypt(v_password, gen_salt('bf')),
           email_confirmed_at = coalesce(email_confirmed_at, now()),
+          confirmation_token = coalesce(confirmation_token, ''),
+          recovery_token = coalesce(recovery_token, ''),
+          email_change = coalesce(email_change, ''),
+          email_change_token_new = coalesce(email_change_token_new, ''),
+          email_change_token_current = coalesce(email_change_token_current, ''),
+          phone_change = coalesce(phone_change, ''),
+          phone_change_token = coalesce(phone_change_token, ''),
+          reauthentication_token = coalesce(reauthentication_token, ''),
           updated_at = now()
       where id = v_user_id;
 
