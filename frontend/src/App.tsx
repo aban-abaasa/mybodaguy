@@ -7,6 +7,7 @@ import SignInPage from "./mybodaguy/pages/SignInPage";
 import LandingPage from "./mybodaguy/pages/LandingPage";
 import UnifiedDashboard from "./mybodaguy/pages/UnifiedDashboard";
 import ChatWidget from "./mybodaguy/components/ChatWidget";
+import CountryGate from "./mybodaguy/components/CountryGate";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -156,11 +157,11 @@ export default function App() {
 
   // Render unified dashboard that handles all roles
   return (
-    <>
+    <CountryGate user={user}>
       <UnifiedDashboard user={user} onSignOut={handleSignOut} />
       <ChatWidget />
       <Toaster position="top-right" theme="light" />
-    </>
+    </CountryGate>
   );
 }
 
