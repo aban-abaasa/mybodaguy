@@ -7,6 +7,7 @@ import {
   getBalance,
   getTransactions,
   sendICAN,
+  requestIcanPayout,
   formatICAN,
   ICAN_TO_UGX,
   type ICANBalance,
@@ -14,6 +15,9 @@ import {
 } from '../services/icanWalletService';
 import BuyIcan from '../components/BuyIcan';
 import SellIcan from '../components/SellIcan';
+import SendIcanOut from '../components/SendIcanOut';
+import SetPinPrompt from '../components/SetPinPrompt';
+import { hasPinSet } from '../services/pinService';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -40,26 +44,68 @@ function formatDate(ts: string) {
 
 interface SendModalProps {
   userId: string;
+  balance: ICANBalance;
   onClose: () => void;
   onDone: () => void;
 }
 
-function SendModal({ userId, onClose, onDone }: SendModalProps) {
+const SEND_DESTINATIONS = [
+  { key: 'wallet', label: '💎 ICAN Wallet' },
+  { key: 'mobilemoneyuganda', label: '📱 Mobile Money' },
+  { key: 'bank', label: '🏦 Bank Account' },
+] as const;
+
+function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
+  const [destination, setDestination] = useState<'wallet' | 'mobilemoneyuganda' | 'bank'>('wallet');
+
+  // ICAN-to-ICAN fields
   const [address, setAddress] = useState('');
-  const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+
+  // Real-money payout fields
+  const [network, setNetwork] = useState<'MTN' | 'AIRTEL'>('MTN');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [bankCode, setBankCode] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [beneficiaryName, setBeneficiaryName] = useState('');
+
+  const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
 
+  const amountNum = parseFloat(amount) || 0;
+  const isPayout = destination !== 'wallet';
+  const feePercent = 3; // flat 3% cash-out fee (mobile money / bank) — sending to another ICAN wallet is 0%
+  const ugxGross = amountNum * ICAN_TO_UGX;
+  const ugxNet = ugxGross - Math.round((ugxGross * feePercent) / 100);
+
+  const canSend = isPayout
+    ? amountNum > 0 && amountNum <= balance.ican &&
+      (destination === 'mobilemoneyuganda' ? !!phoneNumber : !!accountNumber && !!bankCode && !!beneficiaryName)
+    : !!address && amountNum > 0;
+
   const handleSend = async () => {
-    if (!address || !amount) { toast.error('Fill in all fields'); return; }
+    if (!canSend) { toast.error('Fill in all fields'); return; }
     setLoading(true);
     try {
-      const { data: rw, error: re } = await supabase
-        .from('ican_user_wallets').select('user_id')
-        .eq('wallet_address', address.trim()).single();
-      if (re || !rw) { toast.error('Wallet address not found'); return; }
-      await sendICAN({ fromUserId: userId, toUserId: (rw as any).user_id, amount: parseFloat(amount), note });
-      toast.success(`Sent ${amount} ICAN`);
+      if (destination === 'wallet') {
+        const { data: rw, error: re } = await supabase
+          .from('ican_user_wallets').select('user_id')
+          .eq('wallet_address', address.trim()).single();
+        if (re || !rw) { toast.error('Wallet address not found'); return; }
+        await sendICAN({ fromUserId: userId, toUserId: (rw as any).user_id, amount: amountNum, note });
+        toast.success(`Sent ${amount} ICAN`);
+      } else {
+        const data = await requestIcanPayout({
+          icanAmount: amountNum,
+          channel: destination,
+          phoneNumber: destination === 'mobilemoneyuganda' ? phoneNumber : undefined,
+          network: destination === 'mobilemoneyuganda' ? network : undefined,
+          accountNumber: destination === 'bank' ? accountNumber : undefined,
+          bankCode: destination === 'bank' ? bankCode : undefined,
+          beneficiaryName: destination === 'bank' ? beneficiaryName : undefined,
+        });
+        toast.success(`${data.message} You'll receive UGX ${Number(data.ugx_net).toLocaleString()}.`);
+      }
       onDone();
       onClose();
     } catch (e: any) {
@@ -70,51 +116,137 @@ function SendModal({ userId, onClose, onDone }: SendModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl">
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
+      <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl my-8">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="font-bold text-lg text-slate-800">Send ICAN</h2>
+          <h2 className="font-bold text-lg text-slate-800">Send</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
         </div>
 
-        <div className="space-y-4">
-          <div>
-            <label className="text-slate-600 text-sm font-medium mb-1 block">Recipient Wallet Address</label>
-            <input
-              value={address} onChange={e => setAddress(e.target.value)}
-              placeholder="ICA-XXXXXXXXXXXXXXXX"
-              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400"
-            />
+        <div className="mb-4">
+          <label className="text-slate-600 text-sm font-medium mb-1 block">Send To</label>
+          <div className="flex gap-2">
+            {SEND_DESTINATIONS.map((d) => (
+              <button
+                key={d.key}
+                type="button"
+                onClick={() => setDestination(d.key)}
+                disabled={loading}
+                className={`flex-1 py-2 rounded-lg text-xs sm:text-sm font-medium border ${
+                  destination === d.key ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-slate-200 text-slate-600'
+                }`}
+              >
+                {d.label}
+              </button>
+            ))}
           </div>
+          <p className="text-slate-400 text-xs mt-1">
+            Cards can only receive top-ups, not payouts — send to a card isn't supported by any provider we integrate with.
+          </p>
+        </div>
+
+        <div className="space-y-4">
+          {destination === 'wallet' && (
+            <div>
+              <label className="text-slate-600 text-sm font-medium mb-1 block">Recipient Wallet Address</label>
+              <input
+                value={address} onChange={e => setAddress(e.target.value)}
+                placeholder="ICA-XXXXXXXXXXXXXXXX"
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400"
+              />
+            </div>
+          )}
+
+          {destination === 'mobilemoneyuganda' && (
+            <>
+              <div className="flex gap-2">
+                {(['MTN', 'AIRTEL'] as const).map((n) => (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setNetwork(n)}
+                    disabled={loading}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium border ${
+                      network === n ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-slate-200 text-slate-600'
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
+              </div>
+              <div>
+                <label className="text-slate-600 text-sm font-medium mb-1 block">Mobile Money Number</label>
+                <input
+                  value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)}
+                  placeholder="e.g. 0770123456"
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400"
+                />
+              </div>
+            </>
+          )}
+
+          {destination === 'bank' && (
+            <>
+              <div>
+                <label className="text-slate-600 text-sm font-medium mb-1 block">Bank Code</label>
+                <input value={bankCode} onChange={e => setBankCode(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="text-slate-600 text-sm font-medium mb-1 block">Account Number</label>
+                <input value={accountNumber} onChange={e => setAccountNumber(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400" />
+              </div>
+              <div>
+                <label className="text-slate-600 text-sm font-medium mb-1 block">Account Holder Name</label>
+                <input value={beneficiaryName} onChange={e => setBeneficiaryName(e.target.value)}
+                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400" />
+              </div>
+            </>
+          )}
+
           <div>
             <label className="text-slate-600 text-sm font-medium mb-1 block">Amount (ICAN)</label>
             <input
-              type="number" step="0.0001" min="0.0001"
+              type="number" step="0.0001" min="0.0001" max={isPayout ? balance.ican : undefined}
               value={amount} onChange={e => setAmount(e.target.value)}
               placeholder="0.0000"
               className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400"
             />
-            {amount && (
+            {amount && !isPayout && (
               <p className="text-slate-400 text-xs mt-1">
                 ≈ UGX {(parseFloat(amount || '0') * ICAN_TO_UGX).toLocaleString()}
               </p>
             )}
           </div>
-          <div>
-            <label className="text-slate-600 text-sm font-medium mb-1 block">Note (optional)</label>
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="What's this for?"
-              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400" />
-          </div>
+
+          {destination === 'wallet' && (
+            <div>
+              <label className="text-slate-600 text-sm font-medium mb-1 block">Note (optional)</label>
+              <input value={note} onChange={e => setNote(e.target.value)} placeholder="What's this for?"
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400" />
+            </div>
+          )}
+
+          {isPayout && amountNum > 0 && (
+            <div className="bg-slate-50 rounded-xl p-4 text-sm space-y-1">
+              <div className="flex justify-between text-slate-500"><span>Fee ({feePercent}%)</span><span>-UGX {(ugxGross - ugxNet).toLocaleString()}</span></div>
+              <div className="flex justify-between text-slate-800 font-semibold pt-1 border-t border-slate-200"><span>Recipient Gets</span><span>UGX {ugxNet.toLocaleString()}</span></div>
+            </div>
+          )}
+
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-700 text-xs">
-            10% tithe is automatically deducted from the recipient's earnings.
+            {isPayout
+              ? 'Sent via Flutterwave. A 3% cash-out fee applies. If the transfer fails, your ICAN is refunded automatically.'
+              : 'No fee — the recipient receives the full amount you send.'}
           </div>
         </div>
 
         <div className="flex gap-3 mt-5">
           <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm">Cancel</button>
-          <button onClick={handleSend} disabled={loading}
+          <button onClick={handleSend} disabled={!canSend || loading}
             className="flex-1 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm disabled:opacity-60">
-            {loading ? 'Sending…' : 'Send ICAN'}
+            {loading ? 'Sending…' : 'Send'}
           </button>
         </div>
       </div>
@@ -174,8 +306,9 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'in' | 'out' | 'tithe'>('all');
-  const [modal, setModal] = useState<'send' | 'receive' | 'buy' | 'sell' | null>(null);
+  const [modal, setModal] = useState<'send' | 'receive' | 'buy' | 'sell' | 'sendout' | null>(null);
   const [balanceHidden, setBalanceHidden] = useState(false);
+  const [needsPin, setNeedsPin] = useState(false);
 
   const loadData = useCallback(async () => {
     if (!user?.id) return;
@@ -187,6 +320,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
       ]);
       setBalance(bal);
       setTransactions(txs);
+      hasPinSet(user.id).then((has) => setNeedsPin(!has)).catch(() => {});
     } catch (e: any) {
       toast.error('Wallet error: ' + e.message);
     }
@@ -230,7 +364,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Bike className="w-6 h-6 text-orange-300" />
-              <span className="text-white font-semibold text-sm">BodaGo — ICAN Wallet</span>
+              <span className="text-white font-semibold text-sm">BodaGo — IcanEra Wallet</span>
             </div>
             <div className="flex gap-2">
               <button onClick={() => setBalanceHidden(h => !h)}
@@ -277,6 +411,11 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
               </button>
             ))}
           </div>
+
+          <button onClick={() => setModal('sendout')}
+            className="w-full mt-3 py-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-sm font-medium flex items-center justify-center gap-2 transition-colors">
+            📤 Send Out to Mobile Money / Bank
+          </button>
         </div>
       </div>
 
@@ -382,7 +521,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
 
       {/* Modals */}
       {modal === 'send' && (
-        <SendModal userId={user.id} onClose={() => setModal(null)} onDone={loadData} />
+        <SendModal userId={user.id} balance={balance} onClose={() => setModal(null)} onDone={loadData} />
       )}
       {modal === 'receive' && balance.address && (
         <ReceiveModal address={balance.address} onClose={() => setModal(null)} />
@@ -396,6 +535,14 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
         <TradeModal title="💰 Sell ICAN Coins" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>
           <SellIcan userId={user.id} onSuccess={() => { loadData(); setModal(null); }} />
         </TradeModal>
+      )}
+      {modal === 'sendout' && (
+        <TradeModal title="📤 Send ICAN Out" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>
+          <SendIcanOut userId={user.id} balance={balance.ican} onSuccess={() => { loadData(); setModal(null); }} />
+        </TradeModal>
+      )}
+      {needsPin && (
+        <SetPinPrompt userId={user.id} onDone={() => setNeedsPin(false)} />
       )}
     </div>
   );

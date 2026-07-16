@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MapPin, Plane, Home, CreditCard, CheckCircle, Loader2, Star, Phone, Car, Search, Bike, Ship, Package, Printer } from 'lucide-react';
+import { MapPin, Plane, Home, CreditCard, CheckCircle, Loader2, Star, Phone, Car, Search, Bike, Ship, Package, Printer, User } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 import {
   searchFlights, searchAirports, getJourneyQuote, confirmJourney, pollJourney, requestShipCargoJourney,
@@ -7,6 +7,8 @@ import {
 } from '../services/journeyService';
 import { geocodeAddress, reverseGeocodeCountry, searchCities, type CountryLookup, type CitySuggestion } from '../services/geocodeService';
 import { printFlightTicket, printShipTicket } from '../services/printTicket';
+import { getBalance, ICAN_TO_UGX, formatICAN, SOURCE_APP } from '../services/icanWalletService';
+import { payWithFlutterwave, generateTxRef } from '../services/flutterwaveClient';
 import LocationPickerMap from './LocationPickerMap';
 import type { Location } from '../data/mockLocations';
 import { COUNTRIES } from '../data/countries';
@@ -122,6 +124,107 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
   const [journey, setJourney] = useState<Journey | null>(null);
   const [customerName, setCustomerName] = useState('Customer');
 
+  // Real traveler details — must match the passenger's ID/passport, since
+  // this books an actual seat with a real airline via Duffel.
+  const [passengerTitle, setPassengerTitle] = useState<'mr' | 'mrs' | 'ms' | 'miss' | 'dr'>('mr');
+  const [passengerGender, setPassengerGender] = useState<'m' | 'f'>('m');
+  const [passengerGivenName, setPassengerGivenName] = useState('');
+  const [passengerFamilyName, setPassengerFamilyName] = useState('');
+  const [passengerDob, setPassengerDob] = useState('');
+  const [passengerPhone, setPassengerPhone] = useState('');
+  const passengerDetailsValid =
+    passengerGivenName.trim().length > 0 &&
+    passengerFamilyName.trim().length > 0 &&
+    !!passengerDob &&
+    passengerPhone.trim().length >= 7;
+
+  // Real ICAN wallet balance, checked against the quote before letting the
+  // customer confirm — avoids creating a doomed mbg_journeys row (confirm.js
+  // marks it 'failed' on an insufficient-balance debit) when we can instead
+  // offer a real Flutterwave top-up right here.
+  const [walletIcan, setWalletIcan] = useState<number | null>(null);
+  const [checkingBalance, setCheckingBalance] = useState(false);
+  const [toppingUp, setToppingUp] = useState(false);
+
+  const refreshBalance = async () => {
+    if (!customerId) return;
+    setCheckingBalance(true);
+    try {
+      const balance = await getBalance(customerId);
+      setWalletIcan(balance.ican);
+    } catch {
+      setWalletIcan(null);
+    } finally {
+      setCheckingBalance(false);
+    }
+  };
+
+  useEffect(() => {
+    if (step === 'review' && quote) refreshBalance();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, quote]);
+
+  const shortfallIcan = quote && walletIcan !== null ? Math.max(0, quote.totalIcan - walletIcan) : 0;
+  const hasEnoughBalance = walletIcan === null ? true : shortfallIcan <= 0;
+
+  const doTopUp = async () => {
+    if (!quote || shortfallIcan <= 0) return;
+    setError(null);
+    setToppingUp(true);
+    try {
+      const { data: authUser } = await supabase.auth.getUser();
+      const email = authUser?.user?.email;
+      // Round up to whole shillings, and up to at least the platform's
+      // minimum purchase, so a fractional shortfall still clears Flutterwave
+      // and buy_ican_coins' own minimum-amount expectations.
+      const ugxAmount = Math.max(ICAN_TO_UGX, Math.ceil(shortfallIcan * ICAN_TO_UGX));
+      const icanAmount = ugxAmount / ICAN_TO_UGX;
+      const txRef = generateTxRef('MBGJ-TOPUP');
+
+      const payment = await payWithFlutterwave({
+        amount: ugxAmount,
+        currency: 'UGX',
+        customerEmail: email,
+        customerPhone: passengerPhone.trim() || undefined,
+        customerName: `${passengerGivenName} ${passengerFamilyName}`.trim() || customerName,
+        title: 'BodaGo Journey — Top up ICAN',
+        description: `Top up ${formatICAN(icanAmount)} ICAN to complete your journey booking`,
+        txRef,
+      });
+
+      if (payment.status === 'cancelled') {
+        setError('Top-up cancelled.');
+        return;
+      }
+      if (payment.status !== 'successful' || !payment.transaction_id) {
+        setError('Top-up payment was not successful.');
+        return;
+      }
+
+      // Server-side verification against Flutterwave's own API (secret key,
+      // never in the browser) before crediting — see
+      // ICAN/backend/components/supabase/functions/verify-flutterwave-payment.
+      // buy_ican_coins itself is locked to service_role only, so this edge
+      // function is the only real way to credit a wallet.
+      const { data, error: verifyError } = await supabase.functions.invoke('verify-flutterwave-payment', {
+        body: {
+          transaction_id: payment.transaction_id,
+          tx_ref: txRef,
+          ican_amount: icanAmount,
+          source_app: SOURCE_APP,
+        },
+      });
+      if (verifyError) throw verifyError;
+      if (!data?.success) throw new Error(data?.error || 'Top-up verification failed');
+
+      await refreshBalance();
+    } catch (err: any) {
+      setError(err.message || 'Top-up failed');
+    } finally {
+      setToppingUp(false);
+    }
+  };
+
   useEffect(() => {
     if (!customerId) return;
     supabase
@@ -143,6 +246,16 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
         setCustomerName(name);
       });
   }, [customerId]);
+
+  // Best-effort prefill of the passenger name form from the customer's
+  // profile — still editable, since the traveler isn't always the account
+  // holder and the name must match their travel document exactly.
+  useEffect(() => {
+    if (!customerName || customerName === 'Customer') return;
+    const parts = customerName.trim().split(/\s+/);
+    setPassengerGivenName((prev) => prev || parts[0] || '');
+    setPassengerFamilyName((prev) => prev || parts.slice(1).join(' '));
+  }, [customerName]);
 
   const isFirstPickupCountryRender = useRef(true);
   useEffect(() => {
@@ -261,6 +374,19 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
 
   const doConfirm = async () => {
     if (!quote) return;
+    const passengerId = quote.offer.passengers?.[0]?.id;
+    if (!passengerId) {
+      setError('This flight offer has expired — please search flights again.');
+      return;
+    }
+    if (!passengerDetailsValid) {
+      setError('Please fill in the passenger\'s full name, date of birth and phone number.');
+      return;
+    }
+    if (!hasEnoughBalance) {
+      setError('Top up your ICAN wallet before confirming this booking.');
+      return;
+    }
     setConfirming(true);
     setError(null);
     try {
@@ -270,8 +396,9 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
         customerUserId: customerId,
         quote,
         passengers: [{
-          type: 'adult', given_name: 'Passenger', family_name: 'BodaGo', born_on: '1990-01-01',
-          gender: 'm', email, phone_number: '+256700000000',
+          id: passengerId, type: 'adult', title: passengerTitle,
+          given_name: passengerGivenName.trim(), family_name: passengerFamilyName.trim(),
+          born_on: passengerDob, gender: passengerGender, email, phone_number: passengerPhone.trim(),
         }],
       });
       setStep('tracking');
@@ -595,8 +722,86 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
             <div className="flex justify-between font-semibold border-t pt-2"><span>Total</span><span>UGX {quote.totalUgx.toLocaleString()} ({quote.totalIcan.toFixed(4)} ICAN)</span></div>
           </div>
           <p className="text-xs text-slate-500">Paid in full from your ICAN wallet — no tithe on journey payments.</p>
+
+          <div className="border rounded-lg p-3 text-sm flex items-center justify-between">
+            <span className="text-slate-500">Wallet balance</span>
+            <span className="font-semibold">
+              {checkingBalance ? 'Checking…' : walletIcan !== null ? `${walletIcan.toFixed(4)} ICAN` : '—'}
+            </span>
+          </div>
+
+          {!checkingBalance && walletIcan !== null && !hasEnoughBalance && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 space-y-2">
+              <p className="text-sm text-amber-800">
+                You need {shortfallIcan.toFixed(4)} more ICAN (about UGX {Math.ceil(shortfallIcan * ICAN_TO_UGX).toLocaleString()}) to complete this booking.
+              </p>
+              <button
+                type="button"
+                disabled={toppingUp}
+                onClick={doTopUp}
+                className="w-full bg-amber-500 disabled:bg-slate-300 text-white rounded-lg py-2.5 font-semibold text-sm flex items-center justify-center gap-2"
+              >
+                {toppingUp ? <Loader2 className="animate-spin" size={16} /> : <CreditCard size={16} />}
+                {toppingUp ? 'Processing top-up…' : 'Top up via Flutterwave'}
+              </button>
+            </div>
+          )}
+
+          <div className="space-y-3 border-t pt-4">
+            <h4 className="font-semibold text-slate-700 flex items-center gap-2"><User size={16} /> Passenger details</h4>
+            <p className="text-xs text-slate-500">Must match the traveler's ID/passport exactly — this books a real seat with the airline.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                className="border rounded-lg p-2.5 bg-white text-slate-900 text-sm"
+                value={passengerTitle}
+                onChange={(e) => setPassengerTitle(e.target.value as typeof passengerTitle)}
+              >
+                <option value="mr">Mr</option>
+                <option value="mrs">Mrs</option>
+                <option value="ms">Ms</option>
+                <option value="miss">Miss</option>
+                <option value="dr">Dr</option>
+              </select>
+              <select
+                className="border rounded-lg p-2.5 bg-white text-slate-900 text-sm"
+                value={passengerGender}
+                onChange={(e) => setPassengerGender(e.target.value as 'm' | 'f')}
+              >
+                <option value="m">Male</option>
+                <option value="f">Female</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                className="border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400"
+                placeholder="Given name"
+                value={passengerGivenName}
+                onChange={(e) => setPassengerGivenName(e.target.value)}
+              />
+              <input
+                className="border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400"
+                placeholder="Family name"
+                value={passengerFamilyName}
+                onChange={(e) => setPassengerFamilyName(e.target.value)}
+              />
+            </div>
+            <input
+              className="w-full border rounded-lg p-3 bg-white text-slate-900"
+              type="date"
+              value={passengerDob}
+              onChange={(e) => setPassengerDob(e.target.value)}
+            />
+            <input
+              className="w-full border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400"
+              type="tel"
+              placeholder="Phone number (e.g. +2567XXXXXXXX)"
+              value={passengerPhone}
+              onChange={(e) => setPassengerPhone(e.target.value)}
+            />
+          </div>
+
           <button
-            disabled={confirming}
+            disabled={confirming || !passengerDetailsValid || !hasEnoughBalance}
             onClick={doConfirm}
             className="w-full bg-orange-500 disabled:bg-slate-300 text-white rounded-lg py-3 font-semibold flex items-center justify-center gap-2"
           >
@@ -616,7 +821,7 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
                 onClick={() => {
                   const flightLeg = journey.legs.find((l) => l.leg_type === 'flight');
                   printFlightTicket({
-                    passengerName: 'Passenger BodaGo',
+                    passengerName: `${passengerGivenName} ${passengerFamilyName}`.trim() || customerName,
                     pnr: flightLeg?.flight_booking?.pnr || null,
                     carrier: selectedOffer?.carrier || 'Airline',
                     originLabel: originLabel || originIata,

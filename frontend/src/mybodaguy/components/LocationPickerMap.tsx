@@ -124,7 +124,12 @@ export default function LocationPickerMap({
       pickupMarkerRef.current.setPopupContent(`<b>Pickup</b><br>${pickup.fullAddress}`);
       pickupMarkerRef.current.dragging?.[pickupLocked ? 'disable' : 'enable']();
     }
-    if (!dropoff) map.setView(latlng, 14);
+    // animate: false — an animated setView schedules a requestAnimationFrame
+    // callback that runs after this effect returns; if the map has since
+    // been torn down (component unmounted, map.remove() already ran), that
+    // deferred callback reads a pane that no longer exists and throws
+    // ("Cannot read properties of undefined (reading '_leaflet_pos')").
+    if (!dropoff) map.setView(latlng, 14, { animate: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pickup?.coordinates.lat, pickup?.coordinates.lng, pickupLocked]);
 
@@ -143,7 +148,7 @@ export default function LocationPickerMap({
       dropoffMarkerRef.current.setLatLng(latlng);
     }
     dropoffMarkerRef.current.setPopupContent(`<b>Drop-off</b><br>${dropoff.fullAddress}`);
-    if (!pickup) map.setView(latlng, 14);
+    if (!pickup) map.setView(latlng, 14, { animate: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dropoff?.coordinates.lat, dropoff?.coordinates.lng]);
 

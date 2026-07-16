@@ -1,12 +1,17 @@
 // Duffel client using native fetch (Vercel's Node runtime has it built in)
 // so this stays dependency-free — no axios needed just for this.
 const DUFFEL_API_BASE = process.env.DUFFEL_API_BASE || 'https://api.duffel.com';
+// Strip a leading BOM (seen elsewhere in this project's config, e.g.
+// vercel.json) and surrounding whitespace — an env var pasted from a
+// BOM-prefixed source would otherwise silently break the Bearer header and
+// every Duffel call would 401.
+const DUFFEL_ACCESS_TOKEN = process.env.DUFFEL_ACCESS_TOKEN?.replace(/^\uFEFF/, '').trim();
 
 async function duffelRequest(path, options = {}) {
   const res = await fetch(`${DUFFEL_API_BASE}${path}`, {
     ...options,
     headers: {
-      Authorization: `Bearer ${process.env.DUFFEL_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${DUFFEL_ACCESS_TOKEN}`,
       'Duffel-Version': 'v2',
       'Content-Type': 'application/json',
       Accept: 'application/json',
@@ -46,7 +51,10 @@ export async function searchOffers({ originIata, destinationIata, departureDate,
       totalAmount: offer.total_amount,
       totalCurrency: offer.total_currency,
       slices: offer.slices,
-      expiresAt: offer.expires_at
+      expiresAt: offer.expires_at,
+      // Order creation must reference these exact passenger ids from the
+      // offer — Duffel rejects an order whose passengers don't match.
+      passengers: offer.passengers
     }))
   };
 }

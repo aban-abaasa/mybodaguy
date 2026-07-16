@@ -25,6 +25,7 @@ export interface FlutterwavePayParams {
   title?: string;
   description?: string;
   txRef: string;
+  paymentOptions?: string;
 }
 
 export interface FlutterwavePayResult {
@@ -54,7 +55,9 @@ export function payWithFlutterwave(params: FlutterwavePayParams): Promise<Flutte
       // (Flutterwave routes by the number's network automatically), 'account'
       // is bank-account/direct-debit. Tokens like 'bank_transfer'/'barter'
       // aren't valid Flutterwave option strings and were silently ignored.
-      payment_options: 'card,mobilemoneyuganda,account',
+      // Callers can narrow this (e.g. just 'card' or just 'mobilemoneyuganda')
+      // via paymentOptions when the user already picked a method in-app.
+      payment_options: params.paymentOptions || 'card,mobilemoneyuganda,account',
       customer: {
         email: params.customerEmail || 'customer@bodago.app',
         phone_number: params.customerPhone || '',

@@ -1,11 +1,18 @@
 /**
- * Journey booking service — talks to this same Vercel project's /api
- * serverless functions (mybodaguy/frontend/api/), not Supabase directly,
- * because booking a real flight and debiting ICAN must happen atomically
- * with a Duffel API call that needs a secret access token the browser must
- * never see. Same-origin, so no base URL/env var is needed.
+ * Journey booking service — talks to mybodaguy/frontend/api/'s serverless
+ * functions, not Supabase directly, because booking a real flight and
+ * debiting ICAN must happen atomically with a Duffel API call that needs a
+ * secret access token the browser must never see.
+ *
+ * Always points at the live, already-deployed Vercel backend — never a
+ * relative/same-origin path — so this works identically whether the
+ * frontend itself is running locally or deployed, with no local API server
+ * required. mybodaguy/frontend/api/_lib/cors.js already allowlists the
+ * local dev origins, so this remains a normal cross-origin call in dev.
  */
 import { supabase } from '../../services/supabaseClient';
+
+const MBG_API_BASE_URL = 'https://bodagoera.icanera.space';
 
 export interface FlightOffer {
   offerId: string;
@@ -14,6 +21,9 @@ export interface FlightOffer {
   totalCurrency: string;
   slices: any[];
   expiresAt: string;
+  // Duffel-assigned passenger ids from the offer — order creation must
+  // reference these exactly, one per passenger booked on this offer.
+  passengers: Array<{ id: string; type: string }>;
 }
 
 export interface JourneyPickup {
@@ -49,7 +59,7 @@ export interface JourneyQuote {
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(`${MBG_API_BASE_URL}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -99,7 +109,7 @@ export async function getJourneyQuote(params: {
 export async function confirmJourney(params: {
   customerUserId: string;
   quote: JourneyQuote;
-  passengers: Array<{ type: 'adult'; given_name: string; family_name: string; born_on: string; gender: 'm' | 'f'; email: string; phone_number: string; title?: string }>;
+  passengers: Array<{ id: string; type: 'adult'; given_name: string; family_name: string; born_on: string; gender: 'm' | 'f'; email: string; phone_number: string; title?: string }>;
 }): Promise<{ journeyId: string; pnr: string }> {
   return postJson('/api/journeys/confirm', params);
 }
@@ -146,7 +156,7 @@ export interface Journey {
 }
 
 export async function getJourney(journeyId: string): Promise<Journey> {
-  const res = await fetch(`/api/journeys/${journeyId}`);
+  const res = await fetch(`${MBG_API_BASE_URL}/api/journeys/${journeyId}`);
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data.error || 'Failed to fetch journey');
   return data.journey as Journey;

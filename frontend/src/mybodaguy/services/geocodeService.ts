@@ -11,6 +11,34 @@ export interface GeocodeResult {
   displayName: string;
 }
 
+// Nominatim's usage policy caps free public use at 1 request/second per
+// client. This booking flow can fire several geocode calls close together
+// (pickup address, city autocomplete, a dropped map pin's reverse lookup,
+// its country lookup) — without this, those can silently collide and get
+// rate-limited, which looks exactly like "no cities found" with no error.
+// Serializing every Nominatim call through one throttled queue guarantees
+// they're always spaced out, regardless of which function fired them.
+const NOMINATIM_MIN_INTERVAL_MS = 1100;
+let lastNominatimRequestAt = 0;
+let nominatimQueue: Promise<void> = Promise.resolve();
+
+function throttledFetch(url: string, init?: RequestInit): Promise<Response> {
+  const run = async () => {
+    const wait = Math.max(0, lastNominatimRequestAt + NOMINATIM_MIN_INTERVAL_MS - Date.now());
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+    lastNominatimRequestAt = Date.now();
+    return fetch(url, init);
+  };
+  const result = nominatimQueue.then(run);
+  // Keep the queue alive even if this particular call fails, so one bad
+  // request doesn't jam throttling for everything after it.
+  nominatimQueue = result.then(
+    () => undefined,
+    () => undefined
+  );
+  return result;
+}
+
 /**
  * countryHint biases short/local place names (e.g. "Ntinda" — a Kampala
  * neighborhood with no country in the text) toward the right country,
@@ -28,7 +56,7 @@ export async function geocodeAddress(query: string, countryHint?: string): Promi
 
   for (const attempt of attempts) {
     const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(attempt)}`;
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const res = await throttledFetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) continue;
 
     const results = await res.json();
@@ -51,7 +79,7 @@ export async function geocodeAddress(query: string, countryHint?: string): Promi
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
   const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`;
   try {
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const res = await throttledFetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) return null;
     const result = await res.json();
     return result?.display_name || null;
@@ -81,28 +109,23 @@ export interface CitySuggestion {
   lng: number;
 }
 
-/**
- * Real city/town/village search worldwide — no country whitelist, works for
- * any of the ~195 real countries in data/countries.ts (or none at all, if
- * countryIso2 is omitted). featureType=settlement scopes Nominatim's index
- * to city/town/village-level places specifically, so results are actual
- * places a customer would type as "where I live," not streets/POIs.
- */
-export async function searchCities(query: string, countryIso2?: string): Promise<CitySuggestion[]> {
-  const trimmed = query.trim();
-  if (trimmed.length < 2) return [];
-
+async function runCitySearch(trimmed: string, countryIso2: string | undefined, strict: boolean): Promise<CitySuggestion[]> {
   const params = new URLSearchParams({
     format: 'json',
     limit: '8',
     q: trimmed,
-    featureType: 'settlement',
     addressdetails: '1',
     'accept-language': 'en',
   });
+  // Nominatim's featureType=settlement bucket (city/town/village/hamlet)
+  // covers most real places, but plenty of smaller or unusually-tagged
+  // towns fall outside it and come back with zero results — not because
+  // they don't exist, just because of how this one place happens to be
+  // classified in OSM. Only used on the first, strict attempt.
+  if (strict) params.set('featureType', 'settlement');
   if (countryIso2) params.set('countrycodes', countryIso2.toLowerCase());
 
-  const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+  const res = await throttledFetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
     headers: { Accept: 'application/json' },
   });
   if (!res.ok) return [];
@@ -116,10 +139,27 @@ export async function searchCities(query: string, countryIso2?: string): Promise
   }));
 }
 
+/**
+ * Real city/town/village search worldwide — no country whitelist, works for
+ * any of the ~195 real countries in data/countries.ts (or none at all, if
+ * countryIso2 is omitted). Tries the tight settlement-only search first;
+ * if that finds nothing, retries without the featureType filter so a
+ * customer typing a real but loosely-tagged town still gets a result
+ * instead of "no cities found."
+ */
+export async function searchCities(query: string, countryIso2?: string): Promise<CitySuggestion[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const strict = await runCitySearch(trimmed, countryIso2, true);
+  if (strict.length > 0) return strict;
+  return runCitySearch(trimmed, countryIso2, false);
+}
+
 export async function reverseGeocodeCountry(lat: number, lng: number): Promise<CountryLookup | null> {
   const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1&accept-language=en`;
   try {
-    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    const res = await throttledFetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) return null;
     const result = await res.json();
     const iso2 = result?.address?.country_code;

@@ -14,17 +14,32 @@ interface BuyIcanProps {
   onSuccess?: () => void;
 }
 
+const PAYMENT_METHODS = [
+  { key: 'mtn', label: '📱 MTN', paymentOptions: 'mobilemoneyuganda' },
+  { key: 'airtel', label: '📱 Airtel', paymentOptions: 'mobilemoneyuganda' },
+  { key: 'card', label: '💳 Card', paymentOptions: 'card' },
+  { key: 'bank', label: '🏦 Bank Account', paymentOptions: 'account' },
+] as const;
+
 export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
   const [ugxAmount, setUgxAmount] = useState('');
+  const [method, setMethod] = useState<'mtn' | 'airtel' | 'card' | 'bank'>('mtn');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [processing, setProcessing] = useState(false);
 
   const icanAmount = ugxAmount ? parseFloat(ugxAmount) / ICAN_TO_UGX : 0;
+  const isMobileMoney = method === 'mtn' || method === 'airtel';
+  const canBuy = !!ugxAmount && parseFloat(ugxAmount) >= ICAN_TO_UGX && (!isMobileMoney || !!phoneNumber);
 
   const handleBuy = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!ugxAmount || parseFloat(ugxAmount) < ICAN_TO_UGX) {
       toast.error(`Minimum purchase: UGX ${ICAN_TO_UGX.toLocaleString()}`);
+      return;
+    }
+    if (isMobileMoney && !phoneNumber) {
+      toast.error('Enter your mobile money number');
       return;
     }
 
@@ -32,13 +47,16 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
     try {
       const { data: userData } = await supabase.auth.getUser();
       const txRef = generateTxRef('MBG-BUY');
+      const selectedMethod = PAYMENT_METHODS.find((m) => m.key === method)!;
 
       const payment = await payWithFlutterwave({
         amount: parseFloat(ugxAmount),
         currency: 'UGX',
         customerEmail: userData?.user?.email,
         customerName: userData?.user?.user_metadata?.full_name,
-        title: 'BodaGo ICAN Wallet',
+        customerPhone: isMobileMoney ? phoneNumber : undefined,
+        paymentOptions: selectedMethod.paymentOptions,
+        title: 'BodaGo — IcanEra Wallet',
         description: `Buy ${formatICAN(icanAmount)} ICAN`,
         txRef,
       });
@@ -66,6 +84,7 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
 
       toast.success(`Successfully bought ${formatICAN(icanAmount)} ICAN!`);
       setUgxAmount('');
+      setPhoneNumber('');
       if (onSuccess) onSuccess();
     } catch (error: any) {
       toast.error(error.message || 'Purchase failed');
@@ -77,6 +96,39 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
   return (
     <div className="p-4">
       <form onSubmit={handleBuy} className="space-y-4">
+        {/* Payment Method */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">Payment Method</label>
+          <div className="grid grid-cols-2 gap-2">
+            {PAYMENT_METHODS.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                onClick={() => setMethod(m.key)}
+                disabled={processing}
+                className={`py-2 rounded-lg text-sm font-medium border ${
+                  method === m.key ? 'bg-orange-500 border-orange-500 text-white' : 'bg-gray-800 border-gray-700 text-gray-300'
+                }`}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {isMobileMoney && (
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">Mobile Money Number</label>
+            <input
+              value={phoneNumber}
+              onChange={(e) => setPhoneNumber(e.target.value)}
+              placeholder="e.g. 0770123456"
+              disabled={processing}
+              className="w-full px-4 py-3 bg-gray-800 text-white rounded-lg border border-gray-700 focus:outline-none focus:border-orange-500"
+            />
+          </div>
+        )}
+
         {/* Amount Input */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
@@ -132,7 +184,7 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
         {/* Buy Button */}
         <button
           type="submit"
-          disabled={!ugxAmount || parseFloat(ugxAmount) < ICAN_TO_UGX || processing}
+          disabled={!canBuy || processing}
           className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {processing ? (
@@ -143,6 +195,14 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
           ) : (
             '💳 Buy ICAN Now'
           )}
+        </button>
+
+        <button
+          type="button"
+          onClick={() => window.open('https://icanera.space/', '_blank', 'noopener,noreferrer')}
+          className="w-full text-center text-xs text-gray-500 hover:text-gray-300 underline"
+        >
+          Prefer the web? Buy for free at icanera.space ↗
         </button>
       </form>
     </div>
