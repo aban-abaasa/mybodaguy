@@ -187,7 +187,7 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
         customerEmail: email,
         customerPhone: passengerPhone.trim() || undefined,
         customerName: `${passengerGivenName} ${passengerFamilyName}`.trim() || customerName,
-        title: 'BodaGo Journey — Top up ICAN',
+        title: 'BodaGoEra Journey — Top up ICAN',
         description: `Top up ${formatICAN(icanAmount)} ICAN to complete your journey booking`,
         txRef,
       });

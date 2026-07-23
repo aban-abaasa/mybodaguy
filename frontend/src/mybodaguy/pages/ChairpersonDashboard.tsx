@@ -136,7 +136,7 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
               <div className="flex items-center gap-1.5 xs:gap-2 sm:gap-3">
                 <Bike size={18} className="xs:w-5 xs:h-5 sm:w-7 sm:h-7" />
                 <div>
-                  <h1 className="text-sm xs:text-base sm:text-xl font-bold leading-tight">BodaGo</h1>
+                  <h1 className="text-sm xs:text-base sm:text-xl font-bold leading-tight">BodaGoEra</h1>
                   <p className="text-[9px] xs:text-[10px] sm:text-xs opacity-90 hidden xs:block">Chairperson Dashboard</p>
                 </div>
               </div>

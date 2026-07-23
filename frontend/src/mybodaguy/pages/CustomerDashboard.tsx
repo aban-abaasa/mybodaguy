@@ -243,7 +243,7 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               <div className="flex items-center gap-2">
                 <Bike size={22} />
                 <div>
-                  <p className="font-bold leading-none text-sm">BodaGo</p>
+                  <p className="font-bold leading-none text-sm">BodaGoEra</p>
                   <p className="text-[10px] opacity-75">Your Trusted Partner</p>
                 </div>
               </div>
@@ -489,7 +489,7 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
               </div>
               <div>
                 <p className="font-semibold text-slate-800">{user?.email}</p>
-                <p className="text-sm text-slate-500 flex items-center gap-1"><CheckCircle size={12} className="text-green-500" /> BodaGo Customer</p>
+                <p className="text-sm text-slate-500 flex items-center gap-1"><CheckCircle size={12} className="text-green-500" /> BodaGoEra Customer</p>
               </div>
             </div>
             <div className="space-y-2 text-sm">

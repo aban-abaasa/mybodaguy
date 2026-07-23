@@ -294,7 +294,7 @@ function ApplicationChatThread({ applicationId }: { applicationId: string }) {
             key={m.id}
             className={`rounded-lg px-3 py-2 text-sm max-w-[85%] ${m.sender_role === 'dev' ? 'bg-slate-100 text-slate-800' : 'bg-orange-500 text-white ml-auto'}`}
           >
-            <div className="text-[10px] font-semibold uppercase opacity-70 mb-0.5">{m.sender_role === 'dev' ? (m.sender_name || 'BodaGo Team') : 'You'}</div>
+            <div className="text-[10px] font-semibold uppercase opacity-70 mb-0.5">{m.sender_role === 'dev' ? (m.sender_name || 'BodaGoEra Team') : 'You'}</div>
             {m.body}
           </div>
         ))}

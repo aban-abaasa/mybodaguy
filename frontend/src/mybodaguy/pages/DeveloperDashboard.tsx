@@ -190,7 +190,7 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
             <div className="flex items-center gap-3">
               <Bike size={28} />
               <div>
-                <h1 className="text-xl font-bold">BodaGo</h1>
+                <h1 className="text-xl font-bold">BodaGoEra</h1>
                 <p className="text-xs opacity-90">Developer Panel</p>
               </div>
             </div>
@@ -399,7 +399,7 @@ function OverviewTab({ onSwitchToRegions, userId }: { onSwitchToRegions: () => v
         <Bike className="w-16 h-16 text-orange-500 mx-auto mb-4" />
         <h3 className="text-2xl font-bold text-slate-800 mb-2">Welcome to Developer Panel</h3>
         <p className="text-slate-600 mb-4">
-          You have full control over the BodaGo platform. Start by setting up geographic regions 
+          You have full control over the BodaGoEra platform. Start by setting up geographic regions 
           and assigning chairpersons.
         </p>
         <div className="flex flex-wrap gap-4 justify-center">
@@ -691,7 +691,7 @@ function DeveloperApplicationThread({ conversationId }: { conversationId: string
     if (!body || sending) return;
     setSending(true);
     try {
-      const msg = await sendChatMessage(conversationId, { senderRole: 'dev', senderName: 'BodaGo Team', body });
+      const msg = await sendChatMessage(conversationId, { senderRole: 'dev', senderName: 'BodaGoEra Team', body });
       setMessages((prev) => [...prev, msg]);
       setReply('');
     } catch (e) {
@@ -1044,7 +1044,7 @@ function MessagesTab() {
     if (!body || !selectedId || sending) return;
     setSending(true);
     try {
-      const msg = await sendChatMessage(selectedId, { senderRole: 'dev', senderName: 'BodaGo Team', body });
+      const msg = await sendChatMessage(selectedId, { senderRole: 'dev', senderName: 'BodaGoEra Team', body });
       setMessages((prev) => [...prev, msg]);
       setReply('');
     } catch (e) {
@@ -1142,7 +1142,7 @@ function MessagesTab() {
                 value={reply}
                 onChange={(e) => setReply(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleReply(); }}
-                placeholder="Reply as BodaGo Team…"
+                placeholder="Reply as BodaGoEra Team…"
                 className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
               />
               <button
@@ -1261,7 +1261,7 @@ function PublicBoardTab() {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Landing Page Messages</h2>
           <p className="text-sm text-slate-600 mt-1">
-            Community board messages posted from the BodaGo landing page.
+            Community board messages posted from the BodaGoEra landing page.
           </p>
         </div>
         <button
@@ -1364,7 +1364,7 @@ function PublicBoardTab() {
                       <div key={r.id} className={`flex items-start justify-between gap-2 rounded-lg px-3 py-2 ${r.sender_role === 'dev' ? 'bg-orange-50' : 'bg-slate-50'}`}>
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-xs font-semibold text-slate-800">{r.sender_role === 'dev' ? 'BodaGo Team' : (r.name || 'Website visitor')}</p>
+                            <p className="text-xs font-semibold text-slate-800">{r.sender_role === 'dev' ? 'BodaGoEra Team' : (r.name || 'Website visitor')}</p>
                             {r.reward_reason && (
                               <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-600">
                                 🪙 Correct answer

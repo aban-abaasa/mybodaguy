@@ -100,7 +100,7 @@ export default function App() {
       <div className="min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50 flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
           <div className="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
-          <p className="text-slate-600">Loading BodaGo...</p>
+          <p className="text-slate-600">Loading BodaGoEra...</p>
         </div>
       </div>
     );

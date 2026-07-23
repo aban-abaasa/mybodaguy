@@ -53,7 +53,7 @@ export function printFlightTicket(params: {
   openAndPrint('Air Ticket', `
     <div class="header">
       <h1>✈️ Boarding Pass</h1>
-      <p>BodaGo Journey — real flight, booked via Duffel</p>
+      <p>BodaGoEra Journey — real flight, booked via Duffel</p>
     </div>
     <div class="row"><span class="label">Passenger</span><span class="value">${params.passengerName}</span></div>
     <div class="row"><span class="label">Carrier</span><span class="value">${params.carrier}</span></div>
@@ -81,7 +81,7 @@ export function printShipTicket(params: {
   openAndPrint('Shipping Waybill', `
     <div class="header">
       <h1>🚢 Shipping Waybill</h1>
-      <p>BodaGo Cargo — road → sea → road</p>
+      <p>BodaGoEra Cargo — road → sea → road</p>
     </div>
     <div class="row"><span class="label">Shipper</span><span class="value">${params.shipperName}</span></div>
     <div class="row"><span class="label">Waybill No.</span><span class="value code">${params.journeyId.slice(0, 8).toUpperCase()}</span></div>

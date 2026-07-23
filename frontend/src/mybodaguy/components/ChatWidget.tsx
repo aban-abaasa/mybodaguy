@@ -258,7 +258,7 @@ export default function ChatWidget() {
         <div className="mb-3 flex h-[28rem] w-[22rem] max-w-[90vw] flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
           <div className="flex items-center justify-between bg-gradient-to-r from-orange-500 to-yellow-500 px-4 py-3 text-white">
             <div>
-              <p className="text-sm font-semibold">{channel === 'community' ? 'Community' : 'BodaGo Support'}</p>
+              <p className="text-sm font-semibold">{channel === 'community' ? 'Community' : 'BodaGoEra Support'}</p>
               <p className="text-[11px] text-white/80">
                 {channel === 'community' ? 'Public Q&A — everyone can read this' : 'We usually reply within a few minutes'}
               </p>
@@ -318,7 +318,7 @@ export default function ChatWidget() {
                       }`}
                     >
                       <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-80">
-                        {r.sender_role === 'dev' ? 'BodaGo Team' : (r.name || 'Website visitor')}
+                        {r.sender_role === 'dev' ? 'BodaGoEra Team' : (r.name || 'Website visitor')}
                         {r.reward_reason && ' · 🪙'}
                       </p>
                       <p className="whitespace-pre-wrap break-words">{r.message}</p>

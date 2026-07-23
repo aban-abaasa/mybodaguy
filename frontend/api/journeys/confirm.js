@@ -21,7 +21,7 @@ export default async function handler(req, res) {
       .eq('user_id', customerUserId)
       .single();
     if (!customer) {
-      return res.status(400).json({ success: false, error: 'No BodaGo customer profile for this user yet' });
+      return res.status(400).json({ success: false, error: 'No BodaGoEra customer profile for this user yet' });
     }
 
     const { data: journey, error: journeyError } = await supabaseAdmin

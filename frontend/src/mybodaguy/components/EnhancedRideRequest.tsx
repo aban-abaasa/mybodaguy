@@ -1849,7 +1849,7 @@ function JourneyCompleted({
             You've arrived safely at your destination
           </p>
           <p className="text-base sm:text-lg opacity-90">
-            Thanks for riding with BodaGo
+            Thanks for riding with BodaGoEra
           </p>
         </div>
       </div>

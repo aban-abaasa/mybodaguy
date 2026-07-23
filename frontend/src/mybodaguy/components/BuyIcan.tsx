@@ -56,7 +56,7 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
         customerName: userData?.user?.user_metadata?.full_name,
         customerPhone: isMobileMoney ? phoneNumber : undefined,
         paymentOptions: selectedMethod.paymentOptions,
-        title: 'BodaGo — IcanEra Wallet',
+        title: 'BodaGoEra — IcanEra Wallet',
         description: `Buy ${formatICAN(icanAmount)} ICAN`,
         txRef,
       });
