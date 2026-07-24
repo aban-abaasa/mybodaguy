@@ -101,9 +101,10 @@ export async function payIcanRequest({
     toUserId: request.user_id,
     amount: Number(request.amount),
     note: request.description || 'QR payment',
+    referenceId: request.id,
   });
 
-  await supabase
+  const { error: completionError } = await supabase
     .from(TABLE)
     .update({
       status: 'completed',
@@ -115,6 +116,10 @@ export async function payIcanRequest({
     })
     .eq('payment_code', paymentCode)
     .eq('status', 'pending');
+
+  if (completionError) {
+    throw new Error(`Payment transferred, but the request could not be closed: ${completionError.message}`);
+  }
 
   return { request, transfer };
 }

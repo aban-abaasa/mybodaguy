@@ -17,7 +17,10 @@ import BuyIcan from '../components/BuyIcan';
 import SellIcan from '../components/SellIcan';
 import SendIcanOut from '../components/SendIcanOut';
 import SetPinPrompt from '../components/SetPinPrompt';
+import PayMoneyModal from '../components/PayMoneyModal';
+import ReceiveMoneyModal from '../components/ReceiveMoneyModal';
 import { hasPinSet } from '../services/pinService';
+import { parseIcanPayCode, payIcanRequest } from '../services/icanPaymentRequestService';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -306,7 +309,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'in' | 'out' | 'tithe'>('all');
-  const [modal, setModal] = useState<'send' | 'receive' | 'buy' | 'sell' | 'sendout' | null>(null);
+  const [modal, setModal] = useState<'send' | 'pay' | 'receive' | 'buy' | 'sell' | 'sendout' | null>(null);
   const [balanceHidden, setBalanceHidden] = useState(false);
   const [needsPin, setNeedsPin] = useState(false);
 
@@ -336,6 +339,22 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
     await loadData();
     setRefreshing(false);
     toast.success('Wallet refreshed');
+  };
+
+  const handlePaymentScanned = async (scannedValue: string) => {
+    const paymentCode = parseIcanPayCode(scannedValue);
+    if (!paymentCode) {
+      toast.error('This QR code is not an ICAN payment request');
+      return;
+    }
+    try {
+      await payIcanRequest({ paymentCode, payerUserId: user.id });
+      toast.success('Payment sent successfully');
+      setModal(null);
+      await loadData();
+    } catch (e: any) {
+      toast.error(e.message || 'Payment failed');
+    }
   };
 
   const filteredTx = transactions.filter(tx => {
@@ -396,8 +415,9 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
             </button>
           )}
 
-          <div className="grid grid-cols-5 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {[
+              { label: 'Pay', icon: <span className="text-lg">⌕</span>, onClick: () => setModal('pay') },
               { label: 'Send', icon: <ArrowUp className="w-4 h-4" />, onClick: () => setModal('send') },
               { label: 'Receive', icon: <ArrowDown className="w-4 h-4" />, onClick: () => setModal('receive') },
               { label: 'Buy', icon: <ShoppingCart className="w-4 h-4" />, onClick: () => setModal('buy') },
@@ -524,7 +544,10 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
         <SendModal userId={user.id} balance={balance} onClose={() => setModal(null)} onDone={loadData} />
       )}
       {modal === 'receive' && balance.address && (
-        <ReceiveModal address={balance.address} onClose={() => setModal(null)} />
+        <ReceiveMoneyModal isOpen userId={user.id} onClose={() => setModal(null)} onSuccess={loadData} />
+      )}
+      {modal === 'pay' && (
+        <PayMoneyModal isOpen onClose={() => setModal(null)} onPaymentScanned={handlePaymentScanned} />
       )}
       {modal === 'buy' && (
         <TradeModal title="💳 Buy ICAN Coins" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>
