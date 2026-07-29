@@ -19,7 +19,7 @@ import SendIcanOut from '../components/SendIcanOut';
 import SetPinPrompt from '../components/SetPinPrompt';
 import PayMoneyModal from '../components/PayMoneyModal';
 import ReceiveMoneyModal from '../components/ReceiveMoneyModal';
-import { hasPinSet } from '../services/pinService';
+import { hasPinSet, verifyPin } from '../services/pinService';
 import { parseIcanPayCode, payIcanRequest } from '../services/icanPaymentRequestService';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -310,6 +310,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'in' | 'out' | 'tithe'>('all');
   const [modal, setModal] = useState<'send' | 'pay' | 'receive' | 'buy' | 'sell' | 'sendout' | null>(null);
+  const [paymentReceipt, setPaymentReceipt] = useState<any>(null);
   const [balanceHidden, setBalanceHidden] = useState(false);
   const [needsPin, setNeedsPin] = useState(false);
 
@@ -347,14 +348,44 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
       toast.error('This QR code is not an ICAN payment request');
       return;
     }
+    const pin = window.prompt('Enter your transaction PIN to approve this payment:');
+    if (pin === null) return;
+    const pinCheck = await verifyPin(user.id, pin);
+    if (!pinCheck.success) {
+      toast.error(pinCheck.error || 'Incorrect PIN. Payment cancelled.');
+      return;
+    }
     try {
-      await payIcanRequest({ paymentCode, payerUserId: user.id });
-      toast.success('Payment sent successfully');
+      const result = await payIcanRequest({ paymentCode, payerUserId: user.id });
+      setPaymentReceipt(result.payerReceipt);
+      toast.success(`Payment sent successfully. Receipt: ${result.payerReceipt.receiptNumber}`);
       setModal(null);
       await loadData();
     } catch (e: any) {
       toast.error(e.message || 'Payment failed');
     }
+  };
+
+  const downloadPaymentReceipt = () => {
+    if (!paymentReceipt) return;
+    const text = [
+      'ICANERA WALLET PAYMENT RECEIPT',
+      '--------------------------------',
+      `Receipt: ${paymentReceipt.receiptNumber}`,
+      `Transaction: ${paymentReceipt.transactionId || 'N/A'}`,
+      `Amount: ${formatICAN(paymentReceipt.amount)} ${paymentReceipt.currency}`,
+      `Description: ${paymentReceipt.description}`,
+      `Payment code: ${paymentReceipt.paymentCode}`,
+      `Date: ${new Date(paymentReceipt.issuedAt).toLocaleString('en-UG')}`,
+      '',
+      'Payment successful.',
+    ].join('\n');
+    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${paymentReceipt.receiptNumber}.txt`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const filteredTx = transactions.filter(tx => {
@@ -563,6 +594,26 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
         <TradeModal title="📤 Send ICAN Out" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>
           <SendIcanOut userId={user.id} balance={balance.ican} onSuccess={() => { loadData(); setModal(null); }} />
         </TradeModal>
+      )}
+      {paymentReceipt && (
+        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 text-slate-900">
+            <div className="text-center">
+              <div className="text-5xl mb-3">✅</div>
+              <h2 className="text-xl font-bold text-emerald-700">Payment successful</h2>
+              <p className="text-sm text-slate-600 mt-1">Your ICAN payment was sent and recorded.</p>
+            </div>
+            <div className="bg-slate-50 rounded-xl p-4 mt-5 space-y-2 text-sm">
+              <div className="flex justify-between gap-4"><span>Receipt</span><strong>{paymentReceipt.receiptNumber}</strong></div>
+              <div className="flex justify-between gap-4"><span>Amount</span><strong>{formatICAN(paymentReceipt.amount)} {paymentReceipt.currency}</strong></div>
+              <div className="flex justify-between gap-4"><span>Transaction</span><strong className="truncate">{paymentReceipt.transactionId || 'N/A'}</strong></div>
+            </div>
+            <div className="flex gap-3 mt-5">
+              <button onClick={downloadPaymentReceipt} className="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-semibold">Download receipt</button>
+              <button onClick={() => setPaymentReceipt(null)} className="px-5 py-3 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold">Close</button>
+            </div>
+          </div>
+        </div>
       )}
       {needsPin && (
         <SetPinPrompt userId={user.id} onDone={() => setNeedsPin(false)} />

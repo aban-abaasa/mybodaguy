@@ -104,24 +104,37 @@ export async function payIcanRequest({
     referenceId: request.id,
   });
 
-  const { error: completionError } = await supabase
-    .from(TABLE)
-    .update({
-      status: 'completed',
-      payer_user_id: payerUserId,
-      // transfer_ican() returns out_tx_id/in_tx_id, not tx_id — TransferResult's
-      // `tx_id` field doesn't match the RPC's real shape, so read it directly.
-      ican_tx_id: (transfer as unknown as { out_tx_id: string }).out_tx_id,
-      completed_at: new Date().toISOString(),
-    })
-    .eq('payment_code', paymentCode)
-    .eq('status', 'pending');
+  const payerReceipt = {
+    receiptNumber: `ICAN-RCP-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
+    paymentCode,
+    transactionId: (transfer as unknown as { out_tx_id?: string }).out_tx_id || null,
+    amount: Number(request.amount),
+    currency: request.currency || 'ICAN',
+    issuedAt: new Date().toISOString(),
+    description: request.description || 'ICAN QR payment',
+  };
+
+  const completion = {
+    status: 'completed' as const,
+    payer_user_id: payerUserId,
+    ican_tx_id: (transfer as unknown as { out_tx_id: string }).out_tx_id,
+    completed_at: new Date().toISOString(),
+  };
+  let { error: completionError } = await supabase
+    .from(TABLE).update(completion).eq('payment_code', paymentCode).eq('status', 'pending');
+  if (completionError?.message?.includes('ican_tx_id')) {
+    ({ error: completionError } = await supabase
+      .from(TABLE)
+      .update({ status: 'completed', payer_user_id: payerUserId, completed_at: completion.completed_at })
+      .eq('payment_code', paymentCode)
+      .eq('status', 'pending'));
+  }
 
   if (completionError) {
     throw new Error(`Payment transferred, but the request could not be closed: ${completionError.message}`);
   }
 
-  return { request, transfer };
+  return { request, transfer, payerReceipt };
 }
 
 export async function getActiveIcanPaymentRequests(userId: string): Promise<IcanPaymentRequest[]> {
