@@ -43,6 +43,15 @@ interface CheckoutReceipt {
   total_ugx: number;
   tax_ugx: number;
   items_count: number;
+  items: Array<{
+    product_id: string;
+    product_name: string;
+    product_sku?: string | null;
+    quantity: number;
+    unit_price: number;
+    tax_rate: number;
+    line_total: number;
+  }>;
   ican_cashback: {
     success: boolean;
     net_credited?: number;
@@ -387,6 +396,15 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       total_ugx: data.total_ugx,
       tax_ugx: data.tax_ugx,
       items_count: data.items_count,
+      items: data.items?.length ? data.items : cart.map(i => ({
+        product_id: i.product.product_id,
+        product_name: i.product.name,
+        product_sku: i.product.sku,
+        quantity: i.quantity,
+        unit_price: i.product.selling_price,
+        tax_rate: i.product.tax_rate,
+        line_total: i.line_total,
+      })),
       ican_cashback: data.ican_cashback,
     });
 
@@ -447,19 +465,29 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           <div className="bg-slate-50 rounded-xl p-4 text-left space-y-2 mb-4">
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">Transaction #</span>
-              <span className="font-mono font-semibold text-xs">{receipt.transaction_id?.slice(-12)}</span>
+              <span className="font-mono font-semibold text-xs text-slate-900">{receipt.transaction_id?.slice(-12)}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">Receipt #</span>
-              <span className="font-mono font-semibold">{receipt.receipt_number}</span>
+              <span className="font-mono font-semibold text-slate-900">{receipt.receipt_number}</span>
             </div>
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">Items</span>
-              <span className="font-semibold">{receipt.items_count}</span>
+              <span className="font-semibold text-slate-900">{receipt.items_count}</span>
             </div>
+            {receipt.items?.map((item, index) => (
+              <div key={`${item.product_id}-${index}`} className="flex justify-between gap-3 text-sm border-t border-slate-200 pt-2">
+                <span className="text-slate-900">
+                  {item.product_name || 'Product'} × {item.quantity}
+                </span>
+                <span className="font-semibold text-slate-900 whitespace-nowrap">
+                  {formatUGX(item.line_total)}
+                </span>
+              </div>
+            ))}
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">Tax</span>
-              <span>{formatUGX(receipt.tax_ugx)}</span>
+              <span className="text-slate-900">{formatUGX(receipt.tax_ugx)}</span>
             </div>
             <div className="flex justify-between font-bold text-base border-t pt-2">
               <span>Total Paid</span>

@@ -342,7 +342,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
     toast.success('Wallet refreshed');
   };
 
-  const handlePaymentScanned = async (scannedValue: string) => {
+  const handlePaymentScanned = async (scannedValue: string, paymentPurpose: string = 'personal', businessProfileId: string | null = null) => {
     const paymentCode = parseIcanPayCode(scannedValue);
     if (!paymentCode) {
       toast.error('This QR code is not an ICAN payment request');
@@ -356,7 +356,13 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
       return;
     }
     try {
-      const result = await payIcanRequest({ paymentCode, payerUserId: user.id });
+      const result = await payIcanRequest({
+        paymentCode,
+        payerUserId: user.id,
+        expenseClassification: paymentPurpose === 'business' ? 'business_expense' : 'personal_expense',
+        counterpartyType: 'business',
+        businessProfileId,
+      });
       setPaymentReceipt(result.payerReceipt);
       toast.success(`Payment sent successfully. Receipt: ${result.payerReceipt.receiptNumber}`);
       setModal(null);
@@ -578,7 +584,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
         <ReceiveMoneyModal isOpen userId={user.id} onClose={() => setModal(null)} onSuccess={loadData} />
       )}
       {modal === 'pay' && (
-        <PayMoneyModal isOpen onClose={() => setModal(null)} onPaymentScanned={handlePaymentScanned} />
+        <PayMoneyModal isOpen userId={user.id} onClose={() => setModal(null)} onPaymentScanned={handlePaymentScanned} />
       )}
       {modal === 'buy' && (
         <TradeModal title="💳 Buy ICAN Coins" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>

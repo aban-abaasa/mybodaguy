@@ -9,7 +9,7 @@
  */
 
 import { supabase } from '../../services/supabaseClient';
-import { sendICAN } from './icanWalletService';
+import { sendICAN, ICAN_TO_UGX } from './icanWalletService';
 
 const TABLE = 'payment_requests';
 
@@ -70,7 +70,6 @@ export async function getIcanPaymentRequest(paymentCode: string): Promise<IcanPa
     .from(TABLE)
     .select('*')
     .eq('payment_code', paymentCode)
-    .eq('currency', 'ICAN')
     .single();
 
   if (error || !data) throw new Error('Payment request not found');
@@ -78,6 +77,12 @@ export async function getIcanPaymentRequest(paymentCode: string): Promise<IcanPa
   if (request.status !== 'pending') throw new Error(`This payment request was already ${request.status}`);
   if (new Date(request.expires_at) < new Date()) throw new Error('This payment request has expired');
   return request;
+}
+
+function getRequestIcanAmount(request: IcanPaymentRequest): number {
+  if (request.currency === 'ICAN') return Number(request.amount);
+  const match = /^ICAN_REQUEST:([\d.]+)\|/.exec(request.description || '');
+  return match ? Number(match[1]) : Number(request.amount) / 5000;
 }
 
 /** Parses a scanned QR value; returns the payment code, or null if not an ICAN payment request. */
@@ -89,11 +94,18 @@ export function parseIcanPayCode(scannedText: string): string | null {
 export async function payIcanRequest({
   paymentCode,
   payerUserId,
+  expenseClassification = 'personal_expense',
+  counterpartyType = 'business',
+  businessProfileId = null,
 }: {
   paymentCode: string;
   payerUserId: string;
+  expenseClassification?: string;
+  counterpartyType?: string;
+  businessProfileId?: string | null;
 }) {
   const request = await getIcanPaymentRequest(paymentCode);
+  const icanAmount = getRequestIcanAmount(request);
   if (request.user_id === payerUserId) throw new Error('You cannot pay your own request');
 
   // Repair a previous transfer left pending by the old RLS-blocked update;
@@ -110,9 +122,15 @@ export async function payIcanRequest({
     transfer = await sendICAN({
       fromUserId: payerUserId,
       toUserId: request.user_id,
-      amount: Number(request.amount),
+      amount: getRequestIcanAmount(request),
       note: request.description || 'QR payment',
       referenceId: request.id,
+      localAmount: icanAmount * ICAN_TO_UGX,
+      localCurrency: 'UGX',
+      merchantName: 'SupermartKera',
+      counterpartyType,
+      expenseClassification,
+      businessProfileId,
     });
   } else {
     throw new Error(existingCompletion?.error || 'Payment request could not be prepared');
@@ -122,7 +140,7 @@ export async function payIcanRequest({
     receiptNumber: `ICAN-RCP-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
     paymentCode,
     transactionId: (transfer as unknown as { out_tx_id?: string }).out_tx_id || null,
-    amount: Number(request.amount),
+    amount: icanAmount,
     currency: request.currency || 'ICAN',
     issuedAt: new Date().toISOString(),
     description: request.description || 'ICAN QR payment',

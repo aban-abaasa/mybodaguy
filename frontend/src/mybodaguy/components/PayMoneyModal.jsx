@@ -6,11 +6,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowUpRight, X, Loader } from 'lucide-react';
 import jsQR from 'jsqr';
+import { supabase } from '../../services/supabaseClient';
 
 const PayMoneyModal = ({ 
   isOpen, 
   onClose, 
-  onPaymentScanned = null 
+  onPaymentScanned = null,
+  userId = null
 }) => {
   console.log('PayMoneyModal rendered, isOpen:', isOpen);
   
@@ -19,6 +21,10 @@ const PayMoneyModal = ({
   const [error, setError] = useState(null);
   const [successMessage, setSuccessMessage] = useState(null);
   const [scanBuffer, setScanBuffer] = useState('');
+  const [paymentPurpose, setPaymentPurpose] = useState('personal');
+  const [businessProfiles, setBusinessProfiles] = useState([]);
+  const [businessProfileId, setBusinessProfileId] = useState('');
+  const [loadingBusinesses, setLoadingBusinesses] = useState(false);
   
   // Refs for scanner
   const videoRef = useRef(null);
@@ -32,6 +38,9 @@ const PayMoneyModal = ({
     setError(null);
     setSuccessMessage(null);
     setScanBuffer('');
+    setPaymentPurpose('personal');
+    setBusinessProfiles([]);
+    setBusinessProfileId('');
     
     // Stop camera if active
     if (streamRef.current) {
@@ -58,6 +67,37 @@ const PayMoneyModal = ({
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen || paymentPurpose !== 'business' || !userId) return undefined;
+    let cancelled = false;
+    setLoadingBusinesses(true);
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        const [owned, memberships, coOwned] = await Promise.all([
+          supabase.from('business_profiles').select('id, business_name').eq('user_id', userId),
+          supabase.from('business_team_members').select('business_profile_id').eq('user_id', userId).eq('status', 'active'),
+          supabase.from('business_co_owners').select('business_profile_id').or(`user_id.eq.${userId},owner_email.eq.${user?.email || ''}`),
+        ]);
+        const ids = [...new Set([
+          ...(owned.data || []).map(profile => profile.id),
+          ...(memberships.data || []).map(member => member.business_profile_id),
+          ...(coOwned.data || []).map(member => member.business_profile_id),
+        ])];
+        const profiles = ids.length ? (await supabase.from('business_profiles').select('id, business_name').in('id', ids)).data || [] : [];
+        if (!cancelled) {
+          setBusinessProfiles(profiles);
+          setBusinessProfileId(prev => prev || (profiles.length === 1 ? profiles[0].id : ''));
+        }
+      } catch (error) {
+        console.error('Unable to load businesses for payment:', error);
+      } finally {
+        if (!cancelled) setLoadingBusinesses(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, paymentPurpose, userId]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -266,10 +306,13 @@ const PayMoneyModal = ({
     }
     setCameraActive(false);
     
-    // Notify parent
-    if (onPaymentScanned) {
-      onPaymentScanned(code);
-    }
+    // Wait for the payer to classify the expense before submitting it.
+  };
+
+  const submitPayment = async () => {
+    if (!onPaymentScanned || !scannedData.trim()) return;
+    if (paymentPurpose === 'business' && businessProfiles.length > 1 && !businessProfileId) return;
+    await onPaymentScanned(scannedData.trim(), paymentPurpose, businessProfileId || null);
   };
 
   const initializeGunScanner = () => {
@@ -386,6 +429,36 @@ const PayMoneyModal = ({
             </div>
           )}
 
+          {scannedData.trim() && (
+            <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+              <p className="text-xs text-gray-400 mb-2">Record this payment in ICANera as</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[{ value: 'business', label: '💼 Business' }, { value: 'personal', label: '👤 Personal' }].map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setPaymentPurpose(option.value)}
+                    className={`px-3 py-2 rounded-lg text-sm font-semibold ${paymentPurpose === option.value ? 'bg-orange-500 text-white' : 'bg-white/10 text-gray-300'}`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {paymentPurpose === 'business' && scannedData.trim() && (
+            <div className="rounded-lg border border-blue-400/30 bg-blue-500/10 p-3">
+              <p className="text-xs text-blue-200 mb-2">Choose the business for this report</p>
+              {loadingBusinesses ? <p className="text-xs text-gray-300">Loading your businesses…</p> : businessProfiles.length > 1 ? (
+                <select value={businessProfileId} onChange={e => setBusinessProfileId(e.target.value)} className="w-full rounded-lg bg-gray-800 border border-blue-300/40 px-3 py-2 text-sm text-white">
+                  <option value="">Select a business…</option>
+                  {businessProfiles.map(profile => <option key={profile.id} value={profile.id}>{profile.business_name}</option>)}
+                </select>
+              ) : businessProfiles.length === 1 ? <p className="text-sm text-blue-100">{businessProfiles[0].business_name}</p> : <p className="text-xs text-amber-200">No business profile found; this will still be recorded as a business expense.</p>}
+            </div>
+          )}
+
           <div className="flex gap-3">
             <button
               onClick={handleCloseModal}
@@ -396,7 +469,7 @@ const PayMoneyModal = ({
             {scannedData.trim() && (
               <button
                 onClick={() => {
-                  handleScannedCode(scannedData.trim());
+                  submitPayment();
                 }}
                 className="flex-1 px-4 py-2 bg-gradient-to-r from-orange-500 to-orange-600 text-white rounded-lg hover:shadow-lg transition-all font-semibold"
               >

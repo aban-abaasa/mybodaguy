@@ -196,12 +196,24 @@ export async function sendICAN({
   amount,
   note = '',
   referenceId = null,
+  localAmount = null,
+  localCurrency = 'UGX',
+  merchantName = null,
+  counterpartyType = null,
+  expenseClassification = null,
+  businessProfileId = null,
 }: {
   fromUserId: string;
   toUserId: string;
   amount: number;
   note?: string;
   referenceId?: string | null;
+  localAmount?: number | null;
+  localCurrency?: string;
+  merchantName?: string | null;
+  counterpartyType?: string | null;
+  expenseClassification?: string | null;
+  businessProfileId?: string | null;
 }): Promise<TransferResult> {
   const { data, error } = await supabase.rpc('transfer_ican', {
     p_from_user: fromUserId,
@@ -210,6 +222,12 @@ export async function sendICAN({
     p_note: note,
     p_source_app: SOURCE_APP,
     p_reference_id: referenceId,
+    p_local_amount: localAmount ?? Number(amount) * ICAN_TO_UGX,
+    p_local_currency: localCurrency,
+    p_merchant_name: merchantName,
+    p_counterparty_type: counterpartyType,
+    p_expense_classification: expenseClassification,
+    p_business_profile_id: businessProfileId,
   });
   if (error) throw error;
   if (!data.success) throw new Error(data.error);
