@@ -139,6 +139,10 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
 
       // For chairpersons, also save committee member details
       if (userRole === 'chairperson') {
+        if (!profileData.full_name.trim() || !profileData.phone.trim() || !profileData.national_id.trim()
+          || !profileData.emergency_contact_name?.trim() || !profileData.emergency_contact_phone?.trim()) {
+          throw new Error('Complete your name, phone, national ID, and emergency contact before saving commission eligibility.');
+        }
         const { data: committee } = await supabase
           .from('mbg_committee_members')
           .select('id')
@@ -164,8 +168,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
             });
 
           if (detailsError) {
-            console.error('Error saving committee details:', detailsError);
-            // Don't throw - profile was saved successfully
+            throw detailsError;
           }
         }
       }
@@ -231,7 +234,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Phone Number
+                    Phone Number {userRole === 'chairperson' ? '*' : ''}
                   </label>
                   <input
                     type="tel"
@@ -239,6 +242,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
                     onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                     placeholder="+256..."
+                    required={userRole === 'chairperson'}
                   />
                 </div>
 
@@ -278,7 +282,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
               <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    National ID
+                    National ID {userRole === 'chairperson' ? '*' : ''}
                   </label>
                   <input
                     type="text"
@@ -286,6 +290,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
                     onChange={(e) => setProfileData({ ...profileData, national_id: e.target.value })}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                     placeholder="National ID number"
+                    required={userRole === 'chairperson'}
                   />
                 </div>
               </div>
@@ -358,7 +363,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
 
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Emergency Contact Name
+                      Emergency Contact Name *
                     </label>
                     <input
                       type="text"
@@ -366,12 +371,13 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
                       onChange={(e) => setProfileData({ ...profileData, emergency_contact_name: e.target.value })}
                       className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                       placeholder="Full name"
+                      required
                     />
                   </div>
 
                   <div className="md:col-span-2">
                     <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Emergency Contact Phone
+                      Emergency Contact Phone *
                     </label>
                     <input
                       type="tel"
@@ -379,6 +385,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
                       onChange={(e) => setProfileData({ ...profileData, emergency_contact_phone: e.target.value })}
                       className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                       placeholder="+256..."
+                      required
                     />
                   </div>
 

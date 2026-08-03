@@ -300,7 +300,9 @@ BEGIN
 
             SELECT cm.user_id INTO v_chair_user_id
             FROM public.mbg_committee_members cm
-            WHERE cm.region_type = v_level.region_type AND cm.region_id = v_level.region_id AND cm.is_active = true
+            WHERE cm.region_type = v_level.region_type AND cm.region_id = v_level.region_id
+              AND cm.is_active = true
+              AND public.mbg_chairperson_commission_eligible(cm.user_id)
             ORDER BY cm.appointed_at ASC LIMIT 1;
 
             IF v_chair_user_id IS NOT NULL AND v_amount_ugx > 0 THEN
@@ -418,7 +420,9 @@ BEGIN
 
         SELECT cm.user_id INTO v_chair_user_id
         FROM public.mbg_committee_members cm
-        WHERE cm.region_type = v_level.region_type AND cm.region_id = v_level.region_id AND cm.is_active = true
+        WHERE cm.region_type = v_level.region_type AND cm.region_id = v_level.region_id
+          AND cm.is_active = true
+          AND public.mbg_chairperson_commission_eligible(cm.user_id)
         ORDER BY cm.appointed_at ASC LIMIT 1;
 
         IF v_chair_user_id IS NOT NULL AND v_amount_ugx > 0 THEN

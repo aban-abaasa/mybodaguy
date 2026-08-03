@@ -3,7 +3,7 @@ import {
   Bike, Users, MapPin, DollarSign, Settings,
   TrendingUp, LogOut, Menu, X, Shield, Search,
   MessageSquare, RefreshCw, Globe, Lock, Trash2, Send, CheckCircle, Mail, Gift,
-  ShoppingBag, ChevronRight, Truck, XCircle,
+  ShoppingBag, ChevronRight, Truck, XCircle, Activity,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '../services/userService';
@@ -37,13 +37,15 @@ interface DeveloperDashboardProps {
 type DevPermissions = { isMain: boolean; allowedTabs: string[] | null };
 type DevOperatorRow = { email: string; is_main: boolean; allowed_tabs: string[] | null; added_at: string };
 
-const ALL_DEV_TAB_IDS = ['overview', 'users', 'applications', 'regions', 'commissions', 'supermarkets', 'public-board', 'messages', 'settings'];
+const ALL_DEV_TAB_IDS = ['overview', 'users', 'applications', 'regions', 'commissions', 'supermarkets', 'transport', 'public-board', 'messages', 'settings'];
 
 export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboardProps) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [transportOrders, setTransportOrders] = useState<any[]>([]);
+  const [transportLoading, setTransportLoading] = useState(false);
 
   // null allowedTabs = unrestricted (all tabs) — the graceful default
   // shown while mbg_developer_self() is still loading, matching how
@@ -53,8 +55,11 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
   const [operatorsLoaded, setOperatorsLoaded] = useState(false);
   const [savingTabsFor, setSavingTabsFor] = useState<string | null>(null);
 
+  // Transport was added after the original developer-tab permission rows were
+  // created. Keep the monitor visible for existing BodaGo developers; the
+  // underlying monitor RPC still rejects anyone who is not an active developer.
   const isTabAllowed = (id: string) =>
-    permissions.isMain || permissions.allowedTabs == null || permissions.allowedTabs.includes(id);
+    id === 'transport' || permissions.isMain || permissions.allowedTabs == null || permissions.allowedTabs.includes(id);
 
   useEffect(() => {
     loadUsers();
@@ -165,6 +170,25 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
     }
   };
 
+  const loadTransportOrders = useCallback(async () => {
+    setTransportLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('ican_dev_get_transport_orders');
+      if (error) throw error;
+      setTransportOrders(data || []);
+    } catch (error: any) {
+      console.error('Error loading CMMS transport orders:', error);
+      setTransportOrders([]);
+      toast.error(error?.message || 'Failed to load transport orders');
+    } finally {
+      setTransportLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'transport') loadTransportOrders();
+  }, [activeTab, loadTransportOrders]);
+
   const tabs = [
     { id: 'overview', label: 'Overview', icon: TrendingUp },
     { id: 'users', label: 'Users', icon: Users },
@@ -172,6 +196,7 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
     { id: 'regions', label: 'Regions', icon: MapPin },
     { id: 'commissions', label: 'Commissions', icon: DollarSign },
     { id: 'supermarkets', label: 'Supermarkets', icon: ShoppingBag },
+    { id: 'transport', label: 'Transport', icon: Activity },
     { id: 'public-board', label: 'Public Board', icon: MessageSquare },
     { id: 'messages', label: 'Messages', icon: Mail },
     { id: 'settings', label: 'Settings', icon: Settings },
@@ -244,6 +269,7 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
           {activeTab === 'regions' && <RegionsManagement />}
           {activeTab === 'commissions' && <CommissionsTab />}
           {activeTab === 'supermarkets' && <SupermarketsTab />}
+          {activeTab === 'transport' && <TransportOrdersTab orders={transportOrders} loading={transportLoading} onRefresh={loadTransportOrders} />}
           {activeTab === 'public-board' && <PublicBoardTab />}
           {activeTab === 'messages' && <MessagesTab />}
           {activeTab === 'settings' && <SettingsTab />}
@@ -376,6 +402,82 @@ function DeveloperAccessTab({
             </div>
           ))}
           {operators.length === 0 && <p className="text-sm text-slate-500">No developers yet.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TransportOrdersTab({
+  orders,
+  loading,
+  onRefresh,
+}: {
+  orders: any[];
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  const pending = orders.filter((order) => order.request_status === 'pending').length;
+  const active = orders.filter((order) => ['approved', 'dispatched'].includes(order.request_status)).length;
+  const completed = orders.filter((order) => order.request_status === 'completed').length;
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">CMMS Transport Orders</h2>
+          <p className="text-sm text-slate-600 mt-1">
+            Monitor company transport orders automatically created from CMMS requisitions.
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg disabled:opacity-50"
+        >
+          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+          Refresh
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <StatCard title="All orders" value={String(orders.length)} icon={<Truck className="text-orange-500" />} />
+        <StatCard title="Pending" value={String(pending)} icon={<Activity className="text-amber-500" />} />
+        <StatCard title="In progress" value={String(active)} icon={<RefreshCw className="text-blue-500" />} />
+        <StatCard title="Completed" value={String(completed)} icon={<CheckCircle className="text-green-500" />} />
+      </div>
+
+      {loading ? (
+        <div className="py-12 text-center text-sm text-slate-500">Loading transport orders...</div>
+      ) : orders.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 py-12 text-center">
+          <Truck className="mx-auto mb-3 text-slate-400" size={36} />
+          <p className="font-semibold text-slate-700">No automatic transport orders yet</p>
+          <p className="text-sm text-slate-500 mt-1">Linked CMMS transport requisitions will appear here.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {orders.map((order) => (
+            <div key={order.request_id} className="rounded-xl border border-slate-200 p-4 hover:border-orange-300 transition-colors">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="font-semibold text-slate-800">{order.contract_name || 'Corporate transport contract'}</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    BodaGo request {String(order.request_id).slice(0, 8)} · CMMS {order.cmms_requisition_number || 'unlinked'}
+                  </p>
+                </div>
+                <span className="px-2.5 py-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold capitalize">
+                  {order.request_status || 'pending'}
+                </span>
+              </div>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 mt-4 text-xs text-slate-600">
+                <span>Rides: <strong>{order.ride_count || 0}</strong></span>
+                <span>Vehicle: <strong>{order.vehicle_type || 'Any'}</strong></span>
+                <span>CMMS status: <strong>{order.cmms_status || '—'}</strong></span>
+                <span>Created: <strong>{order.created_at ? new Date(order.created_at).toLocaleString() : '—'}</strong></span>
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
