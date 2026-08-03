@@ -162,6 +162,22 @@ export const userService = {
     return data;
   },
 
+  // Return real authenticated accounts for role/committee assignment. This
+  // deliberately does not fall back to arbitrary local rows in mbg_users.
+  async getAuthenticatedUsers() {
+    const { data, error } = await supabase.rpc('get_all_auth_users');
+    if (error) {
+      console.error('[UserService] Error fetching authenticated users:', error);
+      throw error;
+    }
+    return (data || []).map((account: any) => ({
+      id: account.id,
+      email: account.email,
+      full_name: account.full_name || account.user_metadata?.full_name || account.email?.split('@')[0] || 'User',
+      role_type: account.role_type || 'customer'
+    }));
+  },
+
   // Update user profile
   async updateUserProfile(userId: string, updates: any) {
     const { data, error } = await supabase

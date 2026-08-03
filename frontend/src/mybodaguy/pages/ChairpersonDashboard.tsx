@@ -1171,6 +1171,7 @@ interface AssignSubordinateModalProps {
 }
 
 function AssignSubordinateModal({ myCommitteeInfo, onClose, onSuccess }: AssignSubordinateModalProps) {
+  const MAX_COMMITTEE_MEMBERS = 10;
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -1180,6 +1181,7 @@ function AssignSubordinateModal({ myCommitteeInfo, onClose, onSuccess }: AssignS
   const [loadingUsers, setLoadingUsers] = useState(true);
   const [availableRegions, setAvailableRegions] = useState<any[]>([]);
   const [selectedRegionId, setSelectedRegionId] = useState('');
+  const [memberCount, setMemberCount] = useState(0);
 
   useEffect(() => {
     loadUsers();
@@ -1189,10 +1191,14 @@ function AssignSubordinateModal({ myCommitteeInfo, onClose, onSuccess }: AssignS
   const loadUsers = async () => {
     setLoadingUsers(true);
     try {
-      const allUsers = await userService.getAllUsers();
-      // Filter out developers and existing chairpersons
-      const availableUsers = allUsers.filter((u: any) => u.role_type !== 'developer');
+      const [authUsers, committeeResult] = await Promise.all([
+        userService.getAuthenticatedUsers(),
+        supabase.from('mbg_committee_members').select('user_id').eq('is_active', true)
+      ]);
+      const assignedIds = new Set((committeeResult.data || []).map((row: any) => row.user_id));
+      const availableUsers = authUsers.filter((u: any) => u.role_type !== 'developer' && u.id !== myCommitteeInfo.user_id && !assignedIds.has(u.id));
       setUsers(availableUsers);
+      setMemberCount(await chairpersonService.getDirectMemberCount(myCommitteeInfo.id));
     } catch (error) {
       console.error('Error loading users:', error);
       toast.error('Failed to load users');
@@ -1310,6 +1316,11 @@ function AssignSubordinateModal({ myCommitteeInfo, onClose, onSuccess }: AssignS
       return;
     }
 
+    if (memberCount >= MAX_COMMITTEE_MEMBERS) {
+      toast.error(`This committee already has the maximum of ${MAX_COMMITTEE_MEMBERS} members.`);
+      return;
+    }
+
     const rate = parseFloat(commissionRate);
     if (isNaN(rate) || rate < 0 || rate > 100) {
       toast.error('Commission rate must be between 0 and 100');
@@ -1393,6 +1404,7 @@ function AssignSubordinateModal({ myCommitteeInfo, onClose, onSuccess }: AssignS
             <strong>Your Level:</strong> {formatRegionType(myCommitteeInfo.region_type)}<br/>
             <strong>Can Assign:</strong> {formatRegionType(getTargetRegionType(myCommitteeInfo.region_type))} Chairpersons
           </p>
+          <p className="text-xs text-blue-600 mt-2">Committee members: {memberCount}/{MAX_COMMITTEE_MEMBERS}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -1536,7 +1548,7 @@ function AssignSubordinateModal({ myCommitteeInfo, onClose, onSuccess }: AssignS
             </button>
             <button
               type="submit"
-              disabled={assigning || !selectedUserId || (availableRegions.length > 0 && !selectedRegionId)}
+              disabled={assigning || memberCount >= MAX_COMMITTEE_MEMBERS || !selectedUserId || (availableRegions.length > 0 && !selectedRegionId)}
               className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50"
             >
               {assigning ? (
@@ -1547,7 +1559,7 @@ function AssignSubordinateModal({ myCommitteeInfo, onClose, onSuccess }: AssignS
               ) : (
                 <>
                   <UserPlus size={18} />
-                  <span>Assign Chairperson</span>
+                  <span>{memberCount >= MAX_COMMITTEE_MEMBERS ? 'Committee Full' : 'Assign Chairperson'}</span>
                 </>
               )}
             </button>

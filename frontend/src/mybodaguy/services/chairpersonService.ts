@@ -219,6 +219,19 @@ export const chairpersonService = {
     return this.getSubordinates(assignment.user_id);
   },
 
+  async getDirectMemberCount(parentChairpersonId: string): Promise<number> {
+    const { count, error } = await supabase
+      .from('mbg_committee_members')
+      .select('id', { count: 'exact', head: true })
+      .eq('parent_chairperson_id', parentChairpersonId)
+      .eq('is_active', true);
+    if (error) {
+      console.error('[ChairpersonService] Error counting committee members:', error);
+      return 0;
+    }
+    return count || 0;
+  },
+
   // Assign a new chairperson
   async assignChairperson(params: {
     targetUserEmail: string;

@@ -7,6 +7,7 @@ import RiderDashboard from './RiderDashboard';
 import DeveloperDashboard from './DeveloperDashboard';
 import CustomerDashboard from './CustomerDashboard';
 import ICANWalletPage from './ICANWalletPage';
+import ProfileModal from '../components/ProfileModal';
 import { toast } from 'sonner';
 
 interface UnifiedDashboardProps {
@@ -33,6 +34,7 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
   // "Become a Driver" — the tab label distinguishes them without needing a
   // separate role at the data-model level.
   const [riderVehicleType, setRiderVehicleType] = useState<string | null>(null);
+  const [showProfileModal, setShowProfileModal] = useState(false);
 
   useEffect(() => {
     loadUserRoles();
@@ -179,6 +181,14 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
                 <span className="text-sm font-medium truncate max-w-[150px]">{user.email}</span>
               </div>
               <button
+                onClick={() => setShowProfileModal(true)}
+                className="hidden md:flex items-center gap-2 px-3 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
+                title="Edit profile"
+              >
+                <User size={18} />
+                <span>Profile</span>
+              </button>
+              <button
                 onClick={onSignOut}
                 className="hidden md:flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
               >
@@ -187,6 +197,13 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
               </button>
 
               {/* Mobile View - Sign Out Button */}
+              <button
+                onClick={() => setShowProfileModal(true)}
+                className="md:hidden p-1.5 xs:p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
+                title="Edit profile"
+              >
+                <User size={18} className="xs:w-5 xs:h-5" />
+              </button>
               <button
                 onClick={onSignOut}
                 className="md:hidden p-1.5 xs:p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
@@ -235,6 +252,13 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
         {activeRole === 'customer' && <CustomerDashboard user={user} onSignOut={onSignOut} />}
         {activeRole === 'ican-wallet' && <ICANWalletPage user={user} />}
       </div>
+      <ProfileModal
+        user={user}
+        userRole={activeRole === 'ican-wallet' ? (userRoles[0] || 'customer') : activeRole}
+        userRoles={userRoles}
+        isOpen={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+      />
     </div>
   );
 }

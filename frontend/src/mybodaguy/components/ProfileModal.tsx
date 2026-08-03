@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { X, Save, Upload, User } from 'lucide-react';
+import { X, Save, Upload, User, UserPlus, Trash2, Search } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { toast } from 'sonner';
 
 interface ProfileModalProps {
   user: any;
   userRole: string;
+  userRoles?: string[];
   isOpen: boolean;
   onClose: () => void;
   onSaved?: () => void;
@@ -27,9 +28,22 @@ interface ProfileData {
   bio?: string;
 }
 
-export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved }: ProfileModalProps) {
+export default function ProfileModal({ user, userRole, userRoles = [], isOpen, onClose, onSaved }: ProfileModalProps) {
+  const roles = userRoles.length > 0 ? userRoles : userRolesFor(userRole);
+  const isChairperson = roles.includes('chairperson');
+  const isOperator = roles.includes('rider');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [vehicles, setVehicles] = useState<any[]>([]);
+  const [committeeMemberId, setCommitteeMemberId] = useState<string | null>(null);
+  const [teamMembers, setTeamMembers] = useState<any[]>([]);
+  const [teamUsers, setTeamUsers] = useState<any[]>([]);
+  const [teamUserId, setTeamUserId] = useState('');
+  const [teamSearch, setTeamSearch] = useState('');
+  const [teamRole, setTeamRole] = useState('vice_chairperson');
+  const [customTeamRole, setCustomTeamRole] = useState('');
+  const [teamRate, setTeamRate] = useState('0');
+  const [addingTeamMember, setAddingTeamMember] = useState(false);
   const [profileData, setProfileData] = useState<ProfileData>({
     full_name: '',
     phone: '',
@@ -49,7 +63,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
     if (isOpen && user) {
       loadProfile();
     }
-  }, [isOpen, user]);
+  }, [isOpen, user, isChairperson, isOperator]);
 
   const loadProfile = async () => {
     setLoading(true);
@@ -69,12 +83,18 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
 
       // For chairpersons, also load committee member details
       let committeeDetails = null;
-      if (userRole === 'chairperson') {
-        const { data: committee } = await supabase
+      let committee = null;
+      if (isChairperson) {
+        const { data: committeeRow } = await supabase
           .from('mbg_committee_members')
           .select('id')
           .eq('user_id', user.id)
+          .eq('is_active', true)
+          .order('appointed_at', { ascending: false })
+          .limit(1)
           .maybeSingle();
+        committee = committeeRow;
+        setCommitteeMemberId(committee?.id || null);
 
         if (committee) {
           const { data: details } = await supabase
@@ -84,7 +104,39 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
             .maybeSingle();
           
           committeeDetails = details;
+
+          const [{ data: members }, { data: authUsers }] = await Promise.all([
+            supabase
+              .from('mbg_committee_profile_members')
+              .select('id, user_id, committee_role, commission_rate, is_active, created_at')
+              .eq('committee_member_id', committee.id)
+              .eq('is_active', true)
+              .order('created_at', { ascending: true }),
+            supabase.rpc('get_all_auth_users')
+          ]);
+          const authById = new Map((authUsers || []).map((account: any) => [account.id, account]));
+          setTeamMembers((members || []).map((member: any) => ({
+            ...member,
+            email: authById.get(member.user_id)?.email || member.user_id,
+            full_name: authById.get(member.user_id)?.full_name || authById.get(member.user_id)?.email?.split('@')[0] || 'Authenticated user'
+          })));
+          setTeamUsers((authUsers || []).filter((account: any) => account.id !== user.id));
         }
+      } else {
+        setCommitteeMemberId(null);
+        setTeamMembers([]);
+        setTeamUsers([]);
+      }
+
+      if (isOperator) {
+        const { data: riderRows } = await supabase
+          .from('mbg_riders')
+          .select('id, vehicle_type, operator_type, plate_number, license_number, license_expiry, status')
+          .eq('user_id', user.id)
+          .order('created_at', { ascending: true });
+        setVehicles(riderRows || []);
+      } else {
+        setVehicles([]);
       }
 
       if (profile || committeeDetails) {
@@ -107,6 +159,57 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
       console.error('Error loading profile:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const addTeamMember = async () => {
+    const selectedRole = teamRole === 'other' ? customTeamRole.trim() : teamRole.trim();
+    if (!committeeMemberId || !teamUserId || !selectedRole) return;
+    const rate = Number(teamRate);
+    if (!Number.isFinite(rate) || rate < 0 || rate > 100) {
+      toast.error('Rate share must be between 0 and 100%.');
+      return;
+    }
+    setAddingTeamMember(true);
+    const { data, error } = await supabase
+      .from('mbg_committee_profile_members')
+      .upsert({
+        committee_member_id: committeeMemberId,
+        user_id: teamUserId,
+        committee_role: selectedRole,
+        commission_rate: rate,
+        added_by: user.id,
+        is_active: true,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'committee_member_id,user_id' })
+        .select('id, user_id, committee_role, commission_rate, is_active, created_at')
+      .single();
+    if (error) {
+      toast.error(error.message.includes('maximum of 10') ? 'You can add a maximum of 10 active committee members.' : error.message);
+    } else if (data) {
+      const account = teamUsers.find(candidate => candidate.id === teamUserId);
+      setTeamMembers(previous => [...previous.filter(member => member.user_id !== data.user_id), {
+        ...data,
+        email: account?.email || teamUserId,
+        full_name: account?.full_name || account?.email?.split('@')[0] || 'Authenticated user'
+      }]);
+      setTeamUserId('');
+      setTeamSearch('');
+      setTeamRate('0');
+      toast.success('Committee member added');
+    }
+    setAddingTeamMember(false);
+  };
+
+  const removeTeamMember = async (memberId: string) => {
+    const { error } = await supabase
+      .from('mbg_committee_profile_members')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', memberId);
+    if (error) toast.error(error.message);
+    else {
+      setTeamMembers(previous => previous.filter(member => member.id !== memberId));
+      toast.success('Committee member removed');
     }
   };
 
@@ -138,7 +241,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
       }
 
       // For chairpersons, also save committee member details
-      if (userRole === 'chairperson') {
+      if (isChairperson) {
         if (!profileData.full_name.trim() || !profileData.phone.trim() || !profileData.national_id.trim()
           || !profileData.emergency_contact_name?.trim() || !profileData.emergency_contact_phone?.trim()) {
           throw new Error('Complete your name, phone, national ID, and emergency contact before saving commission eligibility.');
@@ -196,7 +299,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
             </div>
             <div>
               <h3 className="text-xl font-bold text-slate-800">Edit Profile</h3>
-              <p className="text-sm text-slate-600 capitalize">{userRole} Account</p>
+              <p className="text-sm text-slate-600 capitalize">{roles.map(role => role.replace(/_/g, ' ')).join(' · ')} account</p>
             </div>
           </div>
           <button
@@ -234,7 +337,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
 
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    Phone Number {userRole === 'chairperson' ? '*' : ''}
+                    Phone Number {isChairperson ? '*' : ''}
                   </label>
                   <input
                     type="tel"
@@ -242,7 +345,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
                     onChange={(e) => setProfileData({ ...profileData, phone: e.target.value })}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                     placeholder="+256..."
-                    required={userRole === 'chairperson'}
+                    required={isChairperson}
                   />
                 </div>
 
@@ -282,7 +385,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
               <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-1">
-                    National ID {userRole === 'chairperson' ? '*' : ''}
+                    National ID {isChairperson ? '*' : ''}
                   </label>
                   <input
                     type="text"
@@ -290,7 +393,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
                     onChange={(e) => setProfileData({ ...profileData, national_id: e.target.value })}
                     className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                     placeholder="National ID number"
-                    required={userRole === 'chairperson'}
+                    required={isChairperson}
                   />
                 </div>
               </div>
@@ -341,7 +444,7 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
             </div>
 
             {/* Committee Member Details (Chairperson Only) */}
-            {userRole === 'chairperson' && (
+            {isChairperson && (
               <div>
                 <h4 className="text-lg font-semibold text-slate-800 mb-4">Committee Member Information</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -408,6 +511,61 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
               </div>
             )}
 
+            {isChairperson && committeeMemberId && (
+              <div>
+                <div className="flex items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h4 className="text-lg font-semibold text-slate-800">Committee Working Members</h4>
+                    <p className="text-sm text-slate-600">Add authenticated users who work with you, such as a vice chairperson, secretary, defence lead, treasurer, or another approved role.</p>
+                  </div>
+                  <span className="shrink-0 rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700">{teamMembers.length} active</span>
+                </div>
+                <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1.2fr_1fr_0.55fr_auto]">
+                  <div>
+                    <div className="relative">
+                      <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input value={teamSearch} onChange={event => setTeamSearch(event.target.value)} disabled={teamMembers.length >= 10 || addingTeamMember} placeholder="Search name or email" className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-9 pr-3 text-sm text-slate-800" />
+                    </div>
+                    <select value={teamUserId} onChange={event => setTeamUserId(event.target.value)} disabled={teamMembers.length >= 10 || addingTeamMember} className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800">
+                    <option value="">Select authenticated user</option>
+                    {teamUsers.filter(account => !teamMembers.some(member => member.user_id === account.id) && `${account.full_name || ''} ${account.email || ''}`.toLowerCase().includes(teamSearch.trim().toLowerCase())).map(account => <option key={account.id} value={account.id}>{account.full_name || account.email} — {account.email}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <select value={teamRole} onChange={event => setTeamRole(event.target.value)} disabled={teamMembers.length >= 10 || addingTeamMember} className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800">
+                      <option value="vice_chairperson">Vice Chairperson</option>
+                      <option value="secretary">Secretary</option>
+                      <option value="vice_secretary">Vice Secretary</option>
+                      <option value="defence">Defence</option>
+                      <option value="treasurer">Treasurer</option>
+                      <option value="mobilizer">Mobilizer</option>
+                      <option value="communications">Communications</option>
+                      <option value="other">Other</option>
+                    </select>
+                    {teamRole === 'other' && <input value={customTeamRole} onChange={event => setCustomTeamRole(event.target.value)} placeholder="Committee role" className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800" />}
+                  </div>
+                  <input type="number" min="0" max="100" step="0.01" value={teamRate} onChange={event => setTeamRate(event.target.value)} disabled={addingTeamMember} placeholder="Rate %" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800" aria-label="Commission rate share" />
+                  <button type="button" onClick={addTeamMember} disabled={addingTeamMember || !teamUserId || (teamRole === 'other' ? !customTeamRole.trim() : !teamRole)} className="flex items-center justify-center gap-1 rounded-lg bg-orange-500 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"><UserPlus size={16} /> Add</button>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {teamMembers.length === 0 ? <p className="text-sm text-slate-500">No working members added yet.</p> : teamMembers.map(member => <div key={member.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2"><div><p className="text-sm font-semibold text-slate-800">{member.full_name}</p><p className="text-xs text-slate-500">{member.email} · <span className="capitalize">{member.committee_role.replace(/_/g, ' ')}</span> · {Number(member.commission_rate || 0).toFixed(2)}% share</p></div><button type="button" onClick={() => removeTeamMember(member.id)} className="rounded p-2 text-red-500 hover:bg-red-50" title="Remove committee member"><Trash2 size={16} /></button></div>)}
+                </div>
+              </div>
+            )}
+
+            {isOperator && (
+              <div>
+                <h4 className="text-lg font-semibold text-slate-800 mb-4">Rider / Driver Access</h4>
+                <p className="text-sm text-slate-600 mb-3">Your approved vehicles and operator credentials. Availability and ride controls remain in the driver dashboard.</p>
+                {vehicles.length === 0 ? <p className="text-sm text-slate-500">No approved vehicle profile found.</p> : <div className="space-y-2">{vehicles.map(vehicle => (
+                  <div key={vehicle.id} className="rounded-lg border border-slate-200 p-3 text-sm">
+                    <div className="flex flex-wrap justify-between gap-2 font-semibold text-slate-800"><span className="capitalize">{vehicle.vehicle_type} {vehicle.operator_type ? `· ${vehicle.operator_type}` : ''}</span><span className="capitalize text-emerald-600">{vehicle.status || 'active'}</span></div>
+                    <div className="mt-1 grid gap-1 text-slate-600 sm:grid-cols-3"><span>Plate: {vehicle.plate_number || 'Not set'}</span><span>License: {vehicle.license_number || 'Not set'}</span><span>Expiry: {vehicle.license_expiry || 'Not set'}</span></div>
+                  </div>
+                ))}</div>}
+              </div>
+            )}
+
             {/* Email (Read-only) */}
             <div>
               <h4 className="text-lg font-semibold text-slate-800 mb-4">Account Information</h4>
@@ -460,4 +618,8 @@ export default function ProfileModal({ user, userRole, isOpen, onClose, onSaved 
       </div>
     </div>
   );
+}
+
+function userRolesFor(userRole: string): string[] {
+  return userRole ? [userRole] : ['customer'];
 }
