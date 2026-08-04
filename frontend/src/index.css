@@ -219,3 +219,42 @@ textarea:-webkit-autofill:active {
 [data-theme='light'] ::-webkit-scrollbar-thumb {
   @apply bg-slate-300 hover:bg-slate-400 rounded;
 }
+
+/* BodaGoEra classic landing */
+.font-classic-display {
+  font-family: "Playfair Display", Georgia, "Times New Roman", serif;
+}
+
+.font-classic-body {
+  font-family: "Lora", Georgia, "Times New Roman", serif;
+}
+
+.landing-classic-divider {
+  background: linear-gradient(90deg, transparent, #c4a052 20%, #c4a052 80%, transparent);
+  height: 1px;
+}
+
+.landing-classic-frame {
+  box-shadow:
+    inset 0 0 0 1px rgba(196, 160, 82, 0.35),
+    0 18px 40px rgba(44, 36, 22, 0.08);
+}
+
+.landing-mobile-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
+}
+
+.landing-touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.landing-input-mobile {
+  font-size: 16px;
+}
+
+@media (min-width: 640px) {
+  .landing-input-mobile {
+    font-size: 0.875rem;
+  }
+}
