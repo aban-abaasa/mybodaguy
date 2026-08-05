@@ -1,0 +1,26 @@
+{
+  "name": "SupermartKera — Shop & Delivery",
+  "short_name": "SupermartKera",
+  "id": "/supermarketera",
+  "description": "Shop from trusted supermarkets and get your order delivered.",
+  "start_url": "/supermarketera/",
+  "scope": "/supermarketera/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#33765b",
+  "theme_color": "#33765b",
+  "icons": [
+    {
+      "src": "/icons/supermarketera-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/supermarketera-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

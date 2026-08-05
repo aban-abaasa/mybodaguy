@@ -113,7 +113,21 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // instant the trip completes. Cash = pay the rider directly in person —
   // no surcharge, but the rider owes the commission out of pocket and must
   // confirm receipt before taking new jobs (see mbg_confirm_cash_received).
-  const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'cash'>('wallet');
+  const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'cash' | 'company'>('wallet');
+  const [companyTransport, setCompanyTransport] = useState<{ eligible: boolean; business_name?: string; billing_mode?: string }>({ eligible: false });
+
+  useEffect(() => {
+    if (!customerId) return;
+    supabase.rpc('mbg_get_company_transport_benefit').then(({ data, error }) => {
+      if (error || !data?.eligible) {
+        setCompanyTransport({ eligible: false });
+        setPaymentMethod(previous => previous === 'company' ? 'wallet' : previous);
+        return;
+      }
+      setCompanyTransport(data);
+      setPaymentMethod('company');
+    });
+  }, [customerId]);
 
   // Clear any selected products once the customer leaves the supermarket
   // delivery flow or switches stores, so a stale cart never gets submitted.
@@ -514,6 +528,21 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         ? deliveryCart.map(l => `${l.qty}x ${l.product.name}`).join(', ')
         : null;
 
+      const requestArgs = {
+        p_service_type: serviceType,
+        p_delivery_mode: serviceType === 'delivery' ? deliveryMode : null,
+        p_supermarket_id: serviceType === 'delivery' && deliveryMode === 'supermarket' ? selectedSupermarketId : null,
+        p_rider_id: rider.rider_id,
+        p_pickup_location: selectedPickup!.fullAddress,
+        p_pickup_lat: selectedPickup!.coordinates.lat,
+        p_pickup_lng: selectedPickup!.coordinates.lng,
+        p_dropoff_location: selectedDropoff!.fullAddress,
+        p_dropoff_lat: selectedDropoff!.coordinates.lat,
+        p_dropoff_lng: selectedDropoff!.coordinates.lng,
+        p_power_type_requested: powerFilter === 'any' ? null : powerFilter,
+        p_umbrella_requested: umbrellaRequired,
+        p_order_notes: orderNotes,
+      };
       const { data, error } = needsCrossBorderPath
         ? await supabase.rpc('mbg_request_cross_border_delivery', {
             p_rider_id: rider.rider_id,
@@ -527,22 +556,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             p_dropoff_country: dropoffCountry!.name,
             p_order_notes: orderNotes,
           })
-        : await supabase.rpc('mbg_request_ride', {
-            p_service_type: serviceType,
-            p_delivery_mode: serviceType === 'delivery' ? deliveryMode : null,
-            p_supermarket_id: serviceType === 'delivery' && deliveryMode === 'supermarket' ? selectedSupermarketId : null,
-            p_rider_id: rider.rider_id,
-            p_pickup_location: selectedPickup!.fullAddress,
-            p_pickup_lat: selectedPickup!.coordinates.lat,
-            p_pickup_lng: selectedPickup!.coordinates.lng,
-            p_dropoff_location: selectedDropoff!.fullAddress,
-            p_dropoff_lat: selectedDropoff!.coordinates.lat,
-            p_dropoff_lng: selectedDropoff!.coordinates.lng,
-            p_power_type_requested: powerFilter === 'any' ? null : powerFilter,
-            p_umbrella_requested: umbrellaRequired,
-            p_order_notes: orderNotes,
-            p_payment_method: paymentMethod,
-          });
+        : paymentMethod === 'company'
+          ? await supabase.rpc('mbg_request_company_ride', requestArgs)
+          : await supabase.rpc('mbg_request_ride', { ...requestArgs, p_payment_method: paymentMethod });
 
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Could not create the request');
@@ -960,7 +976,15 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             the rider directly in person, no surcharge. */}
         <div className="mb-4">
           <p className="text-xs font-semibold text-slate-500 mb-2">Payment method</p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className={companyTransport.eligible ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-2 gap-2'}>
+            {companyTransport.eligible && (
+              <button
+                onClick={() => setPaymentMethod('company')}
+                className="flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 border-blue-500 bg-blue-50 text-blue-700"
+              >
+                🏢 Company
+              </button>
+            )}
             <button
               onClick={() => setPaymentMethod('wallet')}
               className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
@@ -978,7 +1002,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               💵 Cash
             </button>
           </div>
-          {paymentMethod === 'wallet' ? (
+          {paymentMethod === 'company' ? (
+            <p className="text-[11px] text-blue-600 mt-1">Paid by {companyTransport.business_name || 'your company'} from its business wallet ({companyTransport.billing_mode === 'monthly' ? 'monthly settlement' : 'per ride'}).</p>
+          ) : paymentMethod === 'wallet' ? (
             <p className="text-[11px] text-slate-400 mt-1">Charged automatically when the trip ends (fare + 7% convenience fee).</p>
           ) : (
             <p className="text-[11px] text-slate-400 mt-1">Pay the rider directly in cash at the end of the trip.</p>
@@ -1204,7 +1230,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 // Lets the customer switch wallet <-> cash any time before the trip
 // completes — shown throughout the active ride, not just at request time,
 // so they can change their mind at the destination.
-function PaymentMethodSwitcher({ paymentMethod, onChange }: { paymentMethod: 'wallet' | 'cash'; onChange: (m: 'wallet' | 'cash') => void }) {
+function PaymentMethodSwitcher({ paymentMethod, onChange }: { paymentMethod: 'wallet' | 'cash' | 'company'; onChange: (m: 'wallet' | 'cash') => void }) {
   return (
     <div className="mt-4">
       <p className="text-xs font-semibold text-slate-500 mb-2">Payment method</p>
@@ -1549,7 +1575,7 @@ function RiderOnTheWay({
   customerId: string;
   customerName: string;
   riderUserId: string | null;
-  paymentMethod: 'wallet' | 'cash';
+  paymentMethod: 'wallet' | 'cash' | 'company';
   onChangePaymentMethod: (m: 'wallet' | 'cash') => void;
 }) {
   return (
@@ -1687,7 +1713,7 @@ function JourneyStarted({
   customerId: string;
   customerName: string;
   riderUserId: string | null;
-  paymentMethod: 'wallet' | 'cash';
+  paymentMethod: 'wallet' | 'cash' | 'company';
   onChangePaymentMethod: (m: 'wallet' | 'cash') => void;
 }) {
   const [journeyTime, setJourneyTime] = React.useState(0);

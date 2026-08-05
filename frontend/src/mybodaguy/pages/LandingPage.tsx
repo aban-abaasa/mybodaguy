@@ -320,6 +320,13 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
             <a href="#features" className="hover:text-[#8B6914] transition-colors">Features</a>
             <a href="#journey" className="hover:text-[#8B6914] transition-colors">Global Journeys</a>
             <a href="#contact" className="hover:text-[#8B6914] transition-colors">Contact</a>
+            <button
+              type="button"
+              onClick={() => window.dispatchEvent(new Event('bodagoera-install-requested'))}
+              className="rounded-full border border-[#C4A052] px-4 py-2 font-semibold text-[#8B6914] transition-colors hover:bg-[#2C2416] hover:text-[#FAF8F3]"
+            >
+              Install app
+            </button>
           </nav>
           <div className="flex items-center gap-1.5 xs:gap-2 shrink-0">
             <button
@@ -362,6 +369,13 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
               className="mt-2 w-full py-3.5 bg-[#2C2416] text-[#FAF8F3] text-sm font-semibold font-sans landing-touch-target"
             >
               Get Started
+            </button>
+            <button
+              type="button"
+              onClick={() => { closeMobileMenu(); window.dispatchEvent(new Event('bodagoera-install-requested')); }}
+              className="mt-2 w-full border border-[#C4A052] py-3.5 text-[#8B6914] text-sm font-semibold font-sans landing-touch-target"
+            >
+              Install BodaGoEra
             </button>
           </nav>
         )}

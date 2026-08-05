@@ -10,7 +10,28 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/src/index.css" />
-    <link rel="icon" type="image/svg+xml" href='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"%3E%3Crect width="64" height="64" rx="12" fill="%23f97316"/%3E%3Cpath d="M20 36h8l4-8h12l-2-4H30l-2 4H20v8zm24 0l4 8h4l-4-8h-4z" fill="white"/%3E%3C/svg%3E' />
+    <link id="app-manifest" rel="manifest" href="/manifest-bodagoera.webmanifest" />
+    <link id="app-icon" rel="icon" type="image/jpeg" href="/images/bodagoera-apk.jpg" />
+    <link id="app-apple-icon" rel="apple-touch-icon" href="/images/bodagoera-apk.jpg" />
+    <meta name="theme-color" content="#f97316" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="BodaGoEra" />
+    <script>
+      (function () {
+        var supermarket = window.location.pathname.indexOf('/supermarketera') === 0 || new URLSearchParams(window.location.search).get('app') === 'supermarketera';
+        var manifest = document.getElementById('app-manifest');
+        if (manifest) manifest.setAttribute('href', supermarket ? '/manifest-supermarketera.webmanifest' : '/manifest-bodagoera.webmanifest');
+        var appIcon = document.getElementById('app-icon');
+        var appleIcon = document.getElementById('app-apple-icon');
+        var iconPath = supermarket ? '/icons/supermarketera-192.png' : '/images/bodagoera-apk.jpg';
+        if (appIcon) appIcon.setAttribute('href', iconPath);
+        if (appleIcon) appleIcon.setAttribute('href', iconPath);
+        document.querySelector('meta[name="theme-color"]').setAttribute('content', supermarket ? '#33765b' : '#f97316');
+        document.querySelector('meta[name="apple-mobile-web-app-title"]').setAttribute('content', supermarket ? 'SupermartKera' : 'BodaGoEra');
+        document.title = supermarket ? 'SupermartKera — Shop & Delivery' : 'BodaGoEra — Transport & Delivery';
+      }());
+    </script>
 
     <title>BodaGoEra - Your Trusted Ride Partner</title>
 
