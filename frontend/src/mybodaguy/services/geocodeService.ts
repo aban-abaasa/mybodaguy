@@ -11,6 +11,24 @@ export interface GeocodeResult {
   displayName: string;
 }
 
+const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY as string | undefined;
+
+async function geocodeWithGoogle(query: string): Promise<GeocodeResult | null> {
+  if (!GOOGLE_MAPS_API_KEY) return null;
+  try {
+    const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(query)}&key=${encodeURIComponent(GOOGLE_MAPS_API_KEY)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const result = data?.results?.[0];
+    const lat = Number(result?.geometry?.location?.lat);
+    const lng = Number(result?.geometry?.location?.lng);
+    if (data?.status !== 'OK' || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng, displayName: result.formatted_address || query };
+  } catch {
+    return null;
+  }
+}
+
 // Nominatim's usage policy caps free public use at 1 request/second per
 // client. This booking flow can fire several geocode calls close together
 // (pickup address, city autocomplete, a dropped map pin's reverse lookup,
@@ -53,6 +71,11 @@ export async function geocodeAddress(query: string, countryHint?: string): Promi
   const attempts = countryHint && !trimmed.toLowerCase().includes(countryHint.toLowerCase())
     ? [`${trimmed}, ${countryHint}`, trimmed]
     : [trimmed];
+
+  for (const attempt of attempts) {
+    const googleResult = await geocodeWithGoogle(attempt);
+    if (googleResult) return googleResult;
+  }
 
   for (const attempt of attempts) {
     const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(attempt)}`;
@@ -109,6 +132,13 @@ export interface CitySuggestion {
   lng: number;
 }
 
+export interface AddressSuggestion {
+  name: string;
+  displayName: string;
+  lat: number;
+  lng: number;
+}
+
 async function runCitySearch(trimmed: string, countryIso2: string | undefined, strict: boolean): Promise<CitySuggestion[]> {
   const params = new URLSearchParams({
     format: 'json',
@@ -154,6 +184,33 @@ export async function searchCities(query: string, countryIso2?: string): Promise
   const strict = await runCitySearch(trimmed, countryIso2, true);
   if (strict.length > 0) return strict;
   return runCitySearch(trimmed, countryIso2, false);
+}
+
+/** Search hotels, lodges and street addresses within the selected country. */
+export async function searchAddresses(query: string, countryIso2?: string, city?: string): Promise<AddressSuggestion[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const params = new URLSearchParams({
+    format: 'json',
+    limit: '8',
+    q: [trimmed, city].filter(Boolean).join(', '),
+    addressdetails: '1',
+    'accept-language': 'en',
+  });
+  if (countryIso2) params.set('countrycodes', countryIso2.toLowerCase());
+
+  const res = await throttledFetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) return [];
+  const results = await res.json();
+  return (results || []).map((r: any) => ({
+    name: r.name || r.address?.hotel || r.address?.amenity || r.display_name.split(',')[0],
+    displayName: r.display_name,
+    lat: Number(r.lat),
+    lng: Number(r.lon),
+  }));
 }
 
 export async function reverseGeocodeCountry(lat: number, lng: number): Promise<CountryLookup | null> {

@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react';
 import { MapPin, Plus, X, Star, Crosshair } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
+import { reverseGeocode } from '../services/geocodeService';
+import LocationPickerMap from './LocationPickerMap';
+import type { Location } from '../data/mockLocations';
 
 interface Area {
   id: string;
@@ -59,23 +62,31 @@ export default function CustomerAreaManager({ customerId }: CustomerAreaManagerP
       return;
     }
     setLocating(true);
+    const savePosition = async (pos: GeolocationPosition) => {
+      const address = await reverseGeocode(pos.coords.latitude, pos.coords.longitude);
+      setNewArea((prev) => ({
+        ...prev,
+        address: address || `${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`,
+        latitude: pos.coords.latitude,
+        longitude: pos.coords.longitude,
+      }));
+      toast.success('GPS location captured');
+      setLocating(false);
+    };
+    const showLocationHelp = () => {
+      toast.error('GPS needs permission and HTTPS. Use the secure site, or search/tap the map on local HTTP.');
+      setLocating(false);
+    };
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setNewArea((prev) => ({ ...prev, latitude: pos.coords.latitude, longitude: pos.coords.longitude }));
-        toast.success('GPS location captured');
-        setLocating(false);
-      },
-      () => {
-        toast.error('Could not get your GPS location — you can still save with just an address');
-        setLocating(false);
-      },
+      savePosition,
+      () => navigator.geolocation.getCurrentPosition(savePosition, showLocationHelp, { enableHighAccuracy: false, timeout: 20000, maximumAge: 300000 }),
       { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
   const handleAddArea = async () => {
-    if (!newArea.name || !newArea.address) {
-      toast.error('Please fill in all fields');
+    if (!newArea.name || !newArea.address || newArea.latitude == null || newArea.longitude == null) {
+      toast.error('Choose the location on the map before saving');
       return;
     }
 
@@ -165,13 +176,13 @@ export default function CustomerAreaManager({ customerId }: CustomerAreaManagerP
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Detailed Address</label>
+            <label className="block text-xs font-medium text-slate-700 mb-1">Map-selected address</label>
             <input
               type="text"
               value={newArea.address}
-              onChange={(e) => setNewArea({ ...newArea, address: e.target.value })}
-              placeholder="e.g., Plot 12, Ntinda Road"
-              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+              readOnly
+              placeholder="Search or select a point on the map below"
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-slate-50 text-slate-700 outline-none"
             />
           </div>
           <div>
@@ -190,6 +201,24 @@ export default function CustomerAreaManager({ customerId }: CustomerAreaManagerP
               </p>
             )}
           </div>
+          <LocationPickerMap
+            pickup={newArea.latitude != null && newArea.longitude != null ? {
+              id: 'new_area', name: newArea.name || 'Selected area', area: newArea.name || 'Selected area',
+              fullAddress: newArea.address || 'Selected map location',
+              coordinates: { lat: newArea.latitude, lng: newArea.longitude },
+            } as Location : null}
+            dropoff={null}
+            selectionMode="pickup"
+            onPickupChange={(location: Location) => setNewArea((prev) => ({
+              ...prev,
+              address: location.fullAddress,
+              latitude: location.coordinates.lat,
+              longitude: location.coordinates.lng,
+            }))}
+            onDropoffChange={() => {}}
+          />
+          <p className="text-xs text-slate-500">Use the search bar, current-location button, or tap/drag the green pin. Saving requires a map-selected coordinate.</p>
+
           <div className="flex items-center gap-2">
             <input
               type="checkbox"

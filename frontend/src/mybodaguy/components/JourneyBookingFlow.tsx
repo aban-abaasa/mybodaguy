@@ -5,7 +5,7 @@ import {
   searchFlights, searchAirports, getJourneyQuote, confirmJourney, pollJourney, requestShipCargoJourney,
   type FlightOffer, type Journey, type JourneyQuote, type AirportSuggestion,
 } from '../services/journeyService';
-import { geocodeAddress, reverseGeocodeCountry, searchCities, type CountryLookup, type CitySuggestion } from '../services/geocodeService';
+import { geocodeAddress, reverseGeocodeCountry, searchCities, searchAddresses, type CountryLookup, type CitySuggestion, type AddressSuggestion, type GeocodeResult } from '../services/geocodeService';
 import { printFlightTicket, printShipTicket } from '../services/printTicket';
 import { getBalance, ICAN_TO_UGX, formatICAN, SOURCE_APP } from '../services/icanWalletService';
 import { payWithFlutterwave, generateTxRef } from '../services/flutterwaveClient';
@@ -94,6 +94,8 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
   const [selectedAreaId, setSelectedAreaId] = useState('');
   const [manualAddress, setManualAddress] = useState('');
   const [manualPickup, setManualPickup] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [pickupSearchResult, setPickupSearchResult] = useState<GeocodeResult | null>(null);
+  const [searchingPickup, setSearchingPickup] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [pickupVehicleType, setPickupVehicleType] = useState<'motorcycle' | 'car'>('motorcycle');
   // Which country the journey actually STARTS in — was hardcoded to
@@ -118,6 +120,7 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
   const [destAddress, setDestAddress] = useState('');
   const [destPin, setDestPin] = useState<{ lat: number; lng: number; address: string } | null>(null);
   const [findingDestPin, setFindingDestPin] = useState(false);
+  const selectedDestinationAddressRef = useRef('');
 
   const [quote, setQuote] = useState<JourneyQuote | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -285,6 +288,10 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
     : manualPickup;
 
   useEffect(() => {
+    if (selectedDestinationAddressRef.current === destAddress) {
+      selectedDestinationAddressRef.current = '';
+      return;
+    }
     setDestPin(null);
   }, [destAddress, destCity, destCountry]);
 
@@ -292,6 +299,34 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
     setSelectedAreaId('');
     setManualAddress(location.fullAddress);
     setManualPickup({ lat: location.coordinates.lat, lng: location.coordinates.lng, address: location.fullAddress });
+    setPickupSearchResult({ lat: location.coordinates.lat, lng: location.coordinates.lng, displayName: location.fullAddress });
+  };
+
+  const searchPickupOnMap = async () => {
+    const query = manualAddress.trim();
+    if (!query) return;
+    setError(null);
+    setSearchingPickup(true);
+    setPickupSearchResult(null);
+    try {
+      const result = await geocodeAddress(query, pickupCountry.name);
+      if (!result) {
+        setError(`Couldn't find "${query}" in ${pickupCountry.name}. Try adding a neighborhood, city, or landmark.`);
+        return;
+      }
+      setPickupSearchResult(result);
+    } catch (err: any) {
+      setError(err.message || 'Could not search that pickup location');
+    } finally {
+      setSearchingPickup(false);
+    }
+  };
+
+  const usePickupSearchResult = () => {
+    if (!pickupSearchResult) return;
+    setSelectedAreaId('');
+    setManualAddress(pickupSearchResult.displayName);
+    setManualPickup({ lat: pickupSearchResult.lat, lng: pickupSearchResult.lng, address: pickupSearchResult.displayName });
   };
 
   const findDestinationOnMap = async () => {
@@ -513,6 +548,7 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
                 // applies once the country itself changes.
                 setManualPickup(null);
                 setSelectedAreaId('');
+                setPickupSearchResult(null);
               }}
             >
               {COUNTRIES.map((c) => (
@@ -558,17 +594,42 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
               </p>
               <input
                 className="w-full border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400"
-                placeholder="e.g. Ntinda, Kampala"
+                 placeholder={`Search an area, landmark, or address in ${pickupCountry.name}`}
                 value={manualAddress}
                 onChange={(e) => {
                   // Typing invalidates whatever pin/geocode result was
                   // attached to the previous text — a stale one must never
                   // silently get used for the new address.
-                  setManualAddress(e.target.value);
-                  setManualPickup(null);
-                }}
-              />
-            </div>
+                   setManualAddress(e.target.value);
+                   setManualPickup(null);
+                   setPickupSearchResult(null);
+                 }}
+               />
+               <button
+                 type="button"
+                 onClick={searchPickupOnMap}
+                 disabled={!manualAddress.trim() || searchingPickup}
+                 className="w-full border-2 border-blue-200 text-blue-700 rounded-lg py-2.5 font-semibold text-sm disabled:opacity-50 flex items-center justify-center gap-2"
+               >
+                 {searchingPickup ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
+                 {searchingPickup ? 'Searching the map...' : 'Search this pickup on the map'}
+               </button>
+               {pickupSearchResult && (
+                 <button
+                   type="button"
+                   onClick={usePickupSearchResult}
+                   className={`w-full text-left rounded-lg border-2 p-3 transition-colors ${manualPickup?.lat === pickupSearchResult.lat && manualPickup?.lng === pickupSearchResult.lng ? 'border-green-500 bg-green-50' : 'border-slate-200 bg-white hover:border-blue-400'}`}
+                 >
+                   <div className="flex items-start gap-2">
+                     <MapPin size={17} className="text-green-600 mt-0.5 shrink-0" />
+                     <span>
+                       <span className="block text-sm font-semibold text-slate-800">{manualPickup ? 'Pickup selected' : 'Use this map result'}</span>
+                       <span className="block text-xs text-slate-500 mt-0.5">{pickupSearchResult.displayName}</span>
+                     </span>
+                   </div>
+                 </button>
+               )}
+             </div>
           )}
           <p className="text-xs text-slate-500">Or drop a pin — same map picker as booking a ride:</p>
           <LocationPickerMap
@@ -604,7 +665,17 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
           <AirportPicker
             label="To"
             selectedLabel={destinationLabel}
-            onSelect={(iata, label) => { setDestinationIata(iata); setDestinationLabel(label); }}
+            onSelect={(iata, label, countryIso2) => {
+              setDestinationIata(iata);
+              setDestinationLabel(label);
+              const country = COUNTRIES.find((c) => c.iso2 === countryIso2);
+              if (country && country.name !== destCountry) {
+                setDestCountry(country.name);
+                setDestCity('');
+                setDestAddress('');
+                setDestPin(null);
+              }
+            }}
           />
           <input className="w-full border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400" type="date" value={departureDate} onChange={(e) => setDepartureDate(e.target.value)} />
           <div>
@@ -631,13 +702,14 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
             <div className="space-y-2 max-h-72 overflow-y-auto">
               {offers.map((offer) => (
                 <button
+                  type="button"
                   key={offer.offerId}
                   onClick={() => setSelectedOffer(offer)}
-                  className={`w-full text-left border rounded-lg p-3 ${selectedOffer?.offerId === offer.offerId ? 'border-orange-500 bg-orange-50' : 'border-slate-200'}`}
+                  className={`w-full text-left border rounded-lg p-3 text-slate-900 bg-white hover:bg-orange-50 transition-colors ${selectedOffer?.offerId === offer.offerId ? 'border-orange-500 bg-orange-50 ring-1 ring-orange-300' : 'border-slate-200'}`}
                 >
                   <div className="flex justify-between">
-                    <span className="font-medium">{offer.carrier}</span>
-                    <span className="font-semibold">{offer.totalAmount} {offer.totalCurrency}</span>
+                    <span className="font-medium text-slate-900">{offer.carrier || 'Available airline'}</span>
+                    <span className="font-semibold text-slate-900">{offer.totalAmount} {offer.totalCurrency}</span>
                   </div>
                 </button>
               ))}
@@ -660,7 +732,12 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
           <select
             className="w-full border rounded-lg p-3 bg-white text-slate-900"
             value={destCountry}
-            onChange={(e) => { setDestCountry(e.target.value); setDestCity(''); }}
+            onChange={(e) => {
+              setDestCountry(e.target.value);
+              setDestCity('');
+              setDestAddress('');
+              setDestPin(null);
+            }}
           >
             <option value="">Select a country</option>
             {COUNTRIES.map((c) => (
@@ -672,7 +749,17 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
             value={destCity}
             onChange={setDestCity}
           />
-          <input className="w-full border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400" placeholder="Hotel / room address" value={destAddress} onChange={(e) => setDestAddress(e.target.value)} />
+          <AddressSearchInput
+            countryIso2={COUNTRIES.find((c) => c.name === destCountry)?.iso2}
+            city={destCity}
+            value={destAddress}
+            onChange={setDestAddress}
+            onSelect={(address, lat, lng) => {
+              selectedDestinationAddressRef.current = address;
+              setDestAddress(address);
+              setDestPin({ lat, lng, address });
+            }}
+          />
           <p className="text-xs text-slate-500">A driver is dispatched automatically once you land — timed off your actual arrival, and re-timed automatically if your flight is delayed.</p>
 
           <button
@@ -917,7 +1004,7 @@ function AirportPicker({
   label: string;
   defaultCountryIso2?: string;
   selectedLabel: string | null;
-  onSelect: (iataCode: string, displayLabel: string) => void;
+  onSelect: (iataCode: string, displayLabel: string, countryIso2?: string) => void;
 }) {
   const [countryIso2, setCountryIso2] = useState(defaultCountryIso2 || 'UG');
   const [query, setQuery] = useState('');
@@ -925,6 +1012,31 @@ function AirportPicker({
   const [loading, setLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const loadCountryAirports = async (iso2: string) => {
+    const country = COUNTRIES.find((c) => c.iso2 === iso2);
+    if (!country) return;
+
+    setLoading(true);
+    try {
+      // Load the country's airports immediately; the input remains available
+      // for narrowing the results by city or airport name.
+      const { airports } = await searchAirports(country.name, iso2);
+      setSuggestions(airports);
+      setShowSuggestions(true);
+    } catch {
+      setSuggestions([]);
+      setShowSuggestions(true);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadCountryAirports(countryIso2);
+    // The initial airport list is driven by the selected country.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -956,7 +1068,15 @@ function AirportPicker({
         <select
           className="border rounded-lg p-2.5 bg-white text-slate-900 text-sm"
           value={countryIso2}
-          onChange={(e) => setCountryIso2(e.target.value)}
+          onChange={(e) => {
+            const nextIso2 = e.target.value;
+            setCountryIso2(nextIso2);
+            setQuery('');
+            setSuggestions([]);
+            setShowSuggestions(true);
+            onSelect('', '');
+            loadCountryAirports(nextIso2);
+          }}
         >
           {COUNTRIES.map((c) => (
             <option key={c.iso2 || c.name} value={c.iso2}>{c.name}</option>
@@ -980,7 +1100,7 @@ function AirportPicker({
       {showSuggestions && (
         <div className="border rounded-lg bg-white shadow-md max-h-48 overflow-y-auto">
           {loading && <div className="p-2.5 text-xs text-slate-400">Searching…</div>}
-          {!loading && suggestions.length === 0 && query.trim().length >= 2 && (
+          {!loading && suggestions.length === 0 && (
             <div className="p-2.5 text-xs text-slate-400">No airports found</div>
           )}
           {suggestions.map((a) => (
@@ -989,7 +1109,7 @@ function AirportPicker({
               type="button"
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {
-                onSelect(a.iataCode, `${a.name} (${a.iataCode})${a.cityName ? ` — ${a.cityName}` : ''}`);
+                onSelect(a.iataCode, `${a.name} (${a.iataCode})${a.cityName ? ` — ${a.cityName}` : ''}`, a.countryCode);
                 setQuery('');
                 setShowSuggestions(false);
               }}
@@ -997,6 +1117,85 @@ function AirportPicker({
             >
               <div className="font-medium text-slate-800">{a.name} ({a.iataCode})</div>
               {a.cityName && <div className="text-xs text-slate-500">{a.cityName}</div>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddressSearchInput({
+  countryIso2,
+  city,
+  value,
+  onChange,
+  onSelect,
+}: {
+  countryIso2?: string;
+  city: string;
+  value: string;
+  onChange: (value: string) => void;
+  onSelect: (address: string, lat: number, lng: number) => void;
+}) {
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!countryIso2 || value.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      try {
+        setSuggestions(await searchAddresses(value.trim(), countryIso2, city));
+        setShowSuggestions(true);
+      } catch {
+        setSuggestions([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 450);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [value, countryIso2, city]);
+
+  return (
+    <div className="relative">
+      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+      <input
+        className="w-full border rounded-lg p-3 pl-8 bg-white text-slate-900 placeholder-slate-400"
+        placeholder={countryIso2 ? 'Hotel, lodge or street address' : 'Select a country first'}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => value.trim().length >= 2 && setShowSuggestions(true)}
+        onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+        disabled={!countryIso2}
+      />
+      {showSuggestions && (
+        <div className="absolute z-20 w-full mt-1 border rounded-lg bg-white shadow-md max-h-56 overflow-y-auto">
+          {loading && <div className="p-2.5 text-xs text-slate-400">Searching hotels and addresses…</div>}
+          {!loading && suggestions.length === 0 && value.trim().length >= 2 && (
+            <div className="p-2.5 text-xs text-slate-400">No matching hotel found — you can still type the address</div>
+          )}
+          {suggestions.map((a, i) => (
+            <button
+              key={`${a.displayName}-${i}`}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onSelect(a.displayName, a.lat, a.lng);
+                setShowSuggestions(false);
+              }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-orange-50 border-b border-slate-100 last:border-b-0"
+            >
+              <div className="font-medium text-slate-800">{a.name}</div>
+              <div className="text-xs text-slate-500 truncate">{a.displayName}</div>
             </button>
           ))}
         </div>

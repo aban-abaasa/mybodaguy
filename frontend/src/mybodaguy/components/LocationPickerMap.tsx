@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { Locate, Navigation } from 'lucide-react';
+import { Locate, Navigation, Search, Loader2 } from 'lucide-react';
 import type { Location } from '../data/mockLocations';
-import { reverseGeocode } from '../services/geocodeService';
+import { geocodeAddress, reverseGeocode } from '../services/geocodeService';
 
 // Kampala city center — used only as a fallback when GPS is denied/unavailable.
 const DEFAULT_CENTER: [number, number] = [0.3157, 32.5756];
@@ -43,6 +43,10 @@ interface LocationPickerMapProps {
    * device's own GPS position would be the wrong pin entirely there.
    * Defaults on, matching the "Book a Ride" pickup use case. */
   autoLocateGPS?: boolean;
+  /** Controls whether map taps/search results select pickup or drop-off. */
+  selectionMode?: 'pickup' | 'dropoff';
+  /** Optional country hint for the map search. */
+  searchCountry?: string;
 }
 
 export default function LocationPickerMap({
@@ -53,6 +57,8 @@ export default function LocationPickerMap({
   onRouteInfo,
   pickupLocked,
   autoLocateGPS = true,
+  selectionMode = 'dropoff',
+  searchCountry,
 }: LocationPickerMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -61,6 +67,9 @@ export default function LocationPickerMap({
   const routeLineRef = useRef<L.Polyline | null>(null);
   const [locating, setLocating] = useState(false);
   const [routeSummary, setRouteSummary] = useState<{ distanceKm: number; durationMin: number } | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
 
   // Init the map once.
   useEffect(() => {
@@ -74,7 +83,7 @@ export default function LocationPickerMap({
 
     map.on('click', async (e: L.LeafletMouseEvent) => {
       const loc = await toLocation('dropoff', 'Drop-off point', e.latlng.lat, e.latlng.lng);
-      onDropoffChange(loc);
+      (selectionMode === 'pickup' ? onPickupChange : onDropoffChange)(loc);
     });
 
     mapRef.current = map;
@@ -97,7 +106,10 @@ export default function LocationPickerMap({
         onPickupChange(loc);
         setLocating(false);
       },
-      () => setLocating(false),
+      () => {
+        setLocating(false);
+        setLocationError('Location access was denied or unavailable. Search for your area or tap the map instead.');
+      },
       { enableHighAccuracy: true, timeout: 10000 }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -187,22 +199,64 @@ export default function LocationPickerMap({
   }, [pickup?.coordinates.lat, pickup?.coordinates.lng, dropoff?.coordinates.lat, dropoff?.coordinates.lng, onRouteInfo]);
 
   const useMyLocation = () => {
-    if (!navigator.geolocation || pickupLocked) return;
+    if (!navigator.geolocation || pickupLocked) {
+      setLocationError('GPS is unavailable. Search for your area or tap the map instead.');
+      return;
+    }
     setLocating(true);
+    setLocationError(null);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const loc = await toLocation('gps', 'My Location', pos.coords.latitude, pos.coords.longitude);
         onPickupChange(loc);
         setLocating(false);
       },
-      () => setLocating(false),
+      () => {
+        setLocating(false);
+        setLocationError('Could not access your location. On a phone, allow location permission and use HTTPS, or search/tap the map.');
+      },
       { enableHighAccuracy: true, timeout: 10000 }
     );
   };
 
+  const searchLocation = async () => {
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    setLocationError(null);
+    try {
+      const result = await geocodeAddress(searchQuery, searchCountry);
+      if (!result) {
+        setLocationError('No location found. Try a full address, landmark, neighborhood, or city.');
+        return;
+      }
+      const loc = await toLocation(selectionMode, 'Selected location', result.lat, result.lng);
+      (selectionMode === 'pickup' ? onPickupChange : onDropoffChange)(loc);
+      mapRef.current?.setView([result.lat, result.lng], 16, { animate: false });
+    } catch {
+      setLocationError('Location search failed. Check your connection and try again.');
+    } finally {
+      setSearching(false);
+    }
+  };
+
   return (
     <div className="space-y-2">
-      <div ref={containerRef} className="rounded-lg border-2 border-slate-200" style={{ height: 320, width: '100%' }} />
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <input
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && searchLocation()}
+            placeholder="Search any address, landmark, neighborhood or city"
+            className="w-full rounded-lg border-2 border-slate-200 bg-white py-3 pl-10 pr-3 text-sm text-slate-900 placeholder-slate-400"
+          />
+        </div>
+        <button type="button" onClick={searchLocation} disabled={searching || !searchQuery.trim()} className="rounded-lg bg-orange-500 px-4 text-white disabled:bg-slate-300">
+          {searching ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
+        </button>
+      </div>
+      <div ref={containerRef} className="rounded-lg border-2 border-slate-200" style={{ height: 420, width: '100%' }} />
       <div className="flex items-center justify-between gap-2 flex-wrap">
         {autoLocateGPS && (
           <button
@@ -222,7 +276,8 @@ export default function LocationPickerMap({
           </span>
         )}
       </div>
-      <p className="text-[11px] text-slate-400">Tap the map to set your drop-off, or drag either pin to fine-tune it.</p>
+      {locationError && <p className="rounded-lg bg-red-50 p-2 text-xs text-red-700">{locationError}</p>}
+      <p className="text-xs text-slate-500">Search precisely, use your current location, or tap the map to set your {selectionMode}. Drag the pin to fine-tune it.</p>
     </div>
   );
 }
