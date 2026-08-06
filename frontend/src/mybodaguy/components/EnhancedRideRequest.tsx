@@ -9,7 +9,7 @@ import RideCommsBar from './RideCommsBar';
 import ProductPicker, { CartLine } from './ProductPicker';
 import LocationPickerMap from './LocationPickerMap';
 import JourneyBookingFlow from './JourneyBookingFlow';
-import { reverseGeocodeCountry, type CountryLookup } from '../services/geocodeService';
+import { reverseGeocodeCountry, searchAddressSuggestions, type CountryLookup } from '../services/geocodeService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
@@ -394,6 +394,61 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     );
     return [...personal, ...searchLocations(query)];
   };
+
+  const mergeRemoteSuggestions = (local: Location[], remote: Awaited<ReturnType<typeof searchAddressSuggestions>>): Location[] => {
+    const existing = new Set(local.map((location) => `${location.coordinates.lat.toFixed(5)},${location.coordinates.lng.toFixed(5)}`));
+    const remoteLocations: Location[] = remote
+      .filter((result) => {
+        const key = `${result.lat.toFixed(5)},${result.lng.toFixed(5)}`;
+        if (existing.has(key)) return false;
+        existing.add(key);
+        return true;
+      })
+      .map((result, index) => ({
+        id: `google_${result.lat.toFixed(5)}_${result.lng.toFixed(5)}_${index}`,
+        name: result.name,
+        area: result.name,
+        fullAddress: result.displayName,
+        coordinates: { lat: result.lat, lng: result.lng },
+      }));
+    return [...local, ...remoteLocations];
+  };
+
+  // Each field gets its own live request and its own result list. This makes
+  // typing in pickup independent from typing in drop-off.
+  useEffect(() => {
+    const query = pickup.trim();
+    if (pickupIsAutoFromSupermarket || query.length < 2) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      const remote = await searchAddressSuggestions(query);
+      if (!cancelled) {
+        setPickupSuggestions(mergeRemoteSuggestions(mergeSuggestions(query), remote));
+        setShowPickupSuggestions(true);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [pickup, pickupIsAutoFromSupermarket, customerAreas]);
+
+  useEffect(() => {
+    const query = dropoff.trim();
+    if (query.length < 2) return;
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+      const remote = await searchAddressSuggestions(query);
+      if (!cancelled) {
+        setDropoffSuggestions(mergeRemoteSuggestions(mergeSuggestions(query), remote));
+        setShowDropoffSuggestions(true);
+      }
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [dropoff, customerAreas]);
 
   const handlePickupChange = (value: string) => {
     setPickup(value);

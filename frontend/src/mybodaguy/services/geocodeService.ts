@@ -29,6 +29,79 @@ async function geocodeWithGoogle(query: string): Promise<GeocodeResult | null> {
   }
 }
 
+async function searchWithGoogle(query: string): Promise<AddressSuggestion[]> {
+  if (!GOOGLE_MAPS_API_KEY) return [];
+
+  try {
+    const params = new URLSearchParams({
+      address: query,
+      key: GOOGLE_MAPS_API_KEY,
+    });
+    const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`);
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    if (data?.status !== 'OK') return [];
+
+    return (data.results || []).slice(0, 6).map((result: any) => ({
+      name: result.address_components?.[0]?.long_name || result.formatted_address?.split(',')[0] || query,
+      displayName: result.formatted_address || query,
+      lat: Number(result.geometry?.location?.lat),
+      lng: Number(result.geometry?.location?.lng),
+    })).filter((result: AddressSuggestion) => Number.isFinite(result.lat) && Number.isFinite(result.lng));
+  } catch {
+    return [];
+  }
+}
+
+/** Returns several real places for a typing field, rather than only the first geocode match. */
+export async function searchAddressSuggestions(query: string, countryHint?: string): Promise<AddressSuggestion[]> {
+  const trimmed = query.trim();
+  if (trimmed.length < 2) return [];
+
+  const googleQuery = countryHint && !trimmed.toLowerCase().includes(countryHint.toLowerCase())
+    ? `${trimmed}, ${countryHint}`
+    : trimmed;
+  const googleResults = await searchWithGoogle(googleQuery);
+  if (googleResults.length > 0) return googleResults;
+
+  try {
+    const params = new URLSearchParams({ format: 'json', limit: '6', q: googleQuery });
+    const res = await throttledFetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!res.ok) return [];
+    const results = await res.json();
+    return (results || []).map((result: any) => ({
+      name: result.name || result.display_name?.split(',')[0] || trimmed,
+      displayName: result.display_name,
+      lat: Number(result.lat),
+      lng: Number(result.lon),
+    })).filter((result: AddressSuggestion) => Number.isFinite(result.lat) && Number.isFinite(result.lng));
+  } catch {
+    return [];
+  }
+}
+
+async function reverseGeocodeWithGoogle(lat: number, lng: number): Promise<string | null> {
+  if (!GOOGLE_MAPS_API_KEY) return null;
+
+  try {
+    const params = new URLSearchParams({
+      latlng: `${lat},${lng}`,
+      key: GOOGLE_MAPS_API_KEY,
+    });
+    const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params.toString()}`);
+    if (!res.ok) return null;
+
+    const data = await res.json();
+    if (data?.status !== 'OK') return null;
+    return data?.results?.[0]?.formatted_address || null;
+  } catch {
+    return null;
+  }
+}
+
 // Nominatim's usage policy caps free public use at 1 request/second per
 // client. This booking flow can fire several geocode calls close together
 // (pickup address, city autocomplete, a dropped map pin's reverse lookup,
@@ -100,6 +173,9 @@ export async function geocodeAddress(query: string, countryHint?: string): Promi
  * sees real text in the pickup/dropoff field instead of raw coordinates.
  */
 export async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+  const googleResult = await reverseGeocodeWithGoogle(lat, lng);
+  if (googleResult) return googleResult;
+
   const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`;
   try {
     const res = await throttledFetch(url, { headers: { Accept: 'application/json' } });
