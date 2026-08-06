@@ -11,7 +11,20 @@
  *
  * Returns true if the request was a handled preflight (caller should stop).
  */
-const DEFAULT_ALLOWED = ['http://localhost:5173', 'http://localhost:5177', 'http://127.0.0.1:5173'];
+// Local development ports used by the standalone BodaGo app and the
+// SupermartKera customer portal. Keep this explicit instead of using `*`:
+// journey endpoints can create bookings and touch wallet/payment flows.
+const DEFAULT_ALLOWED = [
+  'http://localhost:5173',
+  'http://localhost:5177',
+  'http://localhost:7779',
+  'http://localhost:7780',
+  'http://127.0.0.1:5173',
+  'http://127.0.0.1:5177',
+  'http://127.0.0.1:7779',
+  'http://127.0.0.1:7780',
+  'https://supermartkera.icanera.space',
+];
 
 export function applyCors(req, res) {
   const configured = (process.env.ALLOWED_ORIGINS || '').split(',').map((o) => o.trim()).filter(Boolean);
@@ -23,7 +36,7 @@ export function applyCors(req, res) {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     res.status(204).end();
