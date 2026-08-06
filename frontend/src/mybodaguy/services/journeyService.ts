@@ -59,9 +59,12 @@ export interface JourneyQuote {
 }
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
   const res = await fetch(`${MBG_API_BASE_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify(body),
   });
   const data = await res.json();
@@ -156,7 +159,10 @@ export interface Journey {
 }
 
 export async function getJourney(journeyId: string): Promise<Journey> {
-  const res = await fetch(`${MBG_API_BASE_URL}/api/journeys/${journeyId}`);
+  const { data: { session } } = await supabase.auth.getSession();
+  const headers: Record<string, string> = {};
+  if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+  const res = await fetch(`${MBG_API_BASE_URL}/api/journeys/${journeyId}`, { headers });
   const data = await res.json();
   if (!res.ok || !data.success) throw new Error(data.error || 'Failed to fetch journey');
   return data.journey as Journey;

@@ -1,6 +1,7 @@
 import { supabaseAdmin } from '../_lib/supabaseAdmin.js';
 import { createOrder } from '../_lib/duffel.js';
 import { applyCors } from '../_lib/cors.js';
+import { requireUser, requireMatchingUser } from '../_lib/auth.js';
 
 /**
  * Debit ICAN (tithe-free), book the real Duffel flight, create the journey
@@ -11,8 +12,11 @@ import { applyCors } from '../_lib/cors.js';
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method not allowed' });
+  const user = await requireUser(req, res);
+  if (!user) return;
 
   const { customerUserId, quote, passengers } = req.body;
+  if (!requireMatchingUser(user, customerUserId, res)) return;
 
   try {
     const { data: customer } = await supabaseAdmin

@@ -1,14 +1,18 @@
 import { supabaseAdmin } from '../_lib/supabaseAdmin.js';
 import { applyCors } from '../_lib/cors.js';
+import { requireUser, requireMatchingUser } from '../_lib/auth.js';
 
 const ICAN_TO_UGX = 5000; // must match ICAN's floor price (see ICAN_CROSS_APP_WALLET_MIGRATION.sql)
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method not allowed' });
+  const user = await requireUser(req, res);
+  if (!user) return;
 
   try {
     const { customerUserId, pickup, offer, destination, cargoWeightKg } = req.body;
+    if (!requireMatchingUser(user, customerUserId, res)) return;
 
     const { data: customer } = await supabaseAdmin
       .from('mbg_customers')
