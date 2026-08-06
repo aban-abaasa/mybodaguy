@@ -23,6 +23,7 @@ const DEFAULT_ALLOWED = [
   'http://127.0.0.1:5177',
   'http://127.0.0.1:7779',
   'http://127.0.0.1:7780',
+  'https://bodagoera.icanera.space',
   'https://supermartkera.icanera.space',
 ];
 
