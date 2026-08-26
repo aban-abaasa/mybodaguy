@@ -1,2 +1,35 @@
-.vercel
+# Environment variables
+.env
 .env*
+!.env.example
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Production builds
+dist/
+build/
+
+# Package lock (auto-generated)
+package-lock.json
+
+# Vercel
+.vercel
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# Cache
+.cache
+.parcel-cache
+.eslintcache
