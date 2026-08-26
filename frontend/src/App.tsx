@@ -4,6 +4,7 @@ import { Bike, Bell, Menu, X, LogOut } from "lucide-react";
 import { authService } from "./mybodaguy/services/authService";
 import { userService } from "./mybodaguy/services/userService";
 import SignInPage from "./mybodaguy/pages/SignInPage";
+import ResetPasswordPage from "./mybodaguy/pages/ResetPasswordPage";
 import LandingPage from "./mybodaguy/pages/LandingPage";
 import UnifiedDashboard from "./mybodaguy/pages/UnifiedDashboard";
 import ChatWidget from "./mybodaguy/components/ChatWidget";
@@ -14,6 +15,7 @@ export default function App() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [showAuth, setShowAuth] = useState(false);
+  const [isRecoveryMode, setIsRecoveryMode] = useState(false);
 
   useEffect(() => {
     // Prevent multiple initialization in React Strict Mode
@@ -56,17 +58,26 @@ export default function App() {
     let timeoutId: NodeJS.Timeout;
     const { data: authListener } = authService.onAuthStateChange(async (event, session) => {
       console.log('[MyBodaGuy] Auth state changed:', event);
-      
+
       // Clear any pending updates
       if (timeoutId) clearTimeout(timeoutId);
-      
+
+      // The "reset my password" email link lands here with Supabase having
+      // already turned the token in the URL into a live session — this event
+      // is how we tell that apart from a normal sign-in, so we show the
+      // "set new password" screen instead of the dashboard.
+      if (event === 'PASSWORD_RECOVERY') {
+        setIsRecoveryMode(true);
+      }
+
       // Only handle SIGNED_OUT event to prevent false logouts
       if (event === 'SIGNED_OUT') {
         setUser(null);
         setUserRole(null);
+        setIsRecoveryMode(false);
         return;
       }
-      
+
       // For SIGNED_IN and TOKEN_REFRESHED, debounce the update
       if (session?.user && (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED')) {
         timeoutId = setTimeout(async () => {
@@ -103,6 +114,22 @@ export default function App() {
           <p className="text-slate-600">Loading BodaGoEra...</p>
         </div>
       </div>
+    );
+  }
+
+  // Password-reset email link landed here — show the "set new password"
+  // form regardless of auth/role state until it's completed or cancelled.
+  if (isRecoveryMode) {
+    return (
+      <>
+        <ResetPasswordPage
+          onDone={async () => {
+            await handleSignOut();
+            setIsRecoveryMode(false);
+          }}
+        />
+        <Toaster position="top-right" theme="light" />
+      </>
     );
   }
 

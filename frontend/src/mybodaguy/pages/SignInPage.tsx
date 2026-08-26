@@ -10,11 +10,26 @@ interface SignInPageProps {
 
 export default function SignInPage({ onBack }: SignInPageProps) {
   const [isSignUp, setIsSignUp] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [country, setCountry] = useState('Uganda');
   const [loading, setLoading] = useState(false);
+  const [resetLinkSent, setResetLinkSent] = useState(false);
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      await authService.resetPassword(email);
+      setResetLinkSent(true);
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to send reset link');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,6 +65,66 @@ export default function SignInPage({ onBack }: SignInPageProps) {
       setLoading(false);
     }
   };
+
+  if (showForgotPassword) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-orange-50 via-yellow-50 to-orange-100 flex items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <button
+            onClick={() => { setShowForgotPassword(false); setResetLinkSent(false); }}
+            className="flex items-center gap-2 text-slate-600 hover:text-slate-800 mb-6 transition-colors"
+          >
+            <ArrowLeft size={20} />
+            <span>Back to Sign In</span>
+          </button>
+
+          <div className="text-center mb-8">
+            <div className="w-20 h-20 bg-gradient-to-br from-orange-500 to-yellow-500 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xl">
+              <Bike size={40} className="text-white" />
+            </div>
+            <h1 className="text-3xl font-bold text-slate-800 mb-2">Reset Password</h1>
+            <p className="text-slate-600">
+              {resetLinkSent
+                ? "We've emailed you a reset link"
+                : "Enter your email and we'll send you a reset link"}
+            </p>
+          </div>
+
+          <div className="bg-white rounded-2xl shadow-2xl p-8">
+            {resetLinkSent ? (
+              <p className="text-center text-slate-600">
+                Check <span className="font-semibold text-slate-800">{email}</span> for a link to set a new password. It expires shortly, so use it soon.
+              </p>
+            ) : (
+              <form onSubmit={handleForgotPassword} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Email</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                    <input
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition-all"
+                      placeholder="Enter your email"
+                      required
+                    />
+                  </div>
+                </div>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full py-3 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 focus:ring-4 focus:ring-orange-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
+                >
+                  {loading ? 'Sending...' : 'Send Reset Link'}
+                </button>
+              </form>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-orange-50 via-yellow-50 to-orange-100 flex items-center justify-center p-4">
@@ -151,6 +226,17 @@ export default function SignInPage({ onBack }: SignInPageProps) {
                   minLength={6}
                 />
               </div>
+              {!isSignUp && (
+                <div className="text-right mt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowForgotPassword(true)}
+                    className="text-sm text-orange-600 hover:text-orange-700 font-medium"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
             </div>
 
             <button
