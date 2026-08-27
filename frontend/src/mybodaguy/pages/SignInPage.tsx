@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bike, Mail, Lock, User, Globe, ArrowLeft } from 'lucide-react';
+import { Bike, Mail, Lock, User, Globe, ArrowLeft, Eye, EyeOff } from 'lucide-react';
 import { authService } from '../services/authService';
 import { toast } from 'sonner';
 import { COUNTRY_NAMES as COUNTRIES } from '../data/countries';
@@ -17,6 +17,7 @@ export default function SignInPage({ onBack }: SignInPageProps) {
   const [country, setCountry] = useState('Uganda');
   const [loading, setLoading] = useState(false);
   const [resetLinkSent, setResetLinkSent] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -217,14 +218,22 @@ export default function SignInPage({ onBack }: SignInPageProps) {
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full pl-11 pr-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition-all"
+                  className="w-full pl-11 pr-11 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition-all"
                   placeholder="Enter your password"
                   required
                   minLength={6}
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                </button>
               </div>
               {!isSignUp && (
                 <div className="text-right mt-2">
