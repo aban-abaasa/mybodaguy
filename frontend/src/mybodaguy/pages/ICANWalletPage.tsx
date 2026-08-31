@@ -310,6 +310,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const [refreshing, setRefreshing] = useState(false);
   const [activeTab, setActiveTab] = useState<'all' | 'in' | 'out' | 'tithe'>('all');
   const [modal, setModal] = useState<'send' | 'pay' | 'receive' | 'buy' | 'sell' | 'sendout' | null>(null);
+  const [selectedTx, setSelectedTx] = useState<ICANTransaction | null>(null);
   const [paymentReceipt, setPaymentReceipt] = useState<any>(null);
   const [balanceHidden, setBalanceHidden] = useState(false);
   const [needsPin, setNeedsPin] = useState(false);
@@ -532,49 +533,90 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
             <p className="text-slate-400 text-sm">No transactions yet. Complete a delivery to earn your first ICAN.</p>
           </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-0.5">
             {filteredTx.map(tx => {
               const isIn = tx.direction === 'in';
               const isTithe = tx.transaction_type === 'tithe';
               return (
-                <div key={tx.id} className="bg-white rounded-xl px-4 py-3 flex items-center gap-3 shadow-sm border border-slate-100">
-                  <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                    isTithe ? 'bg-amber-100' : isIn ? 'bg-emerald-100' : 'bg-rose-100'
+                <button
+                  key={tx.id}
+                  type="button"
+                  onClick={() => setSelectedTx(tx)}
+                  className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg text-left hover:bg-slate-100 transition-colors"
+                >
+                  <p className="text-slate-700 text-xs truncate pr-2">
+                    {TX_LABELS[tx.transaction_type] ?? tx.transaction_type}
+                  </p>
+                  <p className={`text-xs font-semibold shrink-0 ${
+                    isTithe ? 'text-amber-500' : isIn ? 'text-emerald-600' : 'text-rose-500'
                   }`}>
-                    {isTithe
-                      ? <span className="text-amber-600 text-sm font-bold">10%</span>
-                      : isIn
-                        ? <ArrowDown className="w-5 h-5 text-emerald-600" />
-                        : <ArrowUp className="w-5 h-5 text-rose-600" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-slate-800 text-sm font-semibold">
-                        {TX_LABELS[tx.transaction_type] ?? tx.transaction_type}
-                      </span>
-                      <span className="text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
-                        {APP_LABELS[tx.source_app] ?? tx.source_app}
-                      </span>
-                    </div>
-                    <p className="text-slate-400 text-xs truncate">{tx.note || '—'}</p>
-                    <p className="text-slate-300 text-xs">{formatDate(tx.created_at)}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className={`font-bold text-sm ${
-                      isTithe ? 'text-amber-500' : isIn ? 'text-emerald-600' : 'text-rose-500'
-                    }`}>
-                      {isIn ? '+' : '-'}{formatICAN(tx.ican_amount)} ICAN
-                    </p>
-                    <p className="text-slate-400 text-xs">
-                      UGX {(tx.ican_amount * ICAN_TO_UGX).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
+                    {isIn ? '+' : '-'}{formatICAN(tx.ican_amount)} ICAN
+                  </p>
+                </button>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Transaction detail modal */}
+      {selectedTx && (() => {
+        const tx = selectedTx;
+        const isIn = tx.direction === 'in';
+        const isTithe = tx.transaction_type === 'tithe';
+        return (
+          <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={() => setSelectedTx(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-slate-800" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold">Transaction Details</h3>
+                <button onClick={() => setSelectedTx(null)} className="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
+              </div>
+              <div className="flex items-center gap-3 mb-4">
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                  isTithe ? 'bg-amber-100' : isIn ? 'bg-emerald-100' : 'bg-rose-100'
+                }`}>
+                  {isTithe
+                    ? <span className="text-amber-600 text-sm font-bold">10%</span>
+                    : isIn
+                      ? <ArrowDown className="w-5 h-5 text-emerald-600" />
+                      : <ArrowUp className="w-5 h-5 text-rose-600" />}
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold">{TX_LABELS[tx.transaction_type] ?? tx.transaction_type}</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                      {APP_LABELS[tx.source_app] ?? tx.source_app}
+                    </span>
+                  </div>
+                  <p className="text-slate-300 text-xs">{formatDate(tx.created_at)}</p>
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-xl p-4 space-y-2 text-sm">
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Amount</span>
+                  <strong className={isTithe ? 'text-amber-500' : isIn ? 'text-emerald-600' : 'text-rose-500'}>
+                    {isIn ? '+' : '-'}{formatICAN(tx.ican_amount)} ICAN
+                  </strong>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Local value</span>
+                  <strong>UGX {(tx.ican_amount * ICAN_TO_UGX).toLocaleString()}</strong>
+                </div>
+                <div className="flex justify-between gap-4">
+                  <span className="text-slate-500">Note</span>
+                  <strong className="truncate max-w-[60%]">{tx.note || '—'}</strong>
+                </div>
+                {tx.id && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-slate-500">ID</span>
+                    <strong className="truncate max-w-[60%] text-xs">{tx.id}</strong>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modals */}
       {modal === 'send' && (
