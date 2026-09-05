@@ -97,8 +97,26 @@ export default function CallController({
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const outgoingTimeoutRef = useRef<number | null>(null);
   const callTimerRef = useRef<number | null>(null);
+  // `phase` as read inside the channel-setup effect's broadcast handlers
+  // would otherwise be a stale closure over whatever it was when that effect
+  // last ran (it doesn't depend on `phase`) — this ref is always current.
+  const phaseRef = useRef<CallPhase>('idle');
+  // Re-sent every RING_INTERVAL_MS while outgoing, exactly like ICAN's
+  // useDirectCall: a call placed the instant the peer's ride screen mounts
+  // can easily beat their Supabase Realtime subscribe handshake (worse yet
+  // on the patchy mobile networks this app runs on), so a single one-shot
+  // 'ring' broadcast can arrive before anyone is listening and be lost for
+  // good. Repeating it means whichever ring lands after their channel opens
+  // still gets through, inside the same ring window.
+  const ringSendIntervalRef = useRef<number | null>(null);
 
   const ringtone = useRingtone();
+
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  const stopRingSend = useCallback(() => {
+    if (ringSendIntervalRef.current) { window.clearInterval(ringSendIntervalRef.current); ringSendIntervalRef.current = null; }
+  }, []);
 
   const send = useCallback(async (event: string, payload: Record<string, any>) => {
     if (!channelRef.current) return;
@@ -133,13 +151,14 @@ export default function CallController({
 
   const resetToIdle = useCallback(() => {
     ringtone.stop();
+    stopRingSend();
     if (outgoingTimeoutRef.current) { window.clearTimeout(outgoingTimeoutRef.current); outgoingTimeoutRef.current = null; }
     if (callTimerRef.current) { window.clearInterval(callTimerRef.current); callTimerRef.current = null; }
     closePeerConnection();
     stopLocalStream();
     setCallSeconds(0);
     setPhase('idle');
-  }, [ringtone, closePeerConnection, stopLocalStream]);
+  }, [ringtone, stopRingSend, closePeerConnection, stopLocalStream]);
 
   const createPeerConnection = useCallback(async (wantVideo: boolean) => {
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
@@ -184,6 +203,13 @@ export default function CallController({
     channel
       .on('broadcast', { event: 'ring' }, ({ payload }) => {
         if (payload.from !== peerUserId) return;
+        // Already on a call (with this peer or, via glare, about to be) —
+        // tell them rather than silently overwriting our own call state,
+        // which is what let a stray repeated ring reset an active call.
+        if (phaseRef.current !== 'idle' && phaseRef.current !== 'incoming') {
+          send('call-declined', { reason: 'busy' });
+          return;
+        }
         setMode(payload.mode === 'video' ? 'video' : 'voice');
         isCallerRef.current = false;
         setPhase('incoming');
@@ -192,6 +218,7 @@ export default function CallController({
       .on('broadcast', { event: 'call-accepted' }, async ({ payload }) => {
         if (payload.from !== peerUserId) return;
         ringtone.stop();
+        stopRingSend();
         setPhase(p => {
           if (p !== 'outgoing') return p;
           return 'active';
@@ -271,7 +298,10 @@ export default function CallController({
     setMode(outgoingRequest);
     setPhase('outgoing');
     ringtone.start('outgoing');
-    send('ring', { fromName: selfName, mode: outgoingRequest });
+
+    const ring = () => send('ring', { fromName: selfName, mode: outgoingRequest });
+    ring();
+    ringSendIntervalRef.current = window.setInterval(ring, 3000);
 
     outgoingTimeoutRef.current = window.setTimeout(() => {
       setPhase(p => {
