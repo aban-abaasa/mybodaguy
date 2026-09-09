@@ -155,16 +155,20 @@ export default function ManageBusinessPanel() {
             <button onClick={() => setActiveBusinessId(null)} className="text-sm text-slate-500 hover:text-slate-700">
               ← All businesses
             </button>
-            {/* TODO: confirm this is ICAN's actual business-management route
-                before shipping — best guess, not verified against ICAN's
-                live router. */}
+            {/* icanera.space is a single-page app with no per-business route —
+                CMSSModule.jsx reads ?business_profile_id= off the URL on load
+                to auto-select (and auto-provision, via
+                cmms_ensure_pichin_business_access) that exact business's CMMS
+                tenant. Verified against ICAN's own CMSSModule.jsx, not a
+                guess — same Supabase project, so the signed-in session
+                carries over. */}
             <a
-              href={`https://icanera.space/business/${activeBusiness.id}`}
+              href={`https://icanera.space/?business_profile_id=${activeBusiness.id}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs font-medium text-violet-600 hover:text-violet-700 flex items-center gap-1"
             >
-              Open full business management on icanera.space <ExternalLink size={12} />
+              Open full management (CMMS) on icanera.space <ExternalLink size={12} />
             </a>
           </div>
 
