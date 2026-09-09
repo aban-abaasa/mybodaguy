@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Save, Upload, User, UserPlus, Trash2, Search, Camera } from 'lucide-react';
+import { X, Save, Upload, User, UserPlus, Trash2, Search, Camera, Volume2 } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { avatarService } from '../services/avatarService';
 import { toast } from 'sonner';
+import { RINGTONES, getSelectedRingtoneId, setSelectedRingtoneId, playNewJobChime } from '../services/notificationSound';
 
 interface ProfileModalProps {
   user: any;
@@ -47,6 +48,7 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
   const [customTeamRole, setCustomTeamRole] = useState('');
   const [teamRate, setTeamRate] = useState('0');
   const [addingTeamMember, setAddingTeamMember] = useState(false);
+  const [ringtoneId, setRingtoneId] = useState(() => getSelectedRingtoneId());
   const [profileData, setProfileData] = useState<ProfileData>({
     full_name: '',
     phone: '',
@@ -214,6 +216,12 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
       setTeamMembers(previous => previous.filter(member => member.id !== memberId));
       toast.success('Committee member removed');
     }
+  };
+
+  const chooseRingtone = (id: string) => {
+    setRingtoneId(id);
+    setSelectedRingtoneId(id);
+    playNewJobChime(id);
   };
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -609,6 +617,32 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
                     <div className="mt-1 grid gap-1 text-slate-600 sm:grid-cols-3"><span>Plate: {vehicle.plate_number || 'Not set'}</span><span>License: {vehicle.license_number || 'Not set'}</span><span>Expiry: {vehicle.license_expiry || 'Not set'}</span></div>
                   </div>
                 ))}</div>}
+
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    New Job Ringtone
+                  </label>
+                  <p className="text-xs text-slate-500 mb-2">
+                    Plays on repeat while a ride request is waiting for you to accept it. Saved to this device.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {RINGTONES.map(tone => (
+                      <button
+                        key={tone.id}
+                        type="button"
+                        onClick={() => chooseRingtone(tone.id)}
+                        className={`flex items-center justify-between gap-2 px-3 py-2 rounded-lg border-2 text-sm font-medium transition-colors ${
+                          ringtoneId === tone.id
+                            ? 'border-orange-500 bg-orange-50 text-orange-700'
+                            : 'border-slate-200 text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        <span>{tone.label}</span>
+                        <Volume2 size={16} className="flex-shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 

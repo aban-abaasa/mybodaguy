@@ -12,11 +12,15 @@ import { toast } from 'sonner';
 interface ChairpersonDashboardProps {
   user: any;
   onSignOut: () => void;
+  // See CustomerDashboard.tsx's onGoToWallet doc — switches UnifiedDashboard's
+  // internal activeRole instead of a hard-navigating to a URL nothing serves.
+  onGoToWallet?: () => void;
 }
 
 type TabType = 'overview' | 'subordinates' | 'riders' | 'commission';
 
-export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDashboardProps) {
+export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: ChairpersonDashboardProps) {
+  const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
   const [myCommitteeInfo, setMyCommitteeInfo] = useState<CommitteeMember | null>(null);
   const [allAssignments, setAllAssignments] = useState<CommitteeMember[]>([]);
   const [subordinates, setSubordinates] = useState<SubordinateChairperson[]>([]);
@@ -513,7 +517,7 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
               </div>
 
               {/* ICAN Coins Card */}
-              <IcanCoinCard userId={user?.id} onGoToWallet={() => (window.location.href = '/ican-wallet')} />
+              <IcanCoinCard userId={user?.id} onGoToWallet={goToWallet} />
             </div>
 
             {/* Quick Actions Section */}

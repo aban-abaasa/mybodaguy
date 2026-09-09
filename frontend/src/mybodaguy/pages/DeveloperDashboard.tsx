@@ -36,6 +36,9 @@ interface DeveloperDashboardProps {
   // shows its own brand/avatar header above this one — skips this
   // component's own <header> so a multi-role account doesn't get two.
   embedded?: boolean;
+  // See CustomerDashboard.tsx's onGoToWallet doc — switches UnifiedDashboard's
+  // internal activeRole instead of a hard-navigating to a URL nothing serves.
+  onGoToWallet?: () => void;
 }
 
 type DevPermissions = { isMain: boolean; allowedTabs: string[] | null };
@@ -43,7 +46,8 @@ type DevOperatorRow = { email: string; is_main: boolean; allowed_tabs: string[] 
 
 const ALL_DEV_TAB_IDS = ['overview', 'users', 'applications', 'regions', 'commissions', 'supermarkets', 'transport', 'public-board', 'messages', 'settings'];
 
-export default function DeveloperDashboard({ user, onSignOut, embedded = false }: DeveloperDashboardProps) {
+export default function DeveloperDashboard({ user, onSignOut, embedded = false, onGoToWallet }: DeveloperDashboardProps) {
+  const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
@@ -500,7 +504,7 @@ function OverviewTab({ onSwitchToRegions, userId }: { onSwitchToRegions: () => v
         <StatCard title="Active Riders" value="0" icon={<Bike className="text-orange-500" />} />
         <StatCard title="Total Rides" value="0" icon={<TrendingUp className="text-orange-500" />} />
         <StatCard title="Total Revenue" value="0 UGX" icon={<DollarSign className="text-orange-500" />} />
-        {userId && <IcanCoinCard userId={userId} onGoToWallet={() => (window.location.href = '/ican-wallet')} />}
+        {userId && <IcanCoinCard userId={userId} onGoToWallet={goToWallet} />}
       </div>
 
       <div className="bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl p-8 text-center">

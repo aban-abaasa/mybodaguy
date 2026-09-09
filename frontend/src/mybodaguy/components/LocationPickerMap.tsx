@@ -45,6 +45,12 @@ interface LocationPickerMapProps {
   autoLocateGPS?: boolean;
   /** Controls whether map taps/search results select pickup or drop-off. */
   selectionMode?: 'pickup' | 'dropoff';
+  /** Which field "Use my current location" (and the on-mount GPS auto-fill)
+   * sets. Defaults to 'pickup' — the "Book a Ride" case, where the customer
+   * is where the trip starts. For a store delivery, pickup is the store
+   * (locked, GPS-irrelevant) and the customer's own device position is
+   * what the DROP-OFF should default to instead. */
+  gpsTarget?: 'pickup' | 'dropoff';
   /** Optional country hint for the map search. */
   searchCountry?: string;
 }
@@ -58,6 +64,7 @@ export default function LocationPickerMap({
   pickupLocked,
   autoLocateGPS = true,
   selectionMode = 'dropoff',
+  gpsTarget = 'pickup',
   searchCountry,
 }: LocationPickerMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -94,16 +101,19 @@ export default function LocationPickerMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-detect the customer's live GPS position as the initial pickup pin,
-  // only if the parent hasn't already supplied one (e.g. from a supermarket
+  // Auto-detect the customer's live GPS position as the initial pin for
+  // whichever field GPS targets (pickup for a normal ride; drop-off for a
+  // store delivery, where pickup is the store instead) — only if the
+  // parent hasn't already supplied a value there (e.g. from a supermarket
   // auto-fill or a typed suggestion).
   useEffect(() => {
-    if (pickup || !autoLocateGPS || !navigator.geolocation) return;
+    const already = gpsTarget === 'dropoff' ? dropoff : pickup;
+    if (already || !autoLocateGPS || !navigator.geolocation) return;
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const loc = await toLocation('gps', 'My Location', pos.coords.latitude, pos.coords.longitude);
-        onPickupChange(loc);
+        (gpsTarget === 'dropoff' ? onDropoffChange : onPickupChange)(loc);
         setLocating(false);
       },
       () => {
@@ -199,7 +209,7 @@ export default function LocationPickerMap({
   }, [pickup?.coordinates.lat, pickup?.coordinates.lng, dropoff?.coordinates.lat, dropoff?.coordinates.lng, onRouteInfo]);
 
   const useMyLocation = () => {
-    if (!navigator.geolocation || pickupLocked) {
+    if (!navigator.geolocation || (gpsTarget === 'pickup' && pickupLocked)) {
       setLocationError('GPS is unavailable. Search for your area or tap the map instead.');
       return;
     }
@@ -208,7 +218,7 @@ export default function LocationPickerMap({
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         const loc = await toLocation('gps', 'My Location', pos.coords.latitude, pos.coords.longitude);
-        onPickupChange(loc);
+        (gpsTarget === 'dropoff' ? onDropoffChange : onPickupChange)(loc);
         setLocating(false);
       },
       () => {
@@ -262,7 +272,7 @@ export default function LocationPickerMap({
           <button
             type="button"
             onClick={useMyLocation}
-            disabled={locating || pickupLocked}
+            disabled={locating || (gpsTarget === 'pickup' && pickupLocked)}
             className="text-xs sm:text-sm text-orange-600 hover:text-orange-700 font-medium disabled:opacity-50 flex items-center gap-1"
           >
             <Locate size={14} />

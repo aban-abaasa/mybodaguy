@@ -161,18 +161,19 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
 
   // If user has only one role, render that dashboard directly without tabs
   // — except 'rider': RiderDashboard.tsx has no header of its own at all
-  // (it's only ever meant to be wrapped by the header below), so a
-  // rider-only account (no 'customer' role in user_roles — e.g. the
-  // multi-role array update hasn't landed yet, or ever ran) falls through
-  // to the full header treatment below instead of rendering headerless.
-  if (userRoles.length === 1 && activeRole !== 'rider') {
+  // (it's only ever meant to be wrapped by the header below), and except
+  // 'ican-wallet': that's not a real role, just where the wallet button
+  // above sends a single-role user, and this fast path has no tab bar to
+  // get back with — so it falls through to the full header treatment below
+  // instead, same as 'rider' does.
+  if (userRoles.length === 1 && activeRole !== 'rider' && activeRole !== 'ican-wallet') {
     switch (activeRole) {
       case 'developer':
-        return <DeveloperDashboard user={user} onSignOut={onSignOut} />;
+        return <DeveloperDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />;
       case 'chairperson':
-        return <ChairpersonDashboard user={user} onSignOut={onSignOut} />;
+        return <ChairpersonDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />;
       case 'customer':
-        return <CustomerDashboard user={user} onSignOut={onSignOut} />;
+        return <CustomerDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />;
     }
   }
 
@@ -277,10 +278,10 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
 
       {/* Dashboard Content - Render active role's dashboard WITHOUT its own header */}
       <div className="dashboard-content">
-        {activeRole === 'developer' && <DeveloperDashboard user={user} onSignOut={onSignOut} embedded />}
-        {activeRole === 'chairperson' && <ChairpersonDashboard user={user} onSignOut={onSignOut} />}
+        {activeRole === 'developer' && <DeveloperDashboard user={user} onSignOut={onSignOut} embedded onGoToWallet={() => setActiveRole('ican-wallet')} />}
+        {activeRole === 'chairperson' && <ChairpersonDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />}
         {activeRole === 'rider' && <RiderDashboard user={user} onSignOut={onSignOut} />}
-        {activeRole === 'customer' && <CustomerDashboard user={user} onSignOut={onSignOut} embedded />}
+        {activeRole === 'customer' && <CustomerDashboard user={user} onSignOut={onSignOut} embedded onGoToWallet={() => setActiveRole('ican-wallet')} />}
         {activeRole === 'ican-wallet' && <ICANWalletPage user={user} />}
       </div>
       <ProfileModal

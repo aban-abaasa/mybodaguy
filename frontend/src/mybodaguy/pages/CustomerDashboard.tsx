@@ -12,6 +12,7 @@ import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
 import IcanCoinCard from '../components/IcanCoinCard';
 import CustomerAreaManager from '../components/CustomerAreaManager';
 import RideCommsBar from '../components/RideCommsBar';
+import RideTrackingModal from '../components/RideTrackingModal';
 import ManageBusinessPanel from '../components/ManageBusinessPanel';
 import JourneyTracker from '../components/JourneyTracker';
 
@@ -22,6 +23,15 @@ interface CustomerDashboardProps {
   // shows its own brand/avatar header above this one — skips this
   // component's own <header> so a multi-role account doesn't get two.
   embedded?: boolean;
+  // Switches UnifiedDashboard's internal activeRole to 'ican-wallet'. This
+  // app has no router (no path ever gets registered for it), so the old
+  // `window.location.href = '/ican-wallet'` on every wallet button here was
+  // a hard navigation to a URL nothing serves — the SPA just remounted and
+  // fell back to the default role/tab, which looked like "the wallet button
+  // bounces back to Overview". Falls back to that same broken href only if
+  // no callback was supplied (shouldn't happen — UnifiedDashboard always
+  // passes one).
+  onGoToWallet?: () => void;
 }
 
 // Delivery is its own tab, separate from Book a Ride — both render
@@ -46,7 +56,7 @@ const ALL_TABS = [
 ];
 
 // ── Rewards (ICAN wallet history) ─────────────────────────────────────────────
-function RewardsTab({ user }: { user: any }) {
+function RewardsTab({ user, onGoToWallet }: { user: any; onGoToWallet: () => void }) {
   const [balance, setBalance] = useState<ICANBalance | null>(null);
   const [txs, setTxs]         = useState<ICANTransaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -92,7 +102,7 @@ function RewardsTab({ user }: { user: any }) {
             </div>
           ))}
         </div>
-        <button onClick={() => (window.location.href = '/ican-wallet')}
+        <button onClick={onGoToWallet}
           className="mt-4 w-full py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-semibold transition-colors">
           Open Full Wallet →
         </button>
@@ -153,7 +163,8 @@ function RewardsTab({ user }: { user: any }) {
 }
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
-export default function CustomerDashboard({ user, onSignOut, embedded = false }: CustomerDashboardProps) {
+export default function CustomerDashboard({ user, onSignOut, embedded = false, onGoToWallet }: CustomerDashboardProps) {
+  const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
   const [activeTab, setActiveTab]       = useState<TabType>('overview');
   const [mobileMenuOpen, setMobileMenu] = useState(false);
   const [rides, setRides]               = useState<any[]>([]);
@@ -166,6 +177,12 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
   // Security-escort request status per ride id (mbg_ride_escort_requests),
   // for the "🛡️ Escort" badge on Overview/Orders ride cards.
   const [escortStatusByRideId, setEscortStatusByRideId] = useState<Record<string, string>>({});
+  // Which ride's tracking view is currently open (Overview/Orders row click)
+  // — re-opens the live map + Call/Video/Chat for a ride that's already in
+  // progress, since EnhancedRideRequest's own live tracking only exists in
+  // that component's in-memory state while actively booking, and is lost on
+  // navigation or refresh.
+  const [trackedRide, setTrackedRide] = useState<any>(null);
   const menuRef                         = useRef<HTMLDivElement>(null);
 
   // Close mobile menu on outside click
@@ -186,7 +203,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
       if (!cr?.id) { setRidesLoading(false); return; }
       const { data } = await supabase
         .from('mbg_rides')
-        .select('id, created_at, pickup_location, dropoff_location, status, fare, service_type, rider_id')
+        .select('id, created_at, pickup_location, dropoff_location, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, status, fare, service_type, rider_id')
         .eq('customer_id', cr.id)
         .order('created_at', { ascending: false })
         .limit(20);
@@ -214,7 +231,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
       await Promise.all(activeRows.map(async (r) => {
         const { data: rider } = await supabase
           .from('mbg_riders')
-          .select('user_id, mbg_users(phone, email, mbg_user_profiles(full_name))')
+          .select('user_id, mbg_users!user_id(phone, email, mbg_user_profiles(full_name))')
           .eq('id', r.rider_id)
           .maybeSingle();
         const rUser = (rider as any)?.mbg_users;
@@ -301,7 +318,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
                   <span>{tab.emoji}</span>{tab.label}
                 </button>
               ))}
-              <button onClick={() => (window.location.href = '/ican-wallet')}
+              <button onClick={goToWallet}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium whitespace-nowrap text-violet-600 hover:bg-violet-50 transition-all flex-shrink-0">
                 <Wallet size={14} /> ₡ ICAN Wallet
               </button>
@@ -331,7 +348,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
                   {activeTab === tab.id && <CheckCircle size={14} className="ml-auto text-orange-500" />}
                 </button>
               ))}
-              <button onClick={() => { window.location.href = '/ican-wallet'; setMobileMenu(false); }}
+              <button onClick={() => { goToWallet(); setMobileMenu(false); }}
                 className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-violet-600 hover:bg-violet-50 border-t border-slate-100">
                 <span>₡</span> ICAN Wallet
               </button>
@@ -347,7 +364,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
         {activeTab === 'overview' && (
           <div className="space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <IcanCoinCard userId={user?.id} onGoToWallet={() => (window.location.href = '/ican-wallet')} />
+              <IcanCoinCard userId={user?.id} onGoToWallet={goToWallet} />
               {[
                 { label: 'Book a Ride', desc: 'Boda ride or a delivery', emoji: '🏍️', tab: 'book-ride' as TabType },
                 { label: 'Scan & Checkout',  desc: 'POS · Pay with ICAN',     emoji: '🛒', tab: 'shop' as TabType },
@@ -374,7 +391,11 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
               ) : (
                 <div className="space-y-2">
                   {rides.slice(0, 5).map(r => (
-                    <div key={r.id} className="py-2 border-b border-slate-50 last:border-0">
+                    <div
+                      key={r.id}
+                      onClick={() => setTrackedRide(r)}
+                      className="py-2 border-b border-slate-50 last:border-0 cursor-pointer hover:bg-slate-50 rounded-lg px-2 -mx-2 transition-colors"
+                    >
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm font-medium text-slate-700">{r.pickup_location} → {r.dropoff_location}</p>
@@ -395,15 +416,17 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
                         </div>
                       </div>
                       {activeRideContacts[r.id] && (
-                        <RideCommsBar
-                          rideId={r.id}
-                          selfUserId={user.id}
-                          selfName={customerName}
-                          peerUserId={activeRideContacts[r.id].userId}
-                          peerName={activeRideContacts[r.id].name}
-                          peerPhone={activeRideContacts[r.id].phone}
-                          className="mt-2"
-                        />
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <RideCommsBar
+                            rideId={r.id}
+                            selfUserId={user.id}
+                            selfName={customerName}
+                            peerUserId={activeRideContacts[r.id].userId}
+                            peerName={activeRideContacts[r.id].name}
+                            peerPhone={activeRideContacts[r.id].phone}
+                            className="mt-2"
+                          />
+                        </div>
                       )}
                     </div>
                   ))}
@@ -480,7 +503,11 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
             ) : (
               <div className="space-y-2">
                 {rides.map(r => (
-                  <div key={r.id} className="p-3 bg-slate-50 rounded-xl">
+                  <div
+                    key={r.id}
+                    onClick={() => setTrackedRide(r)}
+                    className="p-3 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
+                  >
                     <div className="flex items-center justify-between">
                       <div>
                         <p className="font-medium text-slate-800 text-sm flex items-center gap-1.5">
@@ -504,15 +531,17 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
                       </div>
                     </div>
                     {activeRideContacts[r.id] && (
-                      <RideCommsBar
-                        rideId={r.id}
-                        selfUserId={user.id}
-                        selfName={customerName}
-                        peerUserId={activeRideContacts[r.id].userId}
-                        peerName={activeRideContacts[r.id].name}
-                        peerPhone={activeRideContacts[r.id].phone}
-                        className="mt-2"
-                      />
+                      <div onClick={(e) => e.stopPropagation()}>
+                        <RideCommsBar
+                          rideId={r.id}
+                          selfUserId={user.id}
+                          selfName={customerName}
+                          peerUserId={activeRideContacts[r.id].userId}
+                          peerName={activeRideContacts[r.id].name}
+                          peerPhone={activeRideContacts[r.id].phone}
+                          className="mt-2"
+                        />
+                      </div>
                     )}
                   </div>
                 ))}
@@ -527,7 +556,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
         {activeTab === 'areas' && <CustomerAreaManager customerId={user?.id} />}
 
         {/* Rewards */}
-        {activeTab === 'rewards' && <RewardsTab user={user} />}
+        {activeTab === 'rewards' && <RewardsTab user={user} onGoToWallet={goToWallet} />}
 
         {/* Profile */}
         {activeTab === 'profile' && (
@@ -561,7 +590,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
               <button className="flex-1 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-600 hover:bg-slate-50">
                 Edit Profile
               </button>
-              <button onClick={() => (window.location.href = '/ican-wallet')}
+              <button onClick={goToWallet}
                 className="flex-1 py-2.5 bg-gradient-to-r from-violet-500 to-purple-600 text-white rounded-xl text-sm font-semibold hover:opacity-90">
                 ₡ My Wallet
               </button>
@@ -569,6 +598,16 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
           </div>
         )}
       </div>
+
+      {trackedRide && (
+        <RideTrackingModal
+          ride={trackedRide}
+          contact={activeRideContacts[trackedRide.id] || null}
+          customerId={user.id}
+          customerName={customerName}
+          onClose={() => setTrackedRide(null)}
+        />
+      )}
     </div>
   );
 }

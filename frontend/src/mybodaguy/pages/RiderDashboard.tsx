@@ -241,12 +241,18 @@ function useRiderStats(userId: string | undefined) {
 
     const { data: todaysRides } = await supabase
       .from('mbg_rides')
-      .select('fare')
+      .select('fare, rider_earning')
       .eq('rider_id', active.id)
       .eq('status', 'completed')
       .gte('completed_at', startOfToday.toISOString());
 
-    const earningsTodayUGX = (todaysRides || []).reduce((sum, r: any) => sum + (Number(r.fare) || 0), 0);
+    // rider_earning (net, after chairperson commission cuts) is what the
+    // rider actually keeps — fall back to the gross fare only for old rows
+    // completed before that column existed.
+    const earningsTodayUGX = (todaysRides || []).reduce(
+      (sum, r: any) => sum + (Number(r.rider_earning ?? r.fare) || 0),
+      0
+    );
 
     setStats({
       earningsTodayUGX,
@@ -262,6 +268,25 @@ function useRiderStats(userId: string | undefined) {
 
   useEffect(() => {
     load();
+    if (!userId) return;
+
+    // Without this, a ride completed elsewhere (e.g. the Requests tab)
+    // leaves these Overview cards showing whatever was true at page load —
+    // completed_rides/rating/mode only change via an UPDATE on this user's
+    // mbg_riders row(s), so listening for that and re-querying covers
+    // earnings/rides/rating/mode together in one place.
+    const channel = supabase
+      .channel(`mbg_rider_stats_${userId}`)
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'mbg_riders', filter: `user_id=eq.${userId}` },
+        () => load()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
@@ -307,12 +332,6 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
               onClick={() => setActiveTab('overview')}
               icon={<TrendingUp size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
               label="Overview"
-            />
-            <TabButton
-              active={activeTab === 'requests'}
-              onClick={() => setActiveTab('requests')}
-              icon={<Bell size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-              label="Requests"
             />
             <TabButton
               active={activeTab === 'mode'}
@@ -372,18 +391,6 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
               >
                 <TrendingUp size={14} className="xs:w-4 xs:h-4" />
                 <span className="text-xs xs:text-sm font-medium">Overview</span>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('requests');
-                  setShowMobileMenu(false);
-                }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'requests' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Bell size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Requests</span>
               </button>
               <button
                 onClick={() => {
@@ -506,6 +513,23 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
             {/* Working Time — online/offline slider */}
             <WorkingTimeToggle userId={user.id} vehicleType={activeVehicleType} />
 
+            {/* Ride Requests — was its own nav tab; moved here as a dashboard
+                card so it doesn't take up permanent tab space, but stays one
+                tap away from Overview. */}
+            <button
+              onClick={() => setActiveTab('requests')}
+              className="w-full rounded-lg xs:rounded-xl shadow-md p-3 xs:p-4 sm:p-6 flex items-center justify-between gap-3 text-left bg-gradient-to-r from-orange-500 to-yellow-500 hover:brightness-105 transition-all"
+            >
+              <span className="flex items-center gap-3 min-w-0">
+                <span className="p-2 bg-white/20 rounded-lg text-white flex-shrink-0"><Bell size={20} /></span>
+                <span className="min-w-0 text-left">
+                  <span className="block font-bold text-xs xs:text-sm sm:text-lg text-white">Ride Requests</span>
+                  <span className="block text-[9px] xs:text-[11px] sm:text-sm text-white/80 truncate">Accept real requests near you</span>
+                </span>
+              </span>
+              <ChevronDown size={18} className="text-white -rotate-90 flex-shrink-0" />
+            </button>
+
             {/* Stats Cards — live from Supabase (mbg_riders / mbg_rides) */}
             <div className="grid grid-cols-2 xs:gap-3 gap-2 sm:grid-cols-4 sm:gap-6">
               <StatCard
@@ -551,15 +575,7 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
                 />
               </button>
               {quickStartOpen && (
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 xs:gap-3 sm:gap-4 px-3 xs:px-4 sm:px-6 pb-3 xs:pb-4 sm:pb-6">
-                  <button
-                    onClick={() => setActiveTab('requests')}
-                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-orange-100 to-yellow-100 rounded-lg xs:rounded-xl border-2 border-orange-300 hover:border-orange-400 transition-all text-left"
-                  >
-                    <Bell className="text-orange-600 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
-                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Ride Requests</h4>
-                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">Accept real requests near you</p>
-                  </button>
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 xs:gap-3 sm:gap-4 px-3 xs:px-4 sm:px-6 pb-3 xs:pb-4 sm:pb-6">
                   <button
                     onClick={() => setActiveTab('mode')}
                     className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg xs:rounded-xl border-2 border-purple-200 hover:border-purple-400 transition-all text-left"

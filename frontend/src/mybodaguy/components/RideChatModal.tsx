@@ -117,6 +117,7 @@ export default function RideChatModal({ rideId, selfUserId, peerName, isOpen, on
 
         <div className="flex items-center gap-2 p-3 border-t border-slate-100">
           <input
+            type="text"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter' && !sending) send(); }}
