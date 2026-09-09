@@ -10,7 +10,7 @@ import ProductPicker, { CartLine } from './ProductPicker';
 import LocationPickerMap from './LocationPickerMap';
 import LiveTrackingMap from './LiveTrackingMap';
 import JourneyBookingFlow from './JourneyBookingFlow';
-import { reverseGeocodeCountry, searchAddressSuggestions, type CountryLookup } from '../services/geocodeService';
+import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type CountryLookup } from '../services/geocodeService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
@@ -186,6 +186,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // location — the pickup field locks so the customer isn't asked to
   // re-enter something we already know.
   const [pickupIsAutoFromSupermarket, setPickupIsAutoFromSupermarket] = useState(false);
+  // True while resolving a store's coordinates from its address text (only
+  // needed when the supermarket record itself has no latitude/longitude)
+  // — brief, but real network round-trip, so the pickup field shows it
+  // instead of looking broken/empty for a moment.
+  const [pickupGeocodingStore, setPickupGeocodingStore] = useState(false);
 
   // Map-based location picking — an alternative to the typed-suggestion
   // flow, not a replacement: either one ends up setting the same
@@ -383,29 +388,57 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       });
   }, [customerId]);
 
-  // Smart supermarket pickup: once a registered supermarket with known
-  // coordinates is chosen, fill pickup automatically instead of making the
-  // customer search for a place they already picked from a dropdown.
+  // Smart supermarket pickup: a delivery's pickup point is always the
+  // store — never something the customer should have to look up or type
+  // themselves. If the supermarket record already has coordinates, use
+  // them directly; if not, geocode its address/name so this still works
+  // instead of silently falling back to a manual search. Only when even
+  // that fails (no address on file, geocoding down) does the customer see
+  // anything to fill in themselves.
   useEffect(() => {
     if (serviceType !== 'delivery' || deliveryMode !== 'supermarket' || !selectedSupermarketId) {
       setPickupIsAutoFromSupermarket(false);
+      setPickupGeocodingStore(false);
       return;
     }
     const sm = supermarkets.find(s => s.id === selectedSupermarketId);
-    if (sm && sm.latitude != null && sm.longitude != null) {
+    if (!sm) {
+      setPickupIsAutoFromSupermarket(false);
+      return;
+    }
+
+    const applyStorePickup = (lat: number, lng: number, displayAddress?: string) => {
       const loc: Location = {
         id: `supermarket_${sm.id}`,
         name: sm.name,
         area: sm.location,
-        fullAddress: sm.address || `${sm.name}, ${sm.location}`,
-        coordinates: { lat: sm.latitude, lng: sm.longitude }
+        fullAddress: displayAddress || sm.address || `${sm.name}, ${sm.location}`,
+        coordinates: { lat, lng }
       };
       setSelectedPickup(loc);
       setPickup(loc.fullAddress);
       setPickupIsAutoFromSupermarket(true);
-    } else {
-      setPickupIsAutoFromSupermarket(false);
+    };
+
+    if (sm.latitude != null && sm.longitude != null) {
+      applyStorePickup(sm.latitude, sm.longitude);
+      return;
     }
+
+    // No coordinates on file for this store — geocode its address/name
+    // instead of asking the customer to find their own way there.
+    let cancelled = false;
+    setPickupIsAutoFromSupermarket(false);
+    setPickupGeocodingStore(true);
+    const query = sm.address || `${sm.name}, ${sm.location || ''}`;
+    geocodeAddress(query).then((result) => {
+      if (cancelled) return;
+      setPickupGeocodingStore(false);
+      if (result) {
+        applyStorePickup(result.lat, result.lng, sm.address || `${sm.name}, ${sm.location}`);
+      }
+    });
+    return () => { cancelled = true; };
   }, [serviceType, deliveryMode, selectedSupermarketId, supermarkets]);
 
   // Smart default drop-off: pre-fill (but keep editable) from the
@@ -1453,22 +1486,22 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-green-500" size={20} />
               <input
                 type="text"
-                value={pickup}
-                readOnly={pickupIsAutoFromSupermarket}
+                value={pickupGeocodingStore ? 'Locating store…' : pickup}
+                readOnly={pickupIsAutoFromSupermarket || pickupGeocodingStore}
                 onChange={(e) => !pickupIsAutoFromSupermarket && handlePickupChange(e.target.value)}
                 onFocus={() => !pickupIsAutoFromSupermarket && pickup && setShowPickupSuggestions(true)}
                 placeholder="Where are you now? (e.g., Kampala Road, Acacia Mall)"
                 className={`w-full pl-11 pr-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none text-slate-800 placeholder-slate-400 ${
-                  pickupIsAutoFromSupermarket ? 'border-green-300 bg-green-50 cursor-default' : 'border-slate-300'
+                  pickupIsAutoFromSupermarket || pickupGeocodingStore ? 'border-green-300 bg-green-50 cursor-default' : 'border-slate-300'
                 }`}
               />
               {selectedPickup && (
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 bg-green-500 rounded-full" />
               )}
             </div>
-            {serviceType === 'delivery' && deliveryMode === 'supermarket' && selectedSupermarketId && !pickupIsAutoFromSupermarket && (
+            {serviceType === 'delivery' && deliveryMode === 'supermarket' && selectedSupermarketId && !pickupIsAutoFromSupermarket && !pickupGeocodingStore && (
               <p className="text-xs text-amber-600 mt-1">
-                This supermarket hasn't set its exact location yet — please confirm the pickup point manually.
+                Couldn't automatically locate this store — please confirm the pickup point manually.
               </p>
             )}
 
