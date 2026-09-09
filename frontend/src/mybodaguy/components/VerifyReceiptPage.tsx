@@ -1,16 +1,29 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle, XCircle, PackageCheck, Clock, ShieldCheck } from 'lucide-react';
+import { CheckCircle, XCircle, PackageCheck, Clock, ShieldCheck, ReceiptText } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
+
+interface GoodsSnapshotLine {
+  product_id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+}
 
 interface VerifyResult {
   is_valid: boolean;
   status?: 'paid' | 'picked_up' | 'delivered' | 'cancelled';
   store_name?: string;
   item_summary?: string | null;
+  goods_snapshot?: GoodsSnapshotLine[] | null;
   created_at?: string;
   picked_up_at?: string | null;
   picked_up_by_email?: string | null;
   delivered_at?: string | null;
+}
+
+function formatUGX(n: number) {
+  return `UGX ${n.toLocaleString('en-UG', { maximumFractionDigits: 0 })}`;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -42,6 +55,7 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
+  const [activeTab, setActiveTab] = useState<'summary' | 'proof'>('summary');
 
   const refresh = async () => {
     const { data } = await supabase.rpc('icanera_verify_delivery_receipt', { p_code: code });
@@ -127,32 +141,76 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
               )}
             </div>
             <h1 className="text-xl font-bold text-slate-800 mb-1">Receipt Verified</h1>
-            <p className="text-slate-500 text-sm mb-6">{result.store_name}</p>
+            <p className="text-slate-500 text-sm mb-4">{result.store_name}</p>
 
-            <div className="bg-slate-50 rounded-xl p-4 text-left space-y-2 mb-4">
-              {result.item_summary && (
-                <div className="flex justify-between text-sm gap-3">
-                  <span className="text-slate-500">Order</span>
-                  <span className="font-semibold text-slate-900 text-right">{result.item_summary}</span>
-                </div>
-              )}
-              <div className="flex justify-between text-sm">
-                <span className="text-slate-500">Status</span>
-                <span className="font-semibold text-slate-900">{STATUS_LABEL[result.status || ''] || result.status}</span>
+            {!!result.goods_snapshot?.length && (
+              <div className="flex gap-1 bg-slate-100 rounded-xl p-1 mb-3">
+                <button
+                  onClick={() => setActiveTab('summary')}
+                  className={`flex-1 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    activeTab === 'summary' ? 'bg-white shadow text-slate-800' : 'text-slate-500'
+                  }`}
+                >
+                  Summary
+                </button>
+                <button
+                  onClick={() => setActiveTab('proof')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-colors ${
+                    activeTab === 'proof' ? 'bg-white shadow text-slate-800' : 'text-slate-500'
+                  }`}
+                >
+                  <ReceiptText size={14} /> Proof
+                </button>
               </div>
-              {result.created_at && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Ordered</span>
-                  <span className="text-slate-900">{new Date(result.created_at).toLocaleString()}</span>
+            )}
+
+            {activeTab === 'proof' && !!result.goods_snapshot?.length ? (
+              <div className="bg-slate-50 rounded-xl p-4 text-left mb-4">
+                <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Items purchased</p>
+                <div className="divide-y divide-slate-200">
+                  {result.goods_snapshot.map((line, i) => (
+                    <div key={`${line.product_id}-${i}`} className="py-2 flex justify-between gap-3 text-sm">
+                      <span className="text-slate-800">
+                        {line.product_name} × {line.quantity}
+                        <span className="block text-xs text-slate-400">{formatUGX(line.unit_price)} each</span>
+                      </span>
+                      <span className="font-semibold text-slate-900 whitespace-nowrap">{formatUGX(line.line_total)}</span>
+                    </div>
+                  ))}
                 </div>
-              )}
-              {result.picked_up_at && (
-                <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">Picked up</span>
-                  <span className="text-slate-900">{new Date(result.picked_up_at).toLocaleString()}</span>
+                <div className="flex justify-between font-bold text-sm border-t border-slate-200 pt-2 mt-2">
+                  <span>Total</span>
+                  <span className="text-orange-600">
+                    {formatUGX(result.goods_snapshot.reduce((s, l) => s + l.line_total, 0))}
+                  </span>
                 </div>
-              )}
-            </div>
+              </div>
+            ) : (
+              <div className="bg-slate-50 rounded-xl p-4 text-left space-y-2 mb-4">
+                {result.item_summary && (
+                  <div className="flex justify-between text-sm gap-3">
+                    <span className="text-slate-500">Order</span>
+                    <span className="font-semibold text-slate-900 text-right">{result.item_summary}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Status</span>
+                  <span className="font-semibold text-slate-900">{STATUS_LABEL[result.status || ''] || result.status}</span>
+                </div>
+                {result.created_at && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-500">Ordered</span>
+                    <span className="text-slate-900">{new Date(result.created_at).toLocaleString()}</span>
+                  </div>
+                )}
+                {result.picked_up_at && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-slate-500">Picked up</span>
+                    <span className="text-slate-900">{new Date(result.picked_up_at).toLocaleString()}</span>
+                  </div>
+                )}
+              </div>
+            )}
 
             {(result.status === 'picked_up' || result.status === 'delivered') && result.picked_up_by_email && (
               <div className="flex items-center gap-2 justify-center bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 mb-4">

@@ -11,6 +11,7 @@ import LocationPickerMap from './LocationPickerMap';
 import LiveTrackingMap from './LiveTrackingMap';
 import JourneyBookingFlow from './JourneyBookingFlow';
 import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type CountryLookup } from '../services/geocodeService';
+import { verifyPin } from '../services/pinService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
@@ -729,6 +730,28 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     if (serviceType === 'delivery' && deliveryMode === 'supermarket' && deliveryCart.length === 0) {
       toast.error('Add at least one item from the store before requesting a delivery');
       return;
+    }
+
+    // Paying a store for real goods (not just the ride fare) with the
+    // ICANera wallet — require the transaction PIN here, before the order
+    // even goes out, same as any other wallet-funded payment in this app.
+    // The actual debit + credit to the store's business wallet still only
+    // happens once the rider accepts (mbg_respond_to_ride); this is the
+    // customer's up-front authorization to spend from their wallet on it.
+    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && paymentMethod === 'wallet') {
+      const { data: authData } = await supabase.auth.getUser();
+      const authUser = authData?.user;
+      if (!authUser) {
+        toast.error('Please sign in again to pay this store from your wallet');
+        return;
+      }
+      const pin = window.prompt('Enter your transaction PIN to pay this store from your ICANera wallet:');
+      if (pin === null) return;
+      const pinCheck = await verifyPin(authUser.id, pin);
+      if (!pinCheck.success) {
+        toast.error(pinCheck.error || 'Incorrect PIN. Order not sent.');
+        return;
+      }
     }
 
     setSelectedRider(rider);
@@ -1469,6 +1492,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               onDropoffChange={handleMapDropoffChange}
               onRouteInfo={(distanceKm, durationMin) => setRouteInfo({ distanceKm, durationMin })}
               pickupLocked={pickupIsAutoFromSupermarket}
+              gpsTarget={serviceType === 'delivery' && deliveryMode === 'supermarket' ? 'dropoff' : 'pickup'}
             />
           )}
 
