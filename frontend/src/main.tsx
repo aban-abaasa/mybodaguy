@@ -18,7 +18,22 @@ if ('serviceWorker' in navigator) {
 // scan a delivery receipt. There's no router wired up in this app (same
 // precedent as the existing /supermarketera pathname check in index.html),
 // so this is a plain pathname check.
-const verifyMatch = window.location.pathname.match(/^\/verify\/([A-Za-z0-9]+)/);
+let verifyMatch = window.location.pathname.match(/^\/verify\/([A-Za-z0-9]+)/);
+
+// VerifyReceiptPage's "Sign in with Google to Approve" passes
+// redirectTo: window.location.href, so Google should bounce straight back
+// to /verify/<code> — but if this Supabase project's OAuth redirect
+// allow-list only covers the site root, it lands on "/" instead (with the
+// auth tokens still in the URL hash). Recover by bouncing to the verify
+// page we stashed before leaving, carrying the hash along so Supabase's
+// client (detectSessionInUrl: true) still picks up the session there.
+if (!verifyMatch && window.location.hash.includes('access_token')) {
+  const pendingCode = sessionStorage.getItem('icanera_verify_return_code');
+  if (pendingCode) {
+    sessionStorage.removeItem('icanera_verify_return_code');
+    window.location.replace(`/verify/${pendingCode}${window.location.hash}`);
+  }
+}
 
 createRoot(document.getElementById("root")!).render(
   verifyMatch ? (

@@ -8,6 +8,7 @@ import { trackRideCall, trackUIInteraction } from '../../services/featureAnalyti
 import RideCommsBar from './RideCommsBar';
 import ProductPicker, { CartLine } from './ProductPicker';
 import LocationPickerMap from './LocationPickerMap';
+import LiveTrackingMap from './LiveTrackingMap';
 import JourneyBookingFlow from './JourneyBookingFlow';
 import { reverseGeocodeCountry, searchAddressSuggestions, type CountryLookup } from '../services/geocodeService';
 
@@ -46,6 +47,15 @@ interface SecurityCompany {
   home_country: string | null;
   available_escorts: number;
   has_self_transport_escort: boolean;
+}
+
+interface RideCompany {
+  business_profile_id: string;
+  business_name: string;
+  avatar_url: string | null;
+  home_city: string | null;
+  home_country: string | null;
+  available_vehicles: number;
 }
 
 interface Supermarket {
@@ -118,6 +128,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<VehicleTypeFilter>('any');
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
+  // "Any Rider" (open marketplace, the previous-only behaviour) vs "From a
+  // Company" — scopes matching to one transport_company's own driver
+  // roster (CREATE_BODAGOERA_BUSINESS_DRIVER_ROSTER.sql) instead of every
+  // available rider/vehicle.
+  const [riderProviderFilter, setRiderProviderFilter] = useState<'any' | 'company'>('any');
+  const [rideCompanies, setRideCompanies] = useState<RideCompany[]>([]);
+  const [selectedRideCompanyId, setSelectedRideCompanyId] = useState('');
   const [escortRequested, setEscortRequested] = useState(false);
   const [escortFeeEstimate, setEscortFeeEstimate] = useState<number | null>(null);
   const [securityOnlyLoading, setSecurityOnlyLoading] = useState(false);
@@ -235,13 +252,20 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const needsCrossBorderPath = isNormalDelivery && !!pickupCountry && !!dropoffCountry && pickupCountry.iso2 !== dropoffCountry.iso2 && !needsJourneyPath;
 
   // Fee preview for the "Add Security Escort" toggle — refreshed whenever
-  // it's turned on or the pickup country changes.
+  // it's turned on, the pickup country changes, or the chosen company
+  // changes. With a company picked this is exactly that company's own
+  // escort_flat_fee (never a platform-wide guess); null means that company
+  // hasn't set a price yet, not "estimating" forever.
   useEffect(() => {
     if (!escortRequested) return;
-    supabase.rpc('mbg_estimate_escort_fee', { p_country: pickupCountry?.name || 'Uganda' }).then(({ data, error }) => {
-      if (!error) setEscortFeeEstimate(Number(data) || 0);
+    setEscortFeeEstimate(null);
+    supabase.rpc('mbg_estimate_escort_fee', {
+      p_country: pickupCountry?.name || 'Uganda',
+      p_business_profile_id: selectedSecurityCompanyId || null,
+    }).then(({ data, error }) => {
+      if (!error) setEscortFeeEstimate(data == null ? NaN : Number(data));
     });
-  }, [escortRequested, pickupCountry]);
+  }, [escortRequested, pickupCountry, selectedSecurityCompanyId]);
 
   // Security companies the "just send security" flow can be scoped to —
   // loaded once, not filtered by country since a customer picking a
@@ -252,6 +276,32 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       if (!error) setSecurityCompanies(data || []);
     });
   }, [customerId]);
+
+  // Transport companies the customer can scope a ride/delivery search to —
+  // re-fetched whenever the vehicle type filter changes so the list only
+  // ever shows companies that actually have that kind of vehicle.
+  useEffect(() => {
+    if (!customerId) return;
+    supabase.rpc('mbg_list_ride_companies', {
+      p_country: null,
+      p_vehicle_type: vehicleTypeFilter === 'any' ? null : vehicleTypeFilter,
+    }).then(({ data, error }) => {
+      if (!error) setRideCompanies(data || []);
+    });
+  }, [customerId, vehicleTypeFilter]);
+
+  // Dropping back to "Any Rider", or a chosen company no longer being in
+  // the (possibly re-filtered) list, clears a stale selection instead of
+  // silently keeping a company id that's no longer shown/valid.
+  useEffect(() => {
+    if (riderProviderFilter === 'any') {
+      setSelectedRideCompanyId('');
+      return;
+    }
+    if (selectedRideCompanyId && !rideCompanies.some(c => c.business_profile_id === selectedRideCompanyId)) {
+      setSelectedRideCompanyId('');
+    }
+  }, [riderProviderFilter, rideCompanies, selectedRideCompanyId]);
 
   const handleMapPickupChange = (location: Location) => {
     setSelectedPickup(location);
@@ -580,6 +630,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           p_operator_type: 'cargo',
           p_exclude_rider_ids: [],
           p_limit: 10,
+          p_business_profile_id: riderProviderFilter === 'company' ? (selectedRideCompanyId || null) : null,
         });
         if (error) throw error;
         // Synthesizes the boda-only fields (mode/power/umbrella/etc.) cargo
@@ -616,6 +667,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           p_exclude_rider_ids: [],
           p_limit: 10,
           p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
+          p_business_profile_id: riderProviderFilter === 'company' ? (selectedRideCompanyId || null) : null,
         });
         if (error) throw error;
         riders = (data || []) as MatchedRider[];
@@ -641,6 +693,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   };
 
   const handleRequestRide = async (rider: MatchedRider) => {
+    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && deliveryCart.length === 0) {
+      toast.error('Add at least one item from the store before requesting a delivery');
+      return;
+    }
+
     setSelectedRider(rider);
     setRideStatus('waiting_acceptance');
     setWaitingTimer(30);
@@ -648,6 +705,14 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     try {
       const orderNotes = deliveryCart.length > 0
         ? deliveryCart.map(l => `${l.qty}x ${l.product.name}`).join(', ')
+        : null;
+      // Structured, priced cart — this is what lets the store actually get
+      // paid for the goods (separately from the ride fare) at acceptance.
+      // Only meaningful for a store delivery; only sent on the plain
+      // mbg_request_ride call below (mbg_request_company_ride doesn't take
+      // a p_cart param).
+      const cartPayload = serviceType === 'delivery' && deliveryMode === 'supermarket' && deliveryCart.length > 0
+        ? deliveryCart.map(l => ({ product_id: l.product.id, quantity: l.qty }))
         : null;
 
       const requestArgs = {
@@ -680,7 +745,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           })
         : paymentMethod === 'company'
           ? await supabase.rpc('mbg_request_company_ride', requestArgs)
-          : await supabase.rpc('mbg_request_ride', { ...requestArgs, p_payment_method: paymentMethod });
+          : await supabase.rpc('mbg_request_ride', { ...requestArgs, p_payment_method: paymentMethod, p_cart: cartPayload });
 
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Could not create the request');
@@ -688,7 +753,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       setRideId(data.ride_id);
 
       if (escortRequested) {
-        supabase.rpc('mbg_request_ride_escort', { p_ride_id: data.ride_id }).then(({ data: escortData, error: escortError }) => {
+        supabase.rpc('mbg_request_ride_escort', {
+          p_ride_id: data.ride_id,
+          p_business_profile_id: selectedSecurityCompanyId || null,
+        }).then(({ data: escortData, error: escortError }) => {
           if (escortError || !escortData?.success) {
             toast.error(escortData?.error || 'Could not arrange a security escort for this ride');
           } else {
@@ -1214,6 +1282,52 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         </>
         )}
 
+        {/* Any available rider/vehicle (open marketplace) vs one specific
+            transport company's own roster — mbg_list_ride_companies /
+            p_business_profile_id on mbg_find_available_riders /
+            mbg_find_available_vehicles (ADD_COMPANY_CHOICE_TO_RIDE_AND_
+            ESCORT_REQUESTS.sql). */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-slate-700 mb-2">Choose driver from</label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setRiderProviderFilter('any')}
+              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
+                riderProviderFilter === 'any' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              Any Available Driver
+            </button>
+            <button
+              onClick={() => setRiderProviderFilter('company')}
+              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
+                riderProviderFilter === 'company' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              A Specific Company
+            </button>
+          </div>
+          {riderProviderFilter === 'company' && (
+            <>
+              <select
+                value={selectedRideCompanyId}
+                onChange={(e) => setSelectedRideCompanyId(e.target.value)}
+                className="mt-2 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+              >
+                <option value="">Select a company…</option>
+                {rideCompanies.map((c) => (
+                  <option key={c.business_profile_id} value={c.business_profile_id}>
+                    {c.business_name} ({c.available_vehicles} available)
+                  </option>
+                ))}
+              </select>
+              {rideCompanies.length === 0 && (
+                <p className="text-xs text-slate-400 mt-1">No transport companies with an available vehicle of this type right now.</p>
+              )}
+            </>
+          )}
+        </div>
+
         {/* Security escort add-on — available for both rides and
             deliveries, assigned from mbg_riders rows with operator_type =
             'escort' via mbg_request_ride_escort once the ride is created. */}
@@ -1230,10 +1344,34 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             </span>
             {escortRequested && (
               <span className="text-xs font-medium">
-                {escortFeeEstimate != null ? `+UGX ${escortFeeEstimate.toLocaleString()}` : 'Estimating…'}
+                {escortFeeEstimate == null
+                  ? 'Estimating…'
+                  : Number.isNaN(escortFeeEstimate)
+                  ? selectedSecurityCompanyId
+                    ? "This company hasn't set escort pricing yet"
+                    : 'No escort pricing set up yet'
+                  : `+UGX ${escortFeeEstimate.toLocaleString()}`}
               </span>
             )}
           </button>
+          {/* Which security company the escort comes from — same choice
+              (and shared selection) as the standalone "Just send security"
+              picker below; mbg_request_ride_escort now stays with this
+              company instead of always auto-picking the best-rated one. */}
+          {escortRequested && (
+            <select
+              value={selectedSecurityCompanyId}
+              onChange={(e) => setSelectedSecurityCompanyId(e.target.value)}
+              className="mt-2 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 outline-none"
+            >
+              <option value="">Any available security company</option>
+              {securityCompanies.map((c) => (
+                <option key={c.business_profile_id} value={c.business_profile_id}>
+                  {c.business_name} ({c.available_escorts} available)
+                </option>
+              ))}
+            </select>
+          )}
         </div>
 
         {/* Payment method — Wallet settles automatically the instant the
@@ -1930,6 +2068,11 @@ function RiderOnTheWay({
         <p className="opacity-90">Your rider is heading to your pickup location</p>
       </div>
 
+      {/* Live map — rider's real position, pushed instantly via realtime
+          subscription on mbg_riders.current_lat/current_lng (kept fresh by
+          useLiveLocationPing on the rider's own dashboard). */}
+      <LiveTrackingMap riderId={rider.rider_id} pickup={pickup} dropoff={dropoff} phase="to_pickup" />
+
       {/* Rider Details Card */}
       <div className="bg-white rounded-xl shadow-lg p-6">
         <h3 className="text-lg font-bold text-slate-800 mb-4">Rider Details</h3>
@@ -2094,6 +2237,10 @@ function JourneyStarted({
           </div>
         </div>
       </div>
+
+      {/* Live map — same realtime rider position as the "On The Way" screen,
+          now tracking the drop-off leg instead of the pickup leg. */}
+      <LiveTrackingMap riderId={rider.rider_id} pickup={pickup} dropoff={dropoff} phase="to_dropoff" />
 
       {/* Trip Details */}
       <div className="bg-white rounded-xl shadow-lg p-6">

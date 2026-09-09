@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet } from 'lucide-react';
+import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import RideCommsBar from './RideCommsBar';
@@ -176,6 +176,30 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
     } finally {
       setActing(false);
     }
+  };
+
+  // Re-opens the QR receipt stored for this delivery at acceptance time —
+  // read straight from icanera_delivery_receipts (RLS already lets the
+  // rider on the row read it) rather than relying on the one-shot state
+  // set right after accept, so it's still available after a reload/nav.
+  const viewReceipt = async () => {
+    if (!active) return;
+    const { data, error } = await supabase
+      .from('icanera_delivery_receipts')
+      .select('verification_code, store_name')
+      .eq('source_app', 'mybodaguy')
+      .eq('reference_type', 'mbg_ride')
+      .eq('reference_id', active.id)
+      .maybeSingle();
+    if (error || !data) {
+      toast.error('No digital receipt for this trip');
+      return;
+    }
+    setDeliveryReceipt({
+      code: data.verification_code,
+      verifyUrl: `https://bodagoera.icanera.space/verify/${data.verification_code}`,
+      storeName: data.store_name,
+    });
   };
 
   const startTrip = async () => {
@@ -379,6 +403,15 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
               peerPhone={activeCustomer.phone}
               className="mt-4"
             />
+          )}
+
+          {active.service_type === 'delivery' && (
+            <button
+              onClick={viewReceipt}
+              className="w-full mt-3 py-2.5 bg-white border-2 border-orange-300 text-orange-600 font-semibold rounded-lg hover:bg-orange-50 flex items-center justify-center gap-2 text-sm"
+            >
+              <Receipt size={16} /> Receipts
+            </button>
           )}
 
           {active.status === 'accepted' ? (
