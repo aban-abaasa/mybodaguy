@@ -160,6 +160,7 @@ interface RiderStats {
   mode: string;
   vehicleType: string | null;
   operatorType: string | null;
+  escortHasOwnTransport: boolean;
 }
 
 interface RiderVehicle {
@@ -183,7 +184,7 @@ function useRiderStats(userId: string | undefined) {
     setLoading(true);
 
     const [{ data: riderRows }, { data: mu }] = await Promise.all([
-      supabase.from('mbg_riders').select('id, rating, completed_rides, mode, vehicle_type, operator_type').eq('user_id', userId),
+      supabase.from('mbg_riders').select('id, rating, completed_rides, mode, vehicle_type, operator_type, escort_has_own_transport').eq('user_id', userId),
       supabase.from('mbg_users').select('active_vehicle_type').eq('id', userId).maybeSingle(),
     ]);
 
@@ -192,7 +193,7 @@ function useRiderStats(userId: string | undefined) {
 
     if (rows.length === 0) {
       setActiveVehicleType(null);
-      setStats({ earningsTodayUGX: 0, ridesDone: 0, rating: 0, mode: 'normal', vehicleType: null, operatorType: null });
+      setStats({ earningsTodayUGX: 0, ridesDone: 0, rating: 0, mode: 'normal', vehicleType: null, operatorType: null, escortHasOwnTransport: false });
       setLoading(false);
       return;
     }
@@ -221,6 +222,7 @@ function useRiderStats(userId: string | undefined) {
       mode: active.mode || 'normal',
       vehicleType: active.vehicle_type || null,
       operatorType: active.operator_type || null,
+      escortHasOwnTransport: !!active.escort_has_own_transport,
     });
     setLoading(false);
   };
@@ -556,9 +558,21 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
         )}
 
         {activeTab === 'requests' && (
-          riderStats?.operatorType === 'escort'
-            ? <RiderEscortRequests riderId={user.id} />
-            : <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} />
+          riderStats?.operatorType === 'escort' ? (
+            <div className="space-y-4">
+              {/* Escorts with their own vehicle can be booked directly as
+                  the ride (mbg_request_security's self-transport path,
+                  which assigns them via mbg_rides like any other rider) —
+                  RiderEscortRequests alone only watches the add-on table
+                  (mbg_ride_escort_requests) and would miss those offers. */}
+              {riderStats.escortHasOwnTransport && (
+                <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} />
+              )}
+              <RiderEscortRequests riderId={user.id} />
+            </div>
+          ) : (
+            <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} />
+          )
         )}
 
         {activeTab === 'mode' && (
