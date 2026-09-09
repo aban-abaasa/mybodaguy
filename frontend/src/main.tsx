@@ -3,6 +3,7 @@ import "./index.css";
 import App from "./App";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
+import VerifyReceiptPage from "./mybodaguy/components/VerifyReceiptPage";
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -12,9 +13,20 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+// Public QR-verification page (https://bodagoera.icanera.space/verify/<code>)
+// short-circuits before the auth-gated <App/> tree — no login required to
+// scan a delivery receipt. There's no router wired up in this app (same
+// precedent as the existing /supermarketera pathname check in index.html),
+// so this is a plain pathname check.
+const verifyMatch = window.location.pathname.match(/^\/verify\/([A-Za-z0-9]+)/);
+
 createRoot(document.getElementById("root")!).render(
-  <ThemeProvider>
-    <App />
-    <PWAInstallPrompt />
-  </ThemeProvider>
+  verifyMatch ? (
+    <VerifyReceiptPage code={verifyMatch[1]} />
+  ) : (
+    <ThemeProvider>
+      <App />
+      <PWAInstallPrompt />
+    </ThemeProvider>
+  )
 );

@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw } from 'lucide-react';
+import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import RideCommsBar from './RideCommsBar';
+import DeliveryReceiptCard from './DeliveryReceiptCard';
 import { startJobRingLoop, stopJobRingLoop } from '../services/notificationSound';
 
 interface RideRow {
@@ -45,6 +46,18 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
   // debited from their wallet balance right now.
   const [cashConfirmPending, setCashConfirmPending] = useState<{ rideId: string; commissionDueUgx: number } | null>(null);
   const [confirmingCash, setConfirmingCash] = useState(false);
+  // "Mark Delivered" no longer trusts whatever payment_method was picked at
+  // booking time — the rider is standing there with the customer and is the
+  // one who actually knows how they paid, so they confirm it here. true
+  // shows the Cash/Wallet picker; completingMethod tracks which one is
+  // in-flight so a failed wallet attempt (e.g. insufficient balance) can
+  // fall back to picking Cash without losing the "trip is done" moment.
+  const [paymentPickerOpen, setPaymentPickerOpen] = useState(false);
+  const [completingMethod, setCompletingMethod] = useState<'cash' | 'wallet' | null>(null);
+  // Set when accepting a store delivery (delivery_mode='supermarket') hands
+  // back a QR verification code — the customer's wallet was just charged,
+  // so this is proof-of-payment the rider shows the store at pickup.
+  const [deliveryReceipt, setDeliveryReceipt] = useState<{ code: string; verifyUrl: string; storeName?: string | null } | null>(null);
   // Tracks which pending request we've already chimed for, so the sound
   // fires once per new job — not on every 4-second poll while the same
   // request is still sitting there waiting for a response.
@@ -65,10 +78,18 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
     }
     setRiderRowId(rider.id);
 
-    const [{ data: pendingRow }, { data: activeRow }] = await Promise.all([
-      supabase.from('mbg_rides').select('*').eq('rider_id', rider.id).eq('status', 'pending').maybeSingle(),
-      supabase.from('mbg_rides').select('*').eq('rider_id', rider.id).in('status', ['accepted', 'in_progress']).maybeSingle(),
+    // .maybeSingle() errors out (silently, since only `data` is destructured
+    // below) the moment more than one row matches — and mbg_request_ride
+    // doesn't stop a rider from being offered a second ride while a first
+    // one still sits unanswered, so this rider can genuinely end up with
+    // several 'pending' rows at once. Fetch the list and take the most
+    // recent instead of assuming there's ever only one.
+    const [{ data: pendingRows }, { data: activeRows }] = await Promise.all([
+      supabase.from('mbg_rides').select('*').eq('rider_id', rider.id).eq('status', 'pending').order('created_at', { ascending: false }),
+      supabase.from('mbg_rides').select('*').eq('rider_id', rider.id).in('status', ['accepted', 'in_progress']).order('created_at', { ascending: false }).limit(1),
     ]);
+    const pendingRow = pendingRows?.[0] || null;
+    const activeRow = activeRows?.[0] || null;
 
     if (pendingRow && pendingRow.id !== lastChimedRideId.current) {
       startJobRingLoop();
@@ -113,9 +134,29 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
 
   useEffect(() => {
     load().finally(() => setLoading(false));
+    // 4s poll stays as a safety net (covers a dropped realtime connection),
+    // but the realtime subscription below is what makes a new request pop
+    // up and ring instantly instead of up to 4s late.
     const interval = setInterval(load, 4000);
     return () => clearInterval(interval);
   }, [load]);
+
+  // Instant push for a new/updated request on this exact vehicle row —
+  // same postgres_changes pattern chatService.ts uses for chat messages, so
+  // a job appears (and rings) the moment it's assigned instead of waiting
+  // for the next poll tick.
+  useEffect(() => {
+    if (!riderRowId) return;
+    const channel = supabase
+      .channel(`mbg_rider_requests_${riderRowId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mbg_rides', filter: `rider_id=eq.${riderRowId}` },
+        () => load()
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [riderRowId, load]);
 
   const respond = async (accept: boolean) => {
     if (!pending) return;
@@ -126,6 +167,9 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Could not respond');
       toast[accept ? 'success' : 'info'](accept ? 'Request accepted!' : 'Request declined');
+      if (accept && data.verification_code) {
+        setDeliveryReceipt({ code: data.verification_code, verifyUrl: data.verify_url, storeName: pending.pickup_location });
+      }
       await load();
     } catch (e: any) {
       toast.error(e.message || 'Failed to respond');
@@ -150,14 +194,22 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
     }
   };
 
-  const completeTrip = async () => {
+  const completeTrip = async (method: 'cash' | 'wallet') => {
     if (!active) return;
-    setActing(true);
+    setCompletingMethod(method);
     try {
-      const { data, error } = await supabase.rpc('mbg_complete_ride', { p_ride_id: active.id });
+      const { data, error } = await supabase.rpc('mbg_complete_ride', { p_ride_id: active.id, p_payment_method: method });
       if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || 'Could not complete trip');
+      if (!data?.success) {
+        // Most common case: rider picked Wallet but the customer's ICAN
+        // balance can't cover it — the ride is untouched server-side
+        // (still in_progress), so just surface the error and leave the
+        // picker open for them to pick Cash instead.
+        toast.error(data?.error || 'Could not complete trip');
+        return;
+      }
 
+      setPaymentPickerOpen(false);
       if (data.payment_method === 'cash') {
         // Rider already holds the cash — no automatic ICAN credit happens
         // here. They must confirm before dispatch offers them a new job.
@@ -169,7 +221,7 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
     } catch (e: any) {
       toast.error(e.message || 'Failed to complete trip');
     } finally {
-      setActing(false);
+      setCompletingMethod(null);
     }
   };
 
@@ -337,9 +389,38 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
             >
               Mark Picked Up — Start Trip
             </button>
+          ) : paymentPickerOpen ? (
+            <div className="mt-4 border-2 border-teal-400 bg-teal-50 rounded-lg p-4">
+              <p className="text-sm font-semibold text-teal-800 mb-3">How did the customer pay?</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => completeTrip('cash')}
+                  disabled={completingMethod !== null}
+                  className="flex-1 py-3 bg-white border-2 border-amber-400 text-amber-700 font-bold rounded-lg hover:bg-amber-50 disabled:opacity-50 flex flex-col items-center gap-1"
+                >
+                  <Banknote size={20} />
+                  {completingMethod === 'cash' ? 'Confirming…' : 'Cash'}
+                </button>
+                <button
+                  onClick={() => completeTrip('wallet')}
+                  disabled={completingMethod !== null}
+                  className="flex-1 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50 flex flex-col items-center gap-1"
+                >
+                  <Wallet size={20} />
+                  {completingMethod === 'wallet' ? 'Charging…' : 'Wallet'}
+                </button>
+              </div>
+              <button
+                onClick={() => setPaymentPickerOpen(false)}
+                disabled={completingMethod !== null}
+                className="w-full mt-2 py-1.5 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
           ) : (
             <button
-              onClick={completeTrip}
+              onClick={() => setPaymentPickerOpen(true)}
               disabled={acting}
               className="w-full mt-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50"
             >
@@ -355,6 +436,15 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
           <p>No requests right now.</p>
           <p className="text-sm mt-1">Make sure you're available and your areas/vehicle info are up to date.</p>
         </div>
+      )}
+
+      {deliveryReceipt && (
+        <DeliveryReceiptCard
+          verificationCode={deliveryReceipt.code}
+          verifyUrl={deliveryReceipt.verifyUrl}
+          storeName={deliveryReceipt.storeName}
+          onClose={() => setDeliveryReceipt(null)}
+        />
       )}
     </div>
   );
