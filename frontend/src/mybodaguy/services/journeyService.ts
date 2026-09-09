@@ -142,6 +142,9 @@ export interface JourneyLeg {
       vehicle_color: string | null;
       vehicle_model: string | null;
       rating: number;
+      current_lat: number | null;
+      current_lng: number | null;
+      location_updated_at: string | null;
       user?: { phone: string | null; profile?: { full_name: string | null } | null } | null;
     } | null;
   } | null;
@@ -220,7 +223,18 @@ export async function getMyJourneys(customerUserId: string): Promise<Journey[]> 
   if (!customer) return [];
   const { data, error } = await supabase
     .from('mbg_journeys')
-    .select('*, legs:mbg_journey_legs(*, flight_booking:mbg_flight_bookings(*))')
+    .select(`*, legs:mbg_journey_legs(
+      *,
+      flight_booking:mbg_flight_bookings(*),
+      ride:mbg_rides(
+        id, status, fare,
+        rider:mbg_riders(
+          plate_number, vehicle_type, vehicle_color, vehicle_model, rating,
+          current_lat, current_lng, location_updated_at,
+          user:mbg_users(phone, profile:mbg_user_profiles(full_name))
+        )
+      )
+    )`)
     .eq('customer_id', customer.id)
     .order('created_at', { ascending: false });
   if (error) throw error;

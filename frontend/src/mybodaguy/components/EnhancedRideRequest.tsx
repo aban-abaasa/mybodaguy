@@ -183,24 +183,56 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [pickupCountry, setPickupCountry] = useState<CountryLookup | null>(null);
   const [dropoffCountry, setDropoffCountry] = useState<CountryLookup | null>(null);
   const isNormalDelivery = serviceType === 'delivery' && deliveryMode === 'normal';
+  // Country resolution also runs for a plain ride now — a normal ride's
+  // pickup/dropoff can still land in different countries entirely (see
+  // needsJourneyPath below), not just the already-handled normal-delivery
+  // cross-border case.
+  const wantsCountryCheck = isNormalDelivery || serviceType === 'ride';
 
   useEffect(() => {
-    if (!isNormalDelivery || !selectedPickup) {
+    if (!wantsCountryCheck || !selectedPickup) {
       setPickupCountry(null);
       return;
     }
     reverseGeocodeCountry(selectedPickup.coordinates.lat, selectedPickup.coordinates.lng).then(setPickupCountry);
-  }, [isNormalDelivery, selectedPickup?.coordinates.lat, selectedPickup?.coordinates.lng]);
+  }, [wantsCountryCheck, selectedPickup?.coordinates.lat, selectedPickup?.coordinates.lng]);
 
   useEffect(() => {
-    if (!isNormalDelivery || !selectedDropoff) {
+    if (!wantsCountryCheck || !selectedDropoff) {
       setDropoffCountry(null);
       return;
     }
     reverseGeocodeCountry(selectedDropoff.coordinates.lat, selectedDropoff.coordinates.lng).then(setDropoffCountry);
-  }, [isNormalDelivery, selectedDropoff?.coordinates.lat, selectedDropoff?.coordinates.lng]);
+  }, [wantsCountryCheck, selectedDropoff?.coordinates.lat, selectedDropoff?.coordinates.lng]);
 
-  const needsCrossBorderPath = isNormalDelivery && !!pickupCountry && !!dropoffCountry && pickupCountry.iso2 !== dropoffCountry.iso2;
+  // Whether this pickup/dropoff pair needs a real long-haul leg (plane or
+  // ship) instead of a normal boda/car/van trip. mbg_route_needs_long_haul_transport
+  // wraps mbg_route_needs_sea_leg's trade-bloc lookup (ADD_SHIP_DISPATCH.sql /
+  // ADD_LONG_HAUL_DETECTION_AND_SEA_FLAT_FEE.sql), reused here for both cargo
+  // (ship) and passenger (flight) crossings — same signal either way.
+  const [needsJourneyPath, setNeedsJourneyPath] = useState(false);
+  useEffect(() => {
+    if (!pickupCountry || !dropoffCountry || pickupCountry.iso2 === dropoffCountry.iso2) {
+      setNeedsJourneyPath(false);
+      return;
+    }
+    let cancelled = false;
+    supabase.rpc('mbg_route_needs_long_haul_transport', {
+      p_origin_country: pickupCountry.name,
+      p_destination_country: dropoffCountry.name,
+    }).then(({ data, error }) => {
+      if (!cancelled && !error) setNeedsJourneyPath(!!data);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pickupCountry?.iso2, dropoffCountry?.iso2]);
+
+  // Same-bloc cross-border (e.g. Uganda<->Kenya) stays the existing
+  // single-hop cargo-vehicle path; a bloc mismatch is redirected to Journey
+  // booking instead (see the bookingMode === 'journey' early return below),
+  // so the two paths are mutually exclusive.
+  const needsCrossBorderPath = isNormalDelivery && !!pickupCountry && !!dropoffCountry && pickupCountry.iso2 !== dropoffCountry.iso2 && !needsJourneyPath;
 
   // Fee preview for the "Add Security Escort" toggle — refreshed whenever
   // it's turned on or the pickup country changes.
@@ -844,9 +876,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   };
 
   // Journey mode takes over the whole screen — it's a completely different
-  // multi-leg flow (flight + boda + destination driver), not a variant of
-  // the single-hop ride form below.
-  if (showJourneyOption && bookingMode === 'journey') {
+  // multi-leg flow (flight + boda + destination driver, or road->sea->road
+  // cargo), not a variant of the single-hop ride form below. Reachable
+  // either via the manual "Flying somewhere?" toggle (showJourneyOption)
+  // or automatically when needsJourneyPath below detects the pickup/dropoff
+  // pair can't be a normal boda/car/van trip at all.
+  if (bookingMode === 'journey') {
+    const prefillFromAutoRedirect = needsJourneyPath && selectedPickup && selectedDropoff;
     return (
       <div className="space-y-4">
         <button
@@ -855,7 +891,47 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         >
           <ArrowLeft size={16} /> Back to Book a Ride
         </button>
-        <JourneyBookingFlow customerId={customerId} />
+        <JourneyBookingFlow
+          customerId={customerId}
+          initialBookingKind={prefillFromAutoRedirect ? (serviceType === 'delivery' ? 'ship' : 'fly') : undefined}
+          initialShipPickup={
+            prefillFromAutoRedirect && serviceType === 'delivery'
+              ? { lat: selectedPickup!.coordinates.lat, lng: selectedPickup!.coordinates.lng, address: selectedPickup!.fullAddress }
+              : undefined
+          }
+          initialShipDropoff={
+            prefillFromAutoRedirect && serviceType === 'delivery'
+              ? { lat: selectedDropoff!.coordinates.lat, lng: selectedDropoff!.coordinates.lng, address: selectedDropoff!.fullAddress }
+              : undefined
+          }
+          initialPickupCountryIso2={prefillFromAutoRedirect ? pickupCountry?.iso2 : undefined}
+        />
+      </div>
+    );
+  }
+
+  // Auto-redirect card — shown once both pickup and dropoff are chosen and
+  // they turn out to need a plane or ship. Replaces the normal search/request
+  // form entirely rather than letting the customer search for and request a
+  // real nearby boda/car/van rider for a trip no such rider could ever
+  // fulfil (the Uganda-\>Antigua case this was built for).
+  if (needsJourneyPath && selectedPickup && selectedDropoff) {
+    return (
+      <div className="bg-white rounded-xl shadow-lg p-6 sm:p-8 text-center space-y-4">
+        <div className="w-16 h-16 mx-auto rounded-full bg-violet-100 flex items-center justify-center text-violet-600">
+          <Plane size={28} />
+        </div>
+        <h3 className="text-lg font-bold text-slate-800">This trip needs a flight or ship</h3>
+        <p className="text-sm text-slate-500">
+          {pickupCountry?.name} → {dropoffCountry?.name} isn't reachable by a normal boda, car, or van trip.
+          Book it as a journey instead — real flight pricing for passengers, or a flat-fee sea crossing for cargo.
+        </p>
+        <button
+          onClick={() => setBookingMode('journey')}
+          className="w-full py-3 bg-violet-600 text-white font-semibold rounded-xl hover:bg-violet-700 transition-all flex items-center justify-center gap-2"
+        >
+          <Plane size={18} /> Book a Journey
+        </button>
       </div>
     );
   }
@@ -922,7 +998,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             onClick={() => setBookingMode('journey')}
             className="w-full mb-4 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold border-2 border-dashed border-orange-300 text-orange-700 hover:bg-orange-50 transition-all"
           >
-            <Plane size={16} /> Flying somewhere? Book a full journey instead
+            <Plane size={16} />
+            {serviceType === 'delivery' ? 'Sending it overseas? Book a full journey instead' : 'Flying somewhere? Book a full journey instead'}
           </button>
         )}
         <div className="flex items-center justify-between mb-4">

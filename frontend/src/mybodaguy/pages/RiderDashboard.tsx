@@ -18,6 +18,36 @@ interface RiderDashboardProps {
 
 type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' | 'deliveries';
 
+// True while this user has an active (accepted/in_progress) ride that is
+// the dispatched vehicle for a journey's sea_leg — i.e. mid-voyage, departed
+// but not yet docked. There's no phone signal to report out on open ocean
+// anyway, so useLiveLocationPing below skips pinging entirely during this
+// window instead of showing a stale/misleading last-known position.
+// Resolves back to false the moment mbg_complete_ride marks that ride
+// completed (docked), with no new status/column needed for it.
+async function isOnActiveSeaLeg(userId: string): Promise<boolean> {
+  const { data: riderRows } = await supabase.from('mbg_riders').select('id').eq('user_id', userId);
+  const riderIds = (riderRows || []).map((r: any) => r.id);
+  if (riderIds.length === 0) return false;
+
+  const { data: activeRides } = await supabase
+    .from('mbg_rides')
+    .select('id')
+    .in('rider_id', riderIds)
+    .in('status', ['accepted', 'in_progress'])
+    .limit(5);
+  const activeRideIds = (activeRides || []).map((r: any) => r.id);
+  if (activeRideIds.length === 0) return false;
+
+  const { data: seaLegs } = await supabase
+    .from('mbg_journey_legs')
+    .select('id')
+    .in('ride_id', activeRideIds)
+    .eq('leg_type', 'sea_leg')
+    .limit(1);
+  return (seaLegs || []).length > 0;
+}
+
 // Keeps mbg_riders.current_lat/current_lng fresh so the real matching engine
 // (mbg_find_available_riders) can rank this rider by actual live distance
 // instead of only their static home-marked area.
@@ -27,10 +57,13 @@ function useLiveLocationPing(userId: string | undefined) {
   useEffect(() => {
     if (!userId || !navigator.geolocation) return;
 
-    const ping = () => {
+    const ping = async () => {
       const now = Date.now();
       if (now - lastSentRef.current < 45000) return; // throttle to ~45s
       lastSentRef.current = now;
+
+      if (await isOnActiveSeaLeg(userId)) return;
+
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           supabase

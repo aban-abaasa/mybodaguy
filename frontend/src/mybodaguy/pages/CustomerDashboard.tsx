@@ -13,6 +13,7 @@ import IcanCoinCard from '../components/IcanCoinCard';
 import CustomerAreaManager from '../components/CustomerAreaManager';
 import RideCommsBar from '../components/RideCommsBar';
 import ManageBusinessPanel from '../components/ManageBusinessPanel';
+import JourneyTracker from '../components/JourneyTracker';
 
 interface CustomerDashboardProps {
   user: any;
@@ -422,10 +423,12 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
         )}
 
         {/* Delivery — same real matching-engine flow as Book a Ride, locked
-            to delivery so the two never mix */}
+            to delivery so the two never mix. showJourneyOption also lets a
+            cross-bloc delivery (e.g. Uganda -> USA) reach ship-cargo journey
+            booking, same as the ride tab already does for flights. */}
         {activeTab === 'delivery' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-            <EnhancedRideRequest customerId={user?.id} fixedServiceType="delivery" />
+            <EnhancedRideRequest customerId={user?.id} fixedServiceType="delivery" showJourneyOption />
           </div>
         )}
 
@@ -457,6 +460,8 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
 
         {/* Orders — real mbg_rides history (rides booked via Book a Ride) */}
         {activeTab === 'orders' && (
+          <div className="space-y-4">
+          {user?.id && <JourneyTracker customerId={user.id} />}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
               <Bike size={16} className="text-orange-500" /> Rides &amp; Deliveries
@@ -513,6 +518,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false }:
                 ))}
               </div>
             )}
+          </div>
           </div>
         )}
 

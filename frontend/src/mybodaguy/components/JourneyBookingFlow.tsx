@@ -13,8 +13,23 @@ import LocationPickerMap from './LocationPickerMap';
 import type { Location } from '../data/mockLocations';
 import { COUNTRIES } from '../data/countries';
 
+interface JourneyPrefillPoint {
+  lat: number;
+  lng: number;
+  address: string;
+}
+
 interface JourneyBookingFlowProps {
   customerId: string;
+  // Set when a customer got here via the auto-redirect from a normal
+  // ride/delivery request that turned out to need a plane or ship
+  // (EnhancedRideRequest.tsx's needsJourneyPath) — lets them land straight
+  // in the right mode instead of re-choosing Fly vs Ship, and for a cargo
+  // redirect, skips re-dropping pins they already placed.
+  initialBookingKind?: 'fly' | 'ship';
+  initialShipPickup?: JourneyPrefillPoint;
+  initialShipDropoff?: JourneyPrefillPoint;
+  initialPickupCountryIso2?: string;
 }
 
 interface CustomerArea {
@@ -27,7 +42,7 @@ interface CustomerArea {
 type BookingKind = 'fly' | 'ship';
 type Step = 'pickup' | 'flight' | 'destination' | 'review' | 'confirming' | 'tracking' | 'ship-details';
 
-const legLabel: Record<string, string> = {
+export const legLabel: Record<string, string> = {
   local_pickup: 'Boda to the airport',
   flight: 'Flight',
   local_dropoff: 'Driver to your final address',
@@ -35,9 +50,15 @@ const legLabel: Record<string, string> = {
   sea_leg: 'Sea crossing',
 };
 
-export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowProps) {
-  const [bookingKind, setBookingKind] = useState<BookingKind>('fly');
-  const [step, setStep] = useState<Step>('pickup');
+export default function JourneyBookingFlow({
+  customerId,
+  initialBookingKind,
+  initialShipPickup,
+  initialShipDropoff,
+  initialPickupCountryIso2,
+}: JourneyBookingFlowProps) {
+  const [bookingKind, setBookingKind] = useState<BookingKind>(initialBookingKind || 'fly');
+  const [step, setStep] = useState<Step>(initialBookingKind === 'ship' ? 'ship-details' : 'pickup');
   const [error, setError] = useState<string | null>(null);
 
   const changeBookingKind = (kind: BookingKind) => {
@@ -48,9 +69,9 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
 
   // Ship Cargo mode — a separate, simpler direct-book flow (no flight
   // search): pickup + destination pins, what's being shipped, submit.
-  const [shipPickup, setShipPickup] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [shipPickup, setShipPickup] = useState<{ lat: number; lng: number; address: string } | null>(initialShipPickup || null);
   const [shipPickupCountry, setShipPickupCountry] = useState<CountryLookup | null>(null);
-  const [shipDropoff, setShipDropoff] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [shipDropoff, setShipDropoff] = useState<{ lat: number; lng: number; address: string } | null>(initialShipDropoff || null);
   const [shipDropoffCountry, setShipDropoffCountry] = useState<CountryLookup | null>(null);
   const [cargoDescription, setCargoDescription] = useState('');
   const [shipCargoWeightKg, setShipCargoWeightKg] = useState('');
@@ -103,7 +124,9 @@ export default function JourneyBookingFlow({ customerId }: JourneyBookingFlowPro
   // matches against), even though the backend (mbg_find_available_vehicles,
   // gated on r.service_countries) already supports any country. Defaults to
   // Uganda since that's the primary market, but is now a real customer choice.
-  const [pickupCountry, setPickupCountry] = useState(COUNTRIES[0]);
+  const [pickupCountry, setPickupCountry] = useState(
+    COUNTRIES.find((c) => c.iso2 === initialPickupCountryIso2) || COUNTRIES[0]
+  );
 
   const [originIata, setOriginIata] = useState('EBB');
   const [originLabel, setOriginLabel] = useState<string | null>('Entebbe International Airport (EBB)');
