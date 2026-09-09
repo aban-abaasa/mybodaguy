@@ -4,6 +4,7 @@ import { chairpersonService, SubordinateChairperson, CommitteeMember } from '../
 import { riderService, Rider } from '../services/riderService';
 import { supabase } from '../services/supabaseClient';
 import { userService } from '../services/userService';
+import { avatarService } from '../services/avatarService';
 import ProfileModal from '../components/ProfileModal';
 import IcanCoinCard from '../components/IcanCoinCard';
 import { toast } from 'sonner';
@@ -27,6 +28,7 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState<CommitteeMember | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalSubordinates: 0,
     activeSubordinates: 0,
@@ -37,7 +39,16 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
 
   useEffect(() => {
     loadDashboardData();
+    loadAvatar();
   }, [user]);
+
+  const loadAvatar = async () => {
+    try {
+      setAvatarUrl(await avatarService.getAvatarUrl(user.id));
+    } catch (error) {
+      console.error('[ChairpersonDashboard] Error loading avatar:', error);
+    }
+  };
 
   const loadDashboardData = async () => {
     setLoading(true);
@@ -140,66 +151,55 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
                   <p className="text-[9px] xs:text-[10px] sm:text-xs opacity-90 hidden xs:block">Chairperson Dashboard</p>
                 </div>
               </div>
-              <div className="flex items-center gap-2 sm:gap-3">
-                {/* Desktop View */}
-                <button
-                  onClick={() => setShowProfileModal(true)}
-                  className="hidden md:flex w-10 h-10 rounded-full bg-white/20 hover:bg-white/30 items-center justify-center transition-colors"
-                  title="Edit Profile"
-                >
-                  <User size={20} />
-                </button>
-                <button
-                  onClick={onSignOut}
-                  className="hidden md:flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
-                >
-                  <LogOut size={18} />
-                  <span>Sign Out</span>
-                </button>
-
-                {/* Mobile View - 3 Dots Menu */}
+              <div className="relative">
+                {/* Profile Avatar Menu */}
                 <button
                   onClick={() => setShowMobileMenu(!showMobileMenu)}
-                  className="md:hidden p-1.5 xs:p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
+                  className="flex items-center justify-center w-8 h-8 xs:w-9 xs:h-9 rounded-full bg-white/90 text-slate-800 font-bold text-xs xs:text-sm hover:bg-white transition-colors flex-shrink-0 overflow-hidden"
+                  title={user.email}
                 >
-                  {showMobileMenu ? <X size={18} className="xs:w-5 xs:h-5" /> : <Menu size={18} className="xs:w-5 xs:h-5" />}
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    (user.email || '?').charAt(0).toUpperCase()
+                  )}
                 </button>
+
+                {/* Account Dropdown Menu */}
+                {showMobileMenu && (
+                  <div className="absolute right-0 top-full mt-2 bg-white rounded-lg shadow-xl py-2 min-w-[200px] z-50">
+                    <div className="px-3 xs:px-4 py-2 border-b border-slate-200">
+                      <p className="text-[9px] xs:text-xs text-slate-500">Logged in as</p>
+                      <p className="text-xs xs:text-sm font-medium text-slate-800 truncate">{user.email}</p>
+                    </div>
+
+                    {/* Profile */}
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        setShowProfileModal(true);
+                      }}
+                      className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                    >
+                      <User size={14} className="xs:w-4 xs:h-4" />
+                      <span className="text-xs xs:text-sm font-medium">My Profile</span>
+                    </button>
+
+                    {/* Sign Out */}
+                    <button
+                      onClick={() => {
+                        setShowMobileMenu(false);
+                        onSignOut();
+                      }}
+                      className="w-full px-3 xs:px-4 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2"
+                    >
+                      <LogOut size={14} className="xs:w-4 xs:h-4" />
+                      <span className="text-xs xs:text-sm font-medium">Sign Out</span>
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
-
-            {/* Mobile Dropdown Menu */}
-            {showMobileMenu && (
-              <div className="md:hidden absolute right-2 xs:right-3 top-14 xs:top-16 bg-white rounded-lg shadow-xl py-2 min-w-[180px] xs:min-w-[200px] z-50">
-                <div className="px-3 xs:px-4 py-2 border-b border-slate-200">
-                  <p className="text-[9px] xs:text-xs text-slate-500">Logged in as</p>
-                  <p className="text-xs xs:text-sm font-medium text-slate-800 truncate">{user.email}</p>
-                </div>
-                
-                {/* Profile */}
-                <button
-                  onClick={() => {
-                    setShowMobileMenu(false);
-                    setShowProfileModal(true);
-                  }}
-                  className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                >
-                  <User size={14} className="xs:w-4 xs:h-4" />
-                  <span className="text-xs xs:text-sm font-medium">My Profile</span>
-                </button>
-                
-                {/* Sign Out */}
-                <button
-                  onClick={() => {
-                    setShowMobileMenu(false);
-                    onSignOut();
-                  }}
-                  className="w-full px-3 xs:px-4 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2"
-                >
-                  <LogOut size={14} className="xs:w-4 xs:h-4" />
-                  <span className="text-xs xs:text-sm font-medium">Sign Out</span>
-                </button>
-              </div>
-            )}
           </div>
         </header>
 
@@ -220,6 +220,7 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
           onClose={() => setShowProfileModal(false)}
           onSaved={() => {
             loadDashboardData();
+            loadAvatar();
           }}
         />
       </div>
@@ -1100,6 +1101,7 @@ export default function ChairpersonDashboard({ user, onSignOut }: ChairpersonDas
         onClose={() => setShowProfileModal(false)}
         onSaved={() => {
           loadDashboardData();
+          loadAvatar();
         }}
       />
 

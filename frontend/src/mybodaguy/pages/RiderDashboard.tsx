@@ -8,6 +8,7 @@ import ProfileModal from '../components/ProfileModal';
 import RiderICANEarnings from '../components/RiderICANEarnings';
 import SupermarketDeliveryPool from '../components/SupermarketDeliveryPool';
 import RiderRideRequests from '../components/RiderRideRequests';
+import RiderEscortRequests from '../components/RiderEscortRequests';
 import { supabase } from '../services/supabaseClient';
 
 interface RiderDashboardProps {
@@ -555,7 +556,9 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
         )}
 
         {activeTab === 'requests' && (
-          <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} />
+          riderStats?.operatorType === 'escort'
+            ? <RiderEscortRequests riderId={user.id} />
+            : <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} />
         )}
 
         {activeTab === 'mode' && (

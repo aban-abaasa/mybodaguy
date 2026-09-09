@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
-import { X, Save, Upload, User, UserPlus, Trash2, Search } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Save, Upload, User, UserPlus, Trash2, Search, Camera } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
+import { avatarService } from '../services/avatarService';
 import { toast } from 'sonner';
 
 interface ProfileModalProps {
@@ -34,6 +35,8 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
   const isOperator = roles.includes('rider');
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
   const [vehicles, setVehicles] = useState<any[]>([]);
   const [committeeMemberId, setCommitteeMemberId] = useState<string | null>(null);
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
@@ -213,6 +216,23 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
     }
   };
 
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingAvatar(true);
+    try {
+      const url = await avatarService.uploadAvatar(user.id, file);
+      setProfileData(previous => ({ ...previous, avatar_url: url }));
+      onSaved?.();
+      toast.success('Profile picture updated!');
+    } catch (error: any) {
+      toast.error(error.message || 'Failed to upload profile picture');
+    } finally {
+      setUploadingAvatar(false);
+      if (avatarInputRef.current) avatarInputRef.current.value = '';
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -294,8 +314,34 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
       <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
         <div className="sticky top-0 bg-white border-b border-slate-200 p-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center">
-              <User className="text-white" size={24} />
+            <div className="relative flex-shrink-0">
+              <div className="w-12 h-12 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center overflow-hidden">
+                {profileData.avatar_url ? (
+                  <img src={profileData.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  <User className="text-white" size={24} />
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={uploadingAvatar}
+                className="absolute -bottom-1 -right-1 w-5 h-5 bg-orange-500 hover:bg-orange-600 rounded-full flex items-center justify-center border-2 border-white disabled:opacity-50"
+                title="Change profile picture"
+              >
+                {uploadingAvatar ? (
+                  <div className="w-2.5 h-2.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Camera size={11} className="text-white" />
+                )}
+              </button>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleAvatarChange}
+                className="hidden"
+              />
             </div>
             <div>
               <h3 className="text-xl font-bold text-slate-800">Edit Profile</h3>

@@ -12,10 +12,15 @@ import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
 import IcanCoinCard from '../components/IcanCoinCard';
 import CustomerAreaManager from '../components/CustomerAreaManager';
 import RideCommsBar from '../components/RideCommsBar';
+import ManageBusinessPanel from '../components/ManageBusinessPanel';
 
 interface CustomerDashboardProps {
   user: any;
   onSignOut: () => void;
+  // Set when rendered inside UnifiedDashboard's role-tab view, which already
+  // shows its own brand/avatar header above this one — skips this
+  // component's own <header> so a multi-role account doesn't get two.
+  embedded?: boolean;
 }
 
 // Delivery is its own tab, separate from Book a Ride — both render
@@ -24,7 +29,7 @@ interface CustomerDashboardProps {
 // delivery toggle and vice versa. Book a Journey is inbuilt into Book a
 // Ride itself (a mode toggle inside EnhancedRideRequest, showJourneyOption)
 // rather than its own tab.
-type TabType = 'overview' | 'book-ride' | 'shop' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'become-operator' | 'profile';
+type TabType = 'overview' | 'book-ride' | 'shop' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'become-operator' | 'manage-business' | 'profile';
 
 const ALL_TABS = [
   { id: 'overview'  as TabType, label: 'Overview',  emoji: '🏠' },
@@ -35,6 +40,7 @@ const ALL_TABS = [
   { id: 'areas'     as TabType, label: 'My Areas',  emoji: '📍' },
   { id: 'rewards'   as TabType, label: 'Rewards',   emoji: '🎁' },
   { id: 'become-operator' as TabType, label: 'Become a Driver', emoji: '🚚' },
+  { id: 'manage-business' as TabType, label: 'Manage Your Business', emoji: '🏢' },
   { id: 'profile'   as TabType, label: 'Profile',   emoji: '👤' },
 ];
 
@@ -146,7 +152,7 @@ function RewardsTab({ user }: { user: any }) {
 }
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
-export default function CustomerDashboard({ user, onSignOut }: CustomerDashboardProps) {
+export default function CustomerDashboard({ user, onSignOut, embedded = false }: CustomerDashboardProps) {
   const [activeTab, setActiveTab]       = useState<TabType>('overview');
   const [mobileMenuOpen, setMobileMenu] = useState(false);
   const [rides, setRides]               = useState<any[]>([]);
@@ -156,6 +162,9 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
   // by ride id — lets "Recent Rides"/"Orders" offer Call/Video/Chat/Send
   // Money right from the list, not just from the live tracking screen.
   const [activeRideContacts, setActiveRideContacts] = useState<Record<string, { userId: string; name: string; phone: string | null }>>({});
+  // Security-escort request status per ride id (mbg_ride_escort_requests),
+  // for the "🛡️ Escort" badge on Overview/Orders ride cards.
+  const [escortStatusByRideId, setEscortStatusByRideId] = useState<Record<string, string>>({});
   const menuRef                         = useRef<HTMLDivElement>(null);
 
   // Close mobile menu on outside click
@@ -182,6 +191,19 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
         .limit(20);
       setRides(data || []);
       setRidesLoading(false);
+
+      const rideIds = (data || []).map(r => r.id);
+      if (rideIds.length > 0) {
+        const { data: escortRows } = await supabase
+          .from('mbg_ride_escort_requests')
+          .select('ride_id, status')
+          .in('ride_id', rideIds);
+        const byId: Record<string, string> = {};
+        (escortRows || []).forEach((e: any) => { byId[e.ride_id] = e.status; });
+        setEscortStatusByRideId(byId);
+      } else {
+        setEscortStatusByRideId({});
+      }
 
       // Resolve contact info only for rides still actually in progress —
       // that's the whole point: Call/Video/Chat/Send Money only make
@@ -234,32 +256,35 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
     <div className="min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50">
 
       {/* ── Sticky 2-row Header ── */}
-      <header className="sticky top-0 z-50 shadow-md">
+      {/* When embedded, stick below UnifiedDashboard's own header instead of at top-0 (matches ChairpersonDashboard's same offset) */}
+      <header className={`sticky z-40 shadow-md ${embedded ? 'top-12 xs:top-14 sm:top-16' : 'top-0'}`}>
 
-        {/* Row 1 — brand + user + mobile 3-dot */}
-        <div className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
-          <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-14">
-              <div className="flex items-center gap-2">
-                <Bike size={22} />
-                <div>
-                  <p className="font-bold leading-none text-sm">BodaGoEra</p>
-                  <p className="text-[10px] opacity-75">Your Trusted Partner</p>
+        {/* Row 1 — brand + user + mobile 3-dot (skipped when embedded — UnifiedDashboard already shows this) */}
+        {!embedded && (
+          <div className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
+            <div className="container mx-auto px-4">
+              <div className="flex items-center justify-between h-14">
+                <div className="flex items-center gap-2">
+                  <Bike size={22} />
+                  <div>
+                    <p className="font-bold leading-none text-sm">BodaGoEra</p>
+                    <p className="text-[10px] opacity-75">Your Trusted Partner</p>
+                  </div>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="hidden sm:block text-xs opacity-85 bg-white/20 px-2 py-1 rounded-full truncate max-w-[160px]">
-                  {user?.email}
-                </span>
-                <button onClick={onSignOut}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition-colors">
-                  <LogOut size={14} />
-                  <span className="hidden sm:inline text-sm">Sign Out</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <span className="hidden sm:block text-xs opacity-85 bg-white/20 px-2 py-1 rounded-full truncate max-w-[160px]">
+                    {user?.email}
+                  </span>
+                  <button onClick={onSignOut}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition-colors">
+                    <LogOut size={14} />
+                    <span className="hidden sm:inline text-sm">Sign Out</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Row 2 — nav tabs (hidden on mobile, shown via 3-dot) */}
         <div className="hidden sm:block bg-white border-b border-orange-100">
@@ -361,6 +386,11 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
                           }`}>
                             {activeRideContacts[r.id] ? '🟢 Active' : r.status}
                           </span>
+                          {escortStatusByRideId[r.id] && (
+                            <span className="block mt-1 text-xs px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700">
+                              🛡️ Escort: {escortStatusByRideId[r.id]}
+                            </span>
+                          )}
                         </div>
                       </div>
                       {activeRideContacts[r.id] && (
@@ -407,6 +437,17 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
           </div>
         )}
 
+        {/* Manage Your Business — register/run a Transport Company or a
+            Security Escort service. Each is its own business_profile in the
+            shared ICAN business system (icanera.space); this panel only adds
+            the BodaGoEra-specific pieces (driver/escort roster, pricing) —
+            see ManageBusinessPanel.tsx. */}
+        {activeTab === 'manage-business' && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+            <ManageBusinessPanel />
+          </div>
+        )}
+
         {/* Shop / Scan + POS */}
         {activeTab === 'shop' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
@@ -450,6 +491,11 @@ export default function CustomerDashboard({ user, onSignOut }: CustomerDashboard
                         }`}>
                           {activeRideContacts[r.id] ? '🟢 Active' : r.status}
                         </span>
+                        {escortStatusByRideId[r.id] && (
+                          <span className="block mt-1 text-xs px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700">
+                            🛡️ Escort: {escortStatusByRideId[r.id]}
+                          </span>
+                        )}
                       </div>
                     </div>
                     {activeRideContacts[r.id] && (

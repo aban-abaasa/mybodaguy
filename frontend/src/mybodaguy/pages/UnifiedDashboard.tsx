@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Bike, Users, Settings, ChevronRight, User, Menu, X, LogOut, Wallet } from 'lucide-react';
 import { userService } from '../services/userService';
+import { avatarService } from '../services/avatarService';
 import { supabase } from '../../services/supabaseClient';
 import ChairpersonDashboard from './ChairpersonDashboard';
 import RiderDashboard from './RiderDashboard';
@@ -35,10 +36,34 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
   // separate role at the data-model level.
   const [riderVehicleType, setRiderVehicleType] = useState<string | null>(null);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const accountMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadUserRoles();
+    loadAvatar();
   }, [user]);
+
+  const loadAvatar = async () => {
+    try {
+      setAvatarUrl(await avatarService.getAvatarUrl(user.id));
+    } catch (error) {
+      console.error('[UnifiedDashboard] Error loading avatar:', error);
+    }
+  };
+
+  // Close the account menu on an outside click
+  useEffect(() => {
+    if (!showAccountMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target as Node)) {
+        setShowAccountMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showAccountMenu]);
 
   const loadUserRoles = async () => {
     setLoading(true);
@@ -174,42 +199,48 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
               </div>
             </div>
 
-            {/* Right: Profile & Sign Out */}
-            <div className="flex items-center gap-2 sm:gap-3">
-              {/* Desktop View */}
-              <div className="hidden md:flex items-center gap-2 bg-white/20 px-3 py-1 rounded-full">
-                <span className="text-sm font-medium truncate max-w-[150px]">{user.email}</span>
-              </div>
+            {/* Right: Profile Avatar Menu */}
+            <div className="relative" ref={accountMenuRef}>
               <button
-                onClick={() => setShowProfileModal(true)}
-                className="hidden md:flex items-center gap-2 px-3 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
-                title="Edit profile"
+                onClick={() => setShowAccountMenu((prev) => !prev)}
+                className="flex items-center justify-center w-8 h-8 xs:w-9 xs:h-9 rounded-full bg-white/90 text-slate-800 font-bold text-xs xs:text-sm hover:bg-white transition-colors flex-shrink-0 overflow-hidden"
+                title={user.email}
               >
-                <User size={18} />
-                <span>Profile</span>
-              </button>
-              <button
-                onClick={onSignOut}
-                className="hidden md:flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
-              >
-                <LogOut size={18} />
-                <span>Sign Out</span>
+                {avatarUrl ? (
+                  <img src={avatarUrl} alt="Profile" className="w-full h-full object-cover" />
+                ) : (
+                  (user.email || '?').charAt(0).toUpperCase()
+                )}
               </button>
 
-              {/* Mobile View - Sign Out Button */}
-              <button
-                onClick={() => setShowProfileModal(true)}
-                className="md:hidden p-1.5 xs:p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
-                title="Edit profile"
-              >
-                <User size={18} className="xs:w-5 xs:h-5" />
-              </button>
-              <button
-                onClick={onSignOut}
-                className="md:hidden p-1.5 xs:p-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
-              >
-                <LogOut size={18} className="xs:w-5 xs:h-5" />
-              </button>
+              {showAccountMenu && (
+                <div className="absolute right-0 top-full mt-2 bg-white rounded-lg shadow-xl py-2 min-w-[220px] z-50 text-slate-800">
+                  <div className="px-4 py-2 border-b border-slate-200">
+                    <p className="text-xs text-slate-500">Signed in as</p>
+                    <p className="text-sm font-medium truncate">{user.email}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setShowAccountMenu(false);
+                      setShowProfileModal(true);
+                    }}
+                    className="w-full px-4 py-2 text-left hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <User size={16} />
+                    <span className="text-sm font-medium">My Profile</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowAccountMenu(false);
+                      onSignOut();
+                    }}
+                    className="w-full px-4 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2"
+                  >
+                    <LogOut size={16} />
+                    <span className="text-sm font-medium">Sign Out</span>
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 
@@ -246,10 +277,10 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
 
       {/* Dashboard Content - Render active role's dashboard WITHOUT its own header */}
       <div className="dashboard-content">
-        {activeRole === 'developer' && <DeveloperDashboard user={user} onSignOut={onSignOut} />}
+        {activeRole === 'developer' && <DeveloperDashboard user={user} onSignOut={onSignOut} embedded />}
         {activeRole === 'chairperson' && <ChairpersonDashboard user={user} onSignOut={onSignOut} />}
         {activeRole === 'rider' && <RiderDashboard user={user} onSignOut={onSignOut} />}
-        {activeRole === 'customer' && <CustomerDashboard user={user} onSignOut={onSignOut} />}
+        {activeRole === 'customer' && <CustomerDashboard user={user} onSignOut={onSignOut} embedded />}
         {activeRole === 'ican-wallet' && <ICANWalletPage user={user} />}
       </div>
       <ProfileModal
@@ -258,6 +289,7 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
         userRoles={userRoles}
         isOpen={showProfileModal}
         onClose={() => setShowProfileModal(false)}
+        onSaved={loadAvatar}
       />
     </div>
   );

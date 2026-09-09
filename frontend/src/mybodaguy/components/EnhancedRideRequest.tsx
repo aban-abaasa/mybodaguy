@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import * as React from 'react';
-import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package, Tag, Car, Truck, Plane } from 'lucide-react';
+import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package, Tag, Car, Truck, Plane, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { searchLocations, Location } from '../data/mockLocations';
 import { supabase } from '../services/supabaseClient';
@@ -36,6 +36,16 @@ interface MatchedRider {
   fare: number;
   distance_km: number;
   time_multiplier: number;
+}
+
+interface SecurityCompany {
+  business_profile_id: string;
+  business_name: string;
+  avatar_url: string | null;
+  home_city: string | null;
+  home_country: string | null;
+  available_escorts: number;
+  has_self_transport_escort: boolean;
 }
 
 interface Supermarket {
@@ -108,6 +118,12 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<VehicleTypeFilter>('any');
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
+  const [escortRequested, setEscortRequested] = useState(false);
+  const [escortFeeEstimate, setEscortFeeEstimate] = useState<number | null>(null);
+  const [securityOnlyLoading, setSecurityOnlyLoading] = useState(false);
+  const [securityCompanies, setSecurityCompanies] = useState<SecurityCompany[]>([]);
+  const [selectedSecurityCompanyId, setSelectedSecurityCompanyId] = useState('');
+  const [securityPassengerCount, setSecurityPassengerCount] = useState(1);
   const [modePreference, setModePreference] = useState<ModePreference>('all');
   // Wallet = charged automatically (fare + 7% convenience surcharge) the
   // instant the trip completes. Cash = pay the rider directly in person —
@@ -185,6 +201,25 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   }, [isNormalDelivery, selectedDropoff?.coordinates.lat, selectedDropoff?.coordinates.lng]);
 
   const needsCrossBorderPath = isNormalDelivery && !!pickupCountry && !!dropoffCountry && pickupCountry.iso2 !== dropoffCountry.iso2;
+
+  // Fee preview for the "Add Security Escort" toggle — refreshed whenever
+  // it's turned on or the pickup country changes.
+  useEffect(() => {
+    if (!escortRequested) return;
+    supabase.rpc('mbg_estimate_escort_fee', { p_country: pickupCountry?.name || 'Uganda' }).then(({ data, error }) => {
+      if (!error) setEscortFeeEstimate(Number(data) || 0);
+    });
+  }, [escortRequested, pickupCountry]);
+
+  // Security companies the "just send security" flow can be scoped to —
+  // loaded once, not filtered by country since a customer picking a
+  // specific company cares more about who they are than distance.
+  useEffect(() => {
+    if (!customerId) return;
+    supabase.rpc('mbg_list_security_companies', { p_country: null }).then(({ data, error }) => {
+      if (!error) setSecurityCompanies(data || []);
+    });
+  }, [customerId]);
 
   const handleMapPickupChange = (location: Location) => {
     setSelectedPickup(location);
@@ -620,6 +655,16 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
       setRideId(data.ride_id);
 
+      if (escortRequested) {
+        supabase.rpc('mbg_request_ride_escort', { p_ride_id: data.ride_id }).then(({ data: escortData, error: escortError }) => {
+          if (escortError || !escortData?.success) {
+            toast.error(escortData?.error || 'Could not arrange a security escort for this ride');
+          } else {
+            toast.success('Security escort requested');
+          }
+        });
+      }
+
       await trackRideCall('start_ride', rider.rider_id, {
         rider_name: rider.full_name,
         rider_rating: rider.rating,
@@ -636,6 +681,72 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       toast.error(error?.message || 'Failed to send this request');
       setRideStatus(null);
       setSelectedRider(null);
+    }
+  };
+
+  // "Just send security" — no vehicle picked, no rider list. The backend
+  // (mbg_request_security) decides whether the best-available escort brings
+  // their own vehicle (one order, one fare) or needs a driver paired in
+  // alongside them (ride fare + escort fee, same as the add-on toggle
+  // above) — see CREATE_SECURITY_ONLY_ESCORT_BOOKING.sql for why that
+  // decision can't just be "always charge both".
+  const handleRequestSecurityOnly = async () => {
+    if (!selectedPickup || !selectedDropoff) {
+      toast.error('Choose a pickup and dropoff first');
+      return;
+    }
+    setSecurityOnlyLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('mbg_request_security', {
+        p_pickup_location: selectedPickup.fullAddress,
+        p_pickup_lat: selectedPickup.coordinates.lat,
+        p_pickup_lng: selectedPickup.coordinates.lng,
+        p_dropoff_location: selectedDropoff.fullAddress,
+        p_dropoff_lat: selectedDropoff.coordinates.lat,
+        p_dropoff_lng: selectedDropoff.coordinates.lng,
+        p_country: pickupCountry?.name || 'Uganda',
+        p_business_profile_id: selectedSecurityCompanyId || null,
+        p_passenger_count: securityPassengerCount,
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Could not arrange security right now');
+
+      const { data: riderInfo } = await supabase.rpc('mbg_get_ride_rider_info', { p_ride_id: data.ride_id });
+      const info = riderInfo?.[0];
+
+      setSelectedRider({
+        rider_id: info?.rider_id || '',
+        full_name: info?.full_name || 'Security escort',
+        phone: info?.phone ?? null,
+        rating: info?.rating ?? 0,
+        total_rides: info?.total_rides ?? 0,
+        vehicle_type: info?.vehicle_type || 'motorcycle',
+        power_type: (info?.power_type as 'electric' | 'fuel') || 'fuel',
+        has_umbrella: info?.has_umbrella ?? false,
+        plate_number: info?.plate_number || '',
+        vehicle_color: info?.vehicle_color || '',
+        mode: (info?.mode as MatchedRider['mode']) || 'normal',
+        distance_to_pickup_km: null,
+        estimated_arrival_min: 10,
+        knows_destination: false,
+        fare: data.fare,
+        distance_km: data.distance_km,
+        time_multiplier: 1,
+      });
+      setRideId(data.ride_id);
+      setRideStatus('waiting_acceptance');
+      setWaitingTimer(30);
+
+      toast.success(
+        data.mode === 'escort_self_transport'
+          ? 'Security escort requested — they bring their own vehicle, one fare covers it'
+          : 'Security requested — pairing a driver with an escort for you',
+        { description: 'Waiting for acceptance...' }
+      );
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to request security');
+    } finally {
+      setSecurityOnlyLoading(false);
     }
   };
 
@@ -1026,6 +1137,28 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         </>
         )}
 
+        {/* Security escort add-on — available for both rides and
+            deliveries, assigned from mbg_riders rows with operator_type =
+            'escort' via mbg_request_ride_escort once the ride is created. */}
+        <div className="mb-4">
+          <button
+            type="button"
+            onClick={() => setEscortRequested(!escortRequested)}
+            className={`w-full flex items-center justify-between gap-2 py-2.5 px-3 rounded-lg text-sm font-semibold border-2 transition-all ${
+              escortRequested ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-500'
+            }`}
+          >
+            <span className="flex items-center gap-2">
+              <ShieldCheck size={16} /> Add a security escort
+            </span>
+            {escortRequested && (
+              <span className="text-xs font-medium">
+                {escortFeeEstimate != null ? `+UGX ${escortFeeEstimate.toLocaleString()}` : 'Estimating…'}
+              </span>
+            )}
+          </button>
+        </div>
+
         {/* Payment method — Wallet settles automatically the instant the
             trip ends (fare + 7% convenience surcharge); Cash means paying
             the rider directly in person, no surcharge. */}
@@ -1217,6 +1350,76 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               </>
             )}
           </button>
+
+          {/* No vehicle of your own — skip picking a rider entirely and let
+              the system decide whether the escort transports you directly
+              or a driver gets paired in alongside them. */}
+          {serviceType === 'ride' && !needsCrossBorderPath && (
+            <div className="border-2 border-violet-200 rounded-xl p-3 space-y-2.5 bg-violet-50/40">
+              <p className="text-xs font-semibold text-violet-700 flex items-center gap-1.5">
+                <ShieldCheck size={14} /> No transport of your own? Just send security
+              </p>
+
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={selectedSecurityCompanyId}
+                  onChange={(e) => setSelectedSecurityCompanyId(e.target.value)}
+                  className="border rounded-lg p-2 bg-white text-slate-900 text-xs"
+                >
+                  <option value="">Any available company</option>
+                  {securityCompanies.map((c) => (
+                    <option key={c.business_profile_id} value={c.business_profile_id}>
+                      {c.business_name} ({c.available_escorts} available)
+                    </option>
+                  ))}
+                </select>
+
+                <div className="flex items-center justify-between border rounded-lg bg-white px-2 py-1">
+                  <span className="text-xs text-slate-500">People</span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSecurityPassengerCount((n) => Math.max(1, n - 1))}
+                      className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 font-bold text-sm"
+                    >
+                      −
+                    </button>
+                    <span className="text-sm font-semibold text-slate-800 w-4 text-center">{securityPassengerCount}</span>
+                    <button
+                      type="button"
+                      onClick={() => setSecurityPassengerCount((n) => Math.min(8, n + 1))}
+                      className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 font-bold text-sm"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-slate-500">
+                If the escort has their own vehicle, that's your one fare. Otherwise we pair a{' '}
+                {securityPassengerCount <= 1 ? 'boda' : securityPassengerCount <= 4 ? 'car' : 'van'} with them automatically.
+              </p>
+
+              <button
+                onClick={handleRequestSecurityOnly}
+                disabled={securityOnlyLoading || !selectedPickup || !selectedDropoff}
+                className="w-full py-3 bg-violet-600 text-white font-semibold text-sm rounded-xl hover:bg-violet-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {securityOnlyLoading ? (
+                  <>
+                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                    Arranging security...
+                  </>
+                ) : (
+                  <>
+                    <ShieldCheck size={18} />
+                    Request Security
+                  </>
+                )}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

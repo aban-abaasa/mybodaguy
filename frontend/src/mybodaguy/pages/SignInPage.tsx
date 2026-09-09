@@ -300,15 +300,6 @@ export default function SignInPage({ onBack }: SignInPageProps) {
               {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
             </button>
           </div>
-
-          {/* Developer Hint */}
-          {!isSignUp && (
-            <div className="mt-6 pt-6 border-t border-slate-200">
-              <p className="text-xs text-center text-slate-500">
-                Developer access: abanabaasa2@gmail.com
-              </p>
-            </div>
-          )}
         </div>
       </div>
     </div>

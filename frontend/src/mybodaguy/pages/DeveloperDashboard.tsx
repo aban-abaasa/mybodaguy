@@ -32,6 +32,10 @@ import {
 interface DeveloperDashboardProps {
   user: any;
   onSignOut: () => void;
+  // Set when rendered inside UnifiedDashboard's role-tab view, which already
+  // shows its own brand/avatar header above this one — skips this
+  // component's own <header> so a multi-role account doesn't get two.
+  embedded?: boolean;
 }
 
 type DevPermissions = { isMain: boolean; allowedTabs: string[] | null };
@@ -39,7 +43,7 @@ type DevOperatorRow = { email: string; is_main: boolean; allowed_tabs: string[] 
 
 const ALL_DEV_TAB_IDS = ['overview', 'users', 'applications', 'regions', 'commissions', 'supermarkets', 'transport', 'public-board', 'messages', 'settings'];
 
-export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboardProps) {
+export default function DeveloperDashboard({ user, onSignOut, embedded = false }: DeveloperDashboardProps) {
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
@@ -208,33 +212,35 @@ export default function DeveloperDashboard({ user, onSignOut }: DeveloperDashboa
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
-      <header className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg sticky top-0 z-50">
-        <div className="container mx-auto px-4">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center gap-3">
-              <Bike size={28} />
-              <div>
-                <h1 className="text-xl font-bold">BodaGoEra</h1>
-                <p className="text-xs opacity-90">Developer Panel</p>
+      {/* Header (skipped when embedded — UnifiedDashboard already shows this) */}
+      {!embedded && (
+        <header className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg sticky top-0 z-50">
+          <div className="container mx-auto px-4">
+            <div className="flex items-center justify-between h-16">
+              <div className="flex items-center gap-3">
+                <Bike size={28} />
+                <div>
+                  <h1 className="text-xl font-bold">BodaGoEra</h1>
+                  <p className="text-xs opacity-90">Developer Panel</p>
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-4">
-              <div className="hidden md:flex items-center gap-2 bg-white/20 px-3 py-1 rounded-full">
-                <Shield size={16} />
-                <span className="text-sm font-medium">Developer</span>
+              <div className="flex items-center gap-4">
+                <div className="hidden md:flex items-center gap-2 bg-white/20 px-3 py-1 rounded-full">
+                  <Shield size={16} />
+                  <span className="text-sm font-medium">Developer</span>
+                </div>
+                <button
+                  onClick={onSignOut}
+                  className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
+                >
+                  <LogOut size={18} />
+                  <span className="hidden sm:inline">Sign Out</span>
+                </button>
               </div>
-              <button
-                onClick={onSignOut}
-                className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
-              >
-                <LogOut size={18} />
-                <span className="hidden sm:inline">Sign Out</span>
-              </button>
             </div>
           </div>
-        </div>
-      </header>
+        </header>
+      )}
 
       {/* Main Content */}
       <div className="container mx-auto px-4 py-8">
