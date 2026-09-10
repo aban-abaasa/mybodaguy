@@ -38,14 +38,6 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
   const [selfName, setSelfName] = useState('Rider');
   const [loading, setLoading] = useState(true);
   const [acting, setActing] = useState(false);
-  // Set right after completing a cash-paid trip — the rider is blocked
-  // (mbg_riders.is_available = false, server-side) from taking new jobs
-  // until they confirm they've actually been paid. Confirming records the
-  // owed commission as a debt (mbg_riders.cash_commission_debt_ugx),
-  // recovered later from their next wallet-paid ride credit rather than
-  // debited from their wallet balance right now.
-  const [cashConfirmPending, setCashConfirmPending] = useState<{ rideId: string; commissionDueUgx: number } | null>(null);
-  const [confirmingCash, setConfirmingCash] = useState(false);
   // "Mark Delivered" no longer trusts whatever payment_method was picked at
   // booking time — the rider is standing there with the customer and is the
   // one who actually knows how they paid, so they confirm it here. true
@@ -234,10 +226,12 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
       }
 
       setPaymentPickerOpen(false);
+      // Cash and wallet trips both settle automatically server-side now —
+      // for cash, the commission owed is recorded as a debt and quietly
+      // recovered from the rider's next wallet-paid ride, with no
+      // confirmation step and no offline gate in between.
       if (data.payment_method === 'cash') {
-        // Rider already holds the cash — no automatic ICAN credit happens
-        // here. They must confirm before dispatch offers them a new job.
-        setCashConfirmPending({ rideId: active.id, commissionDueUgx: Number(data.commission_due_ugx || 0) });
+        toast.success(`✅ Trip complete! You earned UGX ${Number(data.rider_earning || 0).toLocaleString()} in cash.`);
       } else {
         toast.success(`✅ Trip complete! You earned UGX ${Number(data.rider_earning || 0).toLocaleString()}`);
       }
@@ -246,23 +240,6 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
       toast.error(e.message || 'Failed to complete trip');
     } finally {
       setCompletingMethod(null);
-    }
-  };
-
-  const confirmCashReceived = async () => {
-    if (!cashConfirmPending) return;
-    setConfirmingCash(true);
-    try {
-      const { data, error } = await supabase.rpc('mbg_confirm_cash_received', { p_ride_id: cashConfirmPending.rideId });
-      if (error) throw error;
-      if (!data?.success) throw new Error(data?.error || 'Could not confirm');
-      toast.success(`✅ Confirmed — UGX ${Number(data.commission_debt_recorded_ugx || 0).toLocaleString()} will be deducted from your next wallet-paid ride. You're back online.`);
-      setCashConfirmPending(null);
-      await load();
-    } catch (e: any) {
-      toast.error(e.message || 'Failed to confirm cash received');
-    } finally {
-      setConfirmingCash(false);
     }
   };
 
@@ -317,31 +294,6 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
               </button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Cash-settlement gate — the rider stays offline (server-enforced,
-          is_available = false) until they confirm they've actually been
-          paid. Confirming doesn't touch their wallet balance directly —
-          the owed commission is recorded as a debt and quietly withheld
-          from their next wallet-paid ride instead, so there's no
-          insufficient-balance dead end. Shown until resolved; no new jobs
-          come in meanwhile. */}
-      {cashConfirmPending && (
-        <div className="border-2 border-amber-400 bg-amber-50 rounded-xl p-5 shadow-md">
-          <h4 className="font-bold text-amber-800 mb-1">💵 Confirm cash received</h4>
-          <p className="text-sm text-amber-700 mb-3">
-            You collected this fare in cash. Confirm you've been paid to settle the
-            {' '}<strong>UGX {cashConfirmPending.commissionDueUgx.toLocaleString()}</strong> commission owed — it'll be
-            deducted from your next wallet-paid ride, not right now — and go back online for new requests.
-          </p>
-          <button
-            onClick={confirmCashReceived}
-            disabled={confirmingCash}
-            className="w-full py-3 bg-gradient-to-r from-amber-500 to-orange-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50"
-          >
-            {confirmingCash ? 'Confirming…' : "I've Received the Cash"}
-          </button>
         </div>
       )}
 
