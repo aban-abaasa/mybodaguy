@@ -232,6 +232,11 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
       // confirmation step and no offline gate in between.
       if (data.payment_method === 'cash') {
         toast.success(`✅ Trip complete! You earned UGX ${Number(data.rider_earning || 0).toLocaleString()} in cash.`);
+      } else if (data.awaiting_customer_confirmation) {
+        // Store deliveries: the customer has to confirm they actually
+        // received it (same QR code, "I've Received This") before this
+        // earning lands in the wallet — see icanera_confirm_delivery.
+        toast.success(`Trip complete! UGX ${Number(data.rider_earning || 0).toLocaleString()} will land once the customer confirms they received it.`);
       } else {
         toast.success(`✅ Trip complete! You earned UGX ${Number(data.rider_earning || 0).toLocaleString()}`);
       }

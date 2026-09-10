@@ -136,6 +136,15 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // the presets shown here never fall outside what the server will accept.
   const [maxDeliveryHours, setMaxDeliveryHours] = useState(3);
   const [deliveryWindowBounds, setDeliveryWindowBounds] = useState({ min: 1, max: 48 });
+  // Whether this delivery counts as a personal errand or a business expense
+  // for the customer's own ICANera Wallet bookkeeping. Applies to the WHOLE
+  // order — mbg_request_ride tags every wallet debit it produces (the goods
+  // leg AND the fare leg for a store delivery, just the fare leg for a
+  // normal one) with this same choice, so it lands on one side of the
+  // customer's Personal/Business split instead of being split across both
+  // (previously the goods leg was hardcoded "business", the fare leg always
+  // fell back to "personal", regardless of what the order actually was).
+  const [deliveryExpenseType, setDeliveryExpenseType] = useState<'personal_expense' | 'business_expense'>('personal_expense');
   const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<VehicleTypeFilter>('any');
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
@@ -840,6 +849,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               p_payment_method: paymentMethod,
               p_cart: cartPayload,
               p_max_delivery_hours: deliveryMode === 'supermarket' ? maxDeliveryHours : null,
+              p_expense_classification: serviceType === 'delivery' ? deliveryExpenseType : null,
             });
 
       if (error) throw error;
@@ -1229,6 +1239,33 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                 📦 Normal Delivery
               </button>
             </div>
+
+            {/* Personal vs Business — applies to the WHOLE order (goods +
+                fare for a store delivery, just the fare for a normal one),
+                so it shows up as one consistent side of the ICANera Wallet
+                Personal/Business split instead of being silently divided. */}
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">This delivery is for</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setDeliveryExpenseType('personal_expense')}
+                  className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                    deliveryExpenseType === 'personal_expense' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
+                  }`}
+                >
+                  👤 Personal
+                </button>
+                <button
+                  onClick={() => setDeliveryExpenseType('business_expense')}
+                  className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                    deliveryExpenseType === 'business_expense' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
+                  }`}
+                >
+                  🏢 Business
+                </button>
+              </div>
+            </div>
+
             {deliveryMode === 'supermarket' && (
               <>
                 <div className="flex gap-1.5 overflow-x-auto pb-0.5">

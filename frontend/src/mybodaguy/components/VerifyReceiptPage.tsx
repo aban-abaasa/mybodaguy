@@ -20,6 +20,8 @@ interface VerifyResult {
   picked_up_at?: string | null;
   picked_up_by_email?: string | null;
   delivered_at?: string | null;
+  delivered_by_email?: string | null;
+  is_customer?: boolean;
 }
 
 function formatUGX(n: number) {
@@ -48,12 +50,21 @@ const RETURN_CODE_KEY = 'icanera_verify_return_code';
 // ICAN/backend/ADD_DELIVERY_RECEIPT_APPROVAL_TRACKING.sql). A code can only
 // ever be approved once: re-scanning an already-approved code shows exactly
 // who approved it and when, instead of letting anyone else claim it.
+//
+// A second confirmation happens later, after the rider marks the trip
+// delivered: the CUSTOMER (specifically — unlike pickup approval, this
+// requires signing in as the actual account that placed the order, checked
+// server-side via is_customer) confirms they really received it. That's
+// what releases the rider's fare earning — see
+// ADD_CUSTOMER_DELIVERY_CONFIRMATION.sql / icanera_confirm_delivery.
 export default function VerifyReceiptPage({ code }: { code: string }) {
   const [result, setResult] = useState<VerifyResult | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [confirmingDelivery, setConfirmingDelivery] = useState(false);
+  const [deliveryConfirmError, setDeliveryConfirmError] = useState<string | null>(null);
   const [signedIn, setSignedIn] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const [activeTab, setActiveTab] = useState<'summary' | 'proof'>('summary');
@@ -128,6 +139,26 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
     }
   };
 
+  const confirmDelivery = async () => {
+    setConfirmingDelivery(true);
+    setDeliveryConfirmError(null);
+    try {
+      const { data, error } = await supabase.rpc('icanera_confirm_delivery', { p_verification_code: code });
+      if (error) throw error;
+      if (!data?.success) {
+        if (data?.status) {
+          setResult((prev) => (prev ? { ...prev, status: data.status } : prev));
+        }
+        throw new Error(data?.error || 'Could not confirm delivery');
+      }
+      setResult((prev) => (prev ? { ...prev, status: 'delivered', delivered_by_email: data.confirmed_by_email, delivered_at: new Date().toISOString() } : prev));
+    } catch (e: any) {
+      setDeliveryConfirmError(e.message || 'Could not confirm delivery');
+    } finally {
+      setConfirmingDelivery(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl p-6 text-center max-w-sm w-full">
@@ -191,7 +222,7 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
                     <div key={`${line.product_id}-${i}`} className="py-2 flex justify-between gap-3 text-sm">
                       <span className="text-slate-800">
                         {line.product_name} × {line.quantity}
-                        <span className="block text-xs text-slate-400">{formatUGX(line.unit_price)} each</span>
+                        <span className="block text-xs text-slate-400">{formatUGX(line.unit_price)} each (tax incl.)</span>
                       </span>
                       <span className="font-semibold text-slate-900 whitespace-nowrap">{formatUGX(line.line_total)}</span>
                     </div>
@@ -240,6 +271,15 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
               </div>
             )}
 
+            {result.status === 'delivered' && result.delivered_by_email && (
+              <div className="flex items-center gap-2 justify-center bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-2 mb-4">
+                <ShieldCheck className="text-emerald-600 flex-shrink-0" size={16} />
+                <span className="text-xs font-medium text-emerald-700">
+                  Delivery confirmed by {result.delivered_by_email} — the rider has been paid
+                </span>
+              </div>
+            )}
+
             {result.status === 'paid' && !signedIn && (
               <button
                 onClick={signInToApprove}
@@ -266,6 +306,44 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
               </>
             )}
             {confirmError && <p className="text-red-500 text-xs mt-2">{confirmError}</p>}
+
+            {/* Customer confirms they actually received the delivery — this
+                is what releases the rider's fare earning. Only the account
+                that placed the order can do this (is_customer, checked
+                server-side), so a rider or store re-scanning this same code
+                sees a status note instead of a button they can't use. */}
+            {result.status === 'picked_up' && result.is_customer && !signedIn && (
+              <button
+                onClick={signInToApprove}
+                disabled={signingIn}
+                className="w-full py-3 bg-white border-2 border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {signingIn ? 'Redirecting to Google…' : 'Sign in with Google to Confirm'}
+              </button>
+            )}
+
+            {result.status === 'picked_up' && result.is_customer && signedIn && (
+              <>
+                <p className="text-xs text-slate-400 mb-3">
+                  Confirm only once you actually have the product in hand — this is what pays your rider.
+                </p>
+                <button
+                  onClick={confirmDelivery}
+                  disabled={confirmingDelivery}
+                  className="w-full py-3 bg-gradient-to-r from-emerald-500 to-green-600 text-white font-semibold rounded-xl hover:from-emerald-600 hover:to-green-600 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  <PackageCheck size={18} />
+                  {confirmingDelivery ? 'Confirming…' : "I've Received This"}
+                </button>
+              </>
+            )}
+
+            {result.status === 'picked_up' && !result.is_customer && (
+              <p className="text-xs text-slate-400 mb-1">
+                Picked up from the store — waiting for the customer to confirm they've received it before the rider is paid.
+              </p>
+            )}
+            {deliveryConfirmError && <p className="text-red-500 text-xs mt-2">{deliveryConfirmError}</p>}
           </>
         )}
       </div>

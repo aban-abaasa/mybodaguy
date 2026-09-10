@@ -67,8 +67,14 @@ export default function ProductPicker({ supermarketId, onCartChange }: ProductPi
     setQtyById((prev) => ({ ...prev, [productId]: Math.max(0, qty) }));
   };
 
+  // The store's listed price plus its own tax_rate — always shown together,
+  // never added on top later. mbg_respond_to_ride charges the customer this
+  // exact same tax-inclusive amount at acceptance, so what's shown here
+  // while shopping is always what actually gets billed.
+  const inclusivePrice = (p: Product) => Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100));
+
   const cartCount = Object.values(qtyById).reduce((sum, q) => sum + q, 0);
-  const cartTotal = products.reduce((sum, p) => sum + (qtyById[p.id] || 0) * Number(p.price_ugx), 0);
+  const cartTotal = products.reduce((sum, p) => sum + (qtyById[p.id] || 0) * inclusivePrice(p), 0);
 
   if (loading) {
     return <p className="text-sm text-slate-400 text-center py-6">Loading store…</p>;
@@ -148,7 +154,8 @@ export default function ProductPicker({ supermarketId, onCartChange }: ProductPi
                   </div>
                   <div className="p-2">
                     <p className="text-xs font-semibold text-slate-800 truncate">{p.name}</p>
-                    <p className="text-xs text-orange-600 font-bold">UGX {Number(p.price_ugx).toLocaleString()}</p>
+                    <p className="text-xs text-orange-600 font-bold">UGX {inclusivePrice(p).toLocaleString()}</p>
+                    {p.tax_rate > 0 && <p className="text-[9px] text-slate-400">incl. {p.tax_rate}% tax</p>}
                     {p.stock_qty <= 0 ? (
                       <p className="mt-1.5 text-center text-[10px] font-medium text-red-500 py-1">Out of stock</p>
                     ) : qty === 0 ? (
