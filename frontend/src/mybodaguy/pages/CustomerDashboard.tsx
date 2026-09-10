@@ -15,6 +15,7 @@ import RideCommsBar from '../components/RideCommsBar';
 import RideTrackingModal from '../components/RideTrackingModal';
 import ManageBusinessPanel from '../components/ManageBusinessPanel';
 import JourneyTracker from '../components/JourneyTracker';
+import RefundableDeliveries from '../components/RefundableDeliveries';
 
 interface CustomerDashboardProps {
   user: any;
@@ -484,6 +485,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         {/* Orders — real mbg_rides history (rides booked via Book a Ride) */}
         {activeTab === 'orders' && (
           <div className="space-y-4">
+          {user?.id && <RefundableDeliveries customerId={user.id} />}
           {user?.id && <JourneyTracker customerId={user.id} />}
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
             <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">

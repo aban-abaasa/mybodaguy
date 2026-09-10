@@ -126,6 +126,16 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
   const [storeTypeFilter, setStoreTypeFilter] = useState<BusinessTypeFilter>('all');
   const [deliveryCart, setDeliveryCart] = useState<CartLine[]>([]);
+  // How long the customer is willing to wait for a store order before the
+  // rider is warned and, after a grace period, the customer can pull a
+  // refund (mbg_request_ride requires this for delivery_mode='supermarket'
+  // — see ADD_DELIVERY_ESCROW_DEADLINE_AND_RIDER_LIABILITY.sql). 3h is a
+  // sane "smart" default (long enough for a normal in-town errand, short
+  // enough that a stalled order gets caught same-day); bounds come from
+  // the backend's own delivery.min_deadline_hours/max_deadline_hours so
+  // the presets shown here never fall outside what the server will accept.
+  const [maxDeliveryHours, setMaxDeliveryHours] = useState(3);
+  const [deliveryWindowBounds, setDeliveryWindowBounds] = useState({ min: 1, max: 48 });
   const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<VehicleTypeFilter>('any');
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
@@ -342,6 +352,23 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           return;
         }
         setSupermarkets(data || []);
+      });
+  }, []);
+
+  // Bounds for the delivery-window picker — public settings, safe to read
+  // directly (mbg_platform_settings RLS allows SELECT where is_public=true).
+  // Falls back to the defaults above if the row isn't there yet.
+  useEffect(() => {
+    supabase
+      .from('mbg_platform_settings')
+      .select('key, value')
+      .in('key', ['delivery.min_deadline_hours', 'delivery.max_deadline_hours'])
+      .then(({ data }) => {
+        if (!data) return;
+        const min = Number(data.find(r => r.key === 'delivery.min_deadline_hours')?.value ?? 1);
+        const max = Number(data.find(r => r.key === 'delivery.max_deadline_hours')?.value ?? 48);
+        setDeliveryWindowBounds({ min, max });
+        setMaxDeliveryHours(prev => Math.min(Math.max(prev, min), max));
       });
   }, []);
 
@@ -731,6 +758,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       toast.error('Add at least one item from the store before requesting a delivery');
       return;
     }
+    if (
+      serviceType === 'delivery' && deliveryMode === 'supermarket' &&
+      (maxDeliveryHours < deliveryWindowBounds.min || maxDeliveryHours > deliveryWindowBounds.max)
+    ) {
+      toast.error(`Choose a delivery window between ${deliveryWindowBounds.min} and ${deliveryWindowBounds.max} hours`);
+      return;
+    }
 
     // Paying a store for real goods (not just the ride fare) with the
     // ICANera wallet — require the transaction PIN here, before the order
@@ -801,7 +835,12 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           })
         : paymentMethod === 'company'
           ? await supabase.rpc('mbg_request_company_ride', requestArgs)
-          : await supabase.rpc('mbg_request_ride', { ...requestArgs, p_payment_method: paymentMethod, p_cart: cartPayload });
+          : await supabase.rpc('mbg_request_ride', {
+              ...requestArgs,
+              p_payment_method: paymentMethod,
+              p_cart: cartPayload,
+              p_max_delivery_hours: deliveryMode === 'supermarket' ? maxDeliveryHours : null,
+            });
 
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Could not create the request');
@@ -1222,6 +1261,56 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
                 {selectedSupermarketId && (
                   <ProductPicker supermarketId={selectedSupermarketId} onCartChange={setDeliveryCart} />
+                )}
+
+                {selectedSupermarketId && deliveryCart.length > 0 && (
+                  <div className="p-3 rounded-lg border-2 border-slate-200 bg-slate-50">
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      Deliver within
+                    </label>
+                    <p className="text-xs text-slate-500 mb-2">
+                      If your rider misses this window, you can claim a refund straight from your order receipt.
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {[
+                        { hours: 1, label: '1h · Express' },
+                        { hours: 3, label: '3h · Standard' },
+                        { hours: 6, label: '6h' },
+                        { hours: 24, label: '24h · Tomorrow' },
+                        { hours: 48, label: '48h · Flexible' },
+                      ]
+                        .filter(p => p.hours >= deliveryWindowBounds.min && p.hours <= deliveryWindowBounds.max)
+                        .map(p => (
+                          <button
+                            key={p.hours}
+                            type="button"
+                            onClick={() => setMaxDeliveryHours(p.hours)}
+                            className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+                              maxDeliveryHours === p.hours ? 'bg-blue-600 text-white' : 'bg-white border border-slate-300 text-slate-600'
+                            }`}
+                          >
+                            {p.label}
+                          </button>
+                        ))}
+                      <label className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-white border border-slate-300 text-slate-600">
+                        Custom
+                        <input
+                          type="number"
+                          min={deliveryWindowBounds.min}
+                          max={deliveryWindowBounds.max}
+                          value={maxDeliveryHours}
+                          onChange={(e) => {
+                            const v = Number(e.target.value);
+                            if (!Number.isNaN(v)) {
+                              setMaxDeliveryHours(Math.min(Math.max(v, deliveryWindowBounds.min), deliveryWindowBounds.max));
+                            }
+                          }}
+                          className="w-12 outline-none"
+                        />
+                        h
+                      </label>
+                    </div>
+                  </div>
                 )}
               </>
             )}
