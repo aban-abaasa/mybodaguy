@@ -50,6 +50,7 @@ const RETURN_CODE_KEY = 'icanera_verify_return_code';
 // who approved it and when, instead of letting anyone else claim it.
 export default function VerifyReceiptPage({ code }: { code: string }) {
   const [result, setResult] = useState<VerifyResult | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -58,7 +59,16 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
   const [activeTab, setActiveTab] = useState<'summary' | 'proof'>('summary');
 
   const refresh = async () => {
-    const { data } = await supabase.rpc('icanera_verify_delivery_receipt', { p_code: code });
+    const { data, error } = await supabase.rpc('icanera_verify_delivery_receipt', { p_code: code });
+    // A real server error (bad function/column, network) is NOT the same as
+    // "this code doesn't exist" — surfacing it distinctly is what caught a
+    // live 42703 that this used to mask as a generic "Not a valid receipt".
+    if (error) {
+      setLoadError(error.message);
+      setResult(null);
+      return;
+    }
+    setLoadError(null);
     setResult(data ?? { is_valid: false });
   };
 
@@ -123,6 +133,15 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
       <div className="bg-white rounded-2xl shadow-xl p-6 text-center max-w-sm w-full">
         {loading ? (
           <p className="text-slate-500 py-10">Checking receipt…</p>
+        ) : loadError ? (
+          <>
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <XCircle className="text-red-500" size={32} />
+            </div>
+            <h1 className="text-xl font-bold text-slate-800 mb-1">Couldn't check this receipt</h1>
+            <p className="text-slate-500 text-sm mb-3">Something went wrong on our end — this isn't about your code.</p>
+            <p className="text-slate-400 text-xs font-mono break-all">{loadError}</p>
+          </>
         ) : !result?.is_valid ? (
           <>
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
