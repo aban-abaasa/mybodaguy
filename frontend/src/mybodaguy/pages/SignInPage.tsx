@@ -70,7 +70,16 @@ export default function SignInPage({ onBack }: SignInPageProps) {
         toast.success('Welcome to BodaGoEra!');
       }
     } catch (error: any) {
-      toast.error(error.message || 'Authentication failed');
+      // auth.users is shared across ICAN, digital-city-era and mybodaguy, so
+      // this email may already have an account from any of them — offer a
+      // direct way to switch to sign-in instead of a dead-end error.
+      if (isSignUp && /already exists|already registered/i.test(error.message || '')) {
+        toast.error(error.message, {
+          action: { label: 'Sign In', onClick: () => setIsSignUp(false) },
+        });
+      } else {
+        toast.error(error.message || 'Authentication failed');
+      }
     } finally {
       setLoading(false);
     }

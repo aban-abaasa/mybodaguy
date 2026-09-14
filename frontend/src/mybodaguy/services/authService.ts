@@ -29,6 +29,16 @@ export const authService = {
     });
 
     if (error) throw error;
+
+    // auth.users is shared across ICAN, digital-city-era and mybodaguy —
+    // Supabase silently "succeeds" a signUp for an email that already has an
+    // account (in any of the three apps) by returning a user with no
+    // identities, instead of an error. Surface that as a real error so the
+    // caller doesn't tell the person to "check their email" for nothing.
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      throw new Error('An account with this email already exists. Please sign in instead.');
+    }
+
     return data;
   },
 
