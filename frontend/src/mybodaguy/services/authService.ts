@@ -77,6 +77,35 @@ export const authService = {
     return data;
   },
 
+  // Sign in with an ICANera wallet account number (or phone) + PIN. Verified
+  // server-side by the same wallet-login edge function ICAN uses (shared
+  // Supabase project, shared auth.users), which hands back a magic-link
+  // token_hash redeemed into a real session here — so one wallet account
+  // works across ICAN, digital-city-era and mybodaguy. userService.getUserRole
+  // auto-provisions the mbg_users row (via sync_user_from_auth) on first use.
+  async signInWithWallet(identifier: string, pin: string) {
+    const { data, error } = await supabase.functions.invoke('wallet-login', {
+      body: { identifier: String(identifier || '').trim(), pin: String(pin || '').trim() },
+    });
+
+    if (error) {
+      // supabase-js only gives a generic "Edge Function returned a non-2xx
+      // status code" here — the real { success: false, error } body lives on
+      // error.context (the raw Response object).
+      const detail = await (error as any).context?.json?.().catch(() => null);
+      throw new Error(detail?.error || error.message);
+    }
+    if (!data?.success) throw new Error(data?.error || 'Wallet sign-in failed');
+
+    const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
+      token_hash: data.token_hash,
+      type: 'email',
+    });
+
+    if (otpError) throw otpError;
+    return otpData;
+  },
+
   // Sign in with Google
   async signInWithGoogle() {
     console.log('[AuthService] Initiating Google OAuth...');

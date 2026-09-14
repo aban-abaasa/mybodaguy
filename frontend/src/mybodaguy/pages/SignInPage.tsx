@@ -18,6 +18,31 @@ export default function SignInPage({ onBack }: SignInPageProps) {
   const [loading, setLoading] = useState(false);
   const [resetLinkSent, setResetLinkSent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showWalletSignIn, setShowWalletSignIn] = useState(false);
+  const [walletIdentifier, setWalletIdentifier] = useState('');
+  const [walletPin, setWalletPin] = useState('');
+  const [walletLoading, setWalletLoading] = useState(false);
+  const [walletError, setWalletError] = useState('');
+
+  const handleWalletSignIn = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWalletError('');
+
+    if (!walletIdentifier.trim() || !/^\d{4,6}$/.test(walletPin.trim())) {
+      setWalletError('Enter your wallet account number (or phone) and 4-6 digit PIN');
+      return;
+    }
+
+    setWalletLoading(true);
+    try {
+      await authService.signInWithWallet(walletIdentifier, walletPin);
+      toast.success('Welcome to BodaGoEra!');
+    } catch (error: any) {
+      setWalletError(error.message || 'Wallet sign-in failed');
+    } finally {
+      setWalletLoading(false);
+    }
+  };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -290,6 +315,52 @@ export default function SignInPage({ onBack }: SignInPageProps) {
             </svg>
             <span>{loading ? 'Redirecting...' : 'Continue with Google'}</span>
           </button>
+
+          {/* ICANera Wallet Sign In — same wallet account works across ICAN,
+              digital-city-era (SupermartKera) and mybodaguy (BodaGoEra) */}
+          {!isSignUp && (
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => { setShowWalletSignIn((prev) => !prev); setWalletError(''); }}
+                className="w-full py-3 px-4 border-2 border-orange-300 text-orange-700 font-semibold rounded-lg hover:bg-orange-50 focus:ring-4 focus:ring-orange-200 transition-all flex items-center justify-center gap-3"
+              >
+                <span className="text-xl">💳</span>
+                Sign in with Wallet
+              </button>
+
+              {showWalletSignIn && (
+                <form onSubmit={handleWalletSignIn} className="mt-4 space-y-3">
+                  <input
+                    type="text"
+                    value={walletIdentifier}
+                    onChange={(e) => { setWalletIdentifier(e.target.value); setWalletError(''); }}
+                    placeholder="Wallet account number or phone"
+                    autoComplete="off"
+                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition-all"
+                  />
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    value={walletPin}
+                    onChange={(e) => { setWalletPin(e.target.value.replace(/\D/g, '').slice(0, 6)); setWalletError(''); }}
+                    placeholder="Wallet PIN"
+                    maxLength={6}
+                    autoComplete="off"
+                    className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition-all"
+                  />
+                  {walletError && <p className="text-sm text-red-600">{walletError}</p>}
+                  <button
+                    type="submit"
+                    disabled={walletLoading}
+                    className="w-full py-3 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 focus:ring-4 focus:ring-orange-300 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-lg"
+                  >
+                    {walletLoading ? 'Verifying...' : 'Sign In'}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
 
           {/* Toggle Sign Up/Sign In */}
           <div className="mt-6 text-center">
