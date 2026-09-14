@@ -9,6 +9,8 @@ import LandingPage from "./mybodaguy/pages/LandingPage";
 import UnifiedDashboard from "./mybodaguy/pages/UnifiedDashboard";
 import ChatWidget from "./mybodaguy/components/ChatWidget";
 import CountryGate from "./mybodaguy/components/CountryGate";
+import DecoyPortal from "./mybodaguy/components/security/DecoyPortal";
+import HiddenDecoyLinks from "./mybodaguy/components/security/HiddenDecoyLinks";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -16,6 +18,9 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [showAuth, setShowAuth] = useState(false);
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
+  const [isDecoyPortalPath] = useState(
+    () => typeof window !== 'undefined' && window.location.pathname === '/decoy-portal'
+  );
 
   useEffect(() => {
     // Prevent multiple initialization in React Strict Mode
@@ -106,6 +111,14 @@ export default function App() {
     }
   };
 
+  // Decoy portal — checked before anything else, including the loading
+  // spinner and auth-state branches below. Renders a fully isolated, static
+  // fake dashboard with zero imports that reach Supabase or any real API; a
+  // flagged IP redirected here must never brush against real auth state.
+  if (isDecoyPortalPath) {
+    return <DecoyPortal />;
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50 flex items-center justify-center">
@@ -140,6 +153,7 @@ export default function App() {
         <>
           <SignInPage onBack={() => setShowAuth(false)} />
           <ChatWidget />
+          <HiddenDecoyLinks />
           <Toaster position="top-right" theme="light" />
         </>
       );
@@ -148,6 +162,7 @@ export default function App() {
       <>
         <LandingPage onGetStarted={() => setShowAuth(true)} />
         <ChatWidget />
+        <HiddenDecoyLinks />
         <Toaster position="top-right" theme="light" />
       </>
     );
@@ -187,6 +202,7 @@ export default function App() {
     <CountryGate user={user}>
       <UnifiedDashboard user={user} onSignOut={handleSignOut} />
       <ChatWidget />
+      <HiddenDecoyLinks />
       <Toaster position="top-right" theme="light" />
     </CountryGate>
   );

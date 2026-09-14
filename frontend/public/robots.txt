@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# These paths are intentionally off-limits to well-behaved crawlers.
+# A request to any of them is treated as automated reconnaissance.
+Disallow: /decoy-portal
+Disallow: /api/admin/debug-keys
+Disallow: /api/v1/internal/export-riders

@@ -3,6 +3,8 @@ import { Bike, Mail, Lock, User, Globe, ArrowLeft, Eye, EyeOff } from 'lucide-re
 import { authService } from '../services/authService';
 import { toast } from 'sonner';
 import { COUNTRY_NAMES as COUNTRIES } from '../data/countries';
+import CanweFields from '../components/security/CanweFields';
+import { checkCanweFields } from '../utils/canweGuard';
 
 interface SignInPageProps {
   onBack: () => void;
@@ -59,6 +61,16 @@ export default function SignInPage({ onBack }: SignInPageProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (checkCanweFields(e.currentTarget as HTMLFormElement, isSignUp ? 'sign-up' : 'sign-in')) {
+      setLoading(true);
+      setTimeout(() => {
+        setLoading(false);
+        toast.error('Authentication failed');
+      }, 900 + Math.random() * 400);
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -189,6 +201,7 @@ export default function SignInPage({ onBack }: SignInPageProps) {
         {/* Form Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <form onSubmit={handleSubmit} className="space-y-4">
+            <CanweFields />
             {isSignUp && (
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
