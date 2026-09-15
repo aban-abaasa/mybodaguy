@@ -1,22 +1,26 @@
-import { useState, useEffect, useRef } from 'react';
-import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, Menu, X, User, Package, Bell, ChevronDown, Car, Truck } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, User, Package, Bell, ChevronDown, Car, Truck, Gift } from 'lucide-react';
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
 import RiderICANEarnings from '../components/RiderICANEarnings';
+import RewardsPointsCard from '../components/RewardsPointsCard';
+import RewardsHub from '../components/RewardsHub';
 import SupermarketDeliveryPool from '../components/SupermarketDeliveryPool';
 import RiderRideRequests from '../components/RiderRideRequests';
 import RiderEscortRequests from '../components/RiderEscortRequests';
 import { supabase } from '../services/supabaseClient';
+import { computeOrderInsights, shortenLocation, type OrderInsights } from '../utils/orderInsights';
+import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
 
 interface RiderDashboardProps {
   user: any;
   onSignOut: () => void;
 }
 
-type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' | 'deliveries';
+type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards';
 
 // True while this user has an active (accepted/in_progress) ride that is
 // the dispatched vehicle for a journey's sea_leg — i.e. mid-voyage, departed
@@ -210,6 +214,7 @@ function useRiderStats(userId: string | undefined) {
   const [stats, setStats] = useState<RiderStats | null>(null);
   const [allVehicles, setAllVehicles] = useState<RiderVehicle[]>([]);
   const [activeVehicleType, setActiveVehicleType] = useState<string | null>(null);
+  const [activeRiderId, setActiveRiderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
@@ -226,6 +231,7 @@ function useRiderStats(userId: string | undefined) {
 
     if (rows.length === 0) {
       setActiveVehicleType(null);
+      setActiveRiderId(null);
       setStats({ earningsTodayUGX: 0, ridesDone: 0, rating: 0, mode: 'normal', vehicleType: null, operatorType: null, escortHasOwnTransport: false });
       setLoading(false);
       return;
@@ -235,6 +241,7 @@ function useRiderStats(userId: string | undefined) {
     // they have (covers accounts from before this column was backfilled).
     const active = rows.find((r: any) => r.vehicle_type === mu?.active_vehicle_type) || rows[0];
     setActiveVehicleType(active.vehicle_type);
+    setActiveRiderId(active.id);
 
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
@@ -290,7 +297,48 @@ function useRiderStats(userId: string | undefined) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
-  return { stats, loading, allVehicles, activeVehicleType, reload: load };
+  return { stats, loading, allVehicles, activeVehicleType, activeRiderId, reload: load };
+}
+
+// Greeting insights for the active vehicle: total jobs, the hour customers
+// request them most, and the pickup location they come from most — the
+// rider's own demand pattern, mirroring the same stats on the Customer
+// Overview greeting. Live via realtime on this rider's own mbg_rides rows.
+function useRiderOwnRideInsights(riderId: string | null) {
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const [insights, setInsights] = useState<OrderInsights | null>(null);
+
+  useEffect(() => {
+    if (!riderId) { setTotalCount(null); setInsights(null); return; }
+
+    const load = async () => {
+      const [{ data }, { count }] = await Promise.all([
+        supabase
+          .from('mbg_rides')
+          .select('created_at, pickup_location')
+          .eq('rider_id', riderId)
+          .order('created_at', { ascending: false })
+          .limit(20),
+        supabase.from('mbg_rides').select('id', { count: 'exact', head: true }).eq('rider_id', riderId),
+      ]);
+      setInsights(computeOrderInsights(data || []));
+      setTotalCount(count ?? 0);
+    };
+    load();
+
+    const channel = supabase
+      .channel(`mbg_rider_own_rides_${riderId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mbg_rides', filter: `rider_id=eq.${riderId}` },
+        () => load()
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [riderId]);
+
+  return { totalCount, insights };
 }
 
 export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps) {
@@ -298,10 +346,51 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [quickStartOpen, setQuickStartOpen] = useState(false);
-  const { stats: riderStats, loading: riderStatsLoading, allVehicles, activeVehicleType, reload: reloadRiderStats } = useRiderStats(user?.id);
+  const { stats: riderStats, loading: riderStatsLoading, allVehicles, activeVehicleType, activeRiderId, reload: reloadRiderStats } = useRiderStats(user?.id);
+  const { totalCount: totalJobsCount, insights: demandInsights } = useRiderOwnRideInsights(activeRiderId);
   const [switchingVehicle, setSwitchingVehicle] = useState(false);
+  const [riderName, setRiderName] = useState('You');
 
   useLiveLocationPing(user?.id);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    supabase
+      .from('mbg_users')
+      .select('email, mbg_user_profiles(full_name)')
+      .eq('id', user.id)
+      .maybeSingle()
+      .then(({ data }) => {
+        const name = (data as any)?.mbg_user_profiles?.[0]?.full_name || data?.email?.split('@')[0] || 'You';
+        setRiderName(name);
+      });
+  }, [user?.id]);
+
+  // Each demand stat gets its own slide in the greeting's carousel — only
+  // real, live data ever shows up here (a stat is simply omitted until it
+  // has one), mirroring the same slider on the Customer Overview greeting.
+  const insightSlides = useMemo<InsightSlide[]>(() => {
+    const slides: InsightSlide[] = [];
+    if (totalJobsCount !== null && totalJobsCount > 0) {
+      slides.push({
+        key: 'jobs', emoji: '🏍️', tint: 'bg-orange-50 text-orange-700',
+        content: <><strong>{totalJobsCount}</strong> jobs total</>,
+      });
+    }
+    if (demandInsights?.peakHourLabel) {
+      slides.push({
+        key: 'peak', emoji: '⏰', tint: 'bg-blue-50 text-blue-700',
+        content: <>Busiest <strong>{demandInsights.peakHourLabel}</strong></>,
+      });
+    }
+    if (demandInsights?.topLocation) {
+      slides.push({
+        key: 'location', emoji: '📍', tint: 'bg-violet-50 text-violet-700',
+        content: <>Mostly from <strong>{shortenLocation(demandInsights.topLocation)}</strong></>,
+      });
+    }
+    return slides;
+  }, [totalJobsCount, demandInsights]);
 
   const switchVehicle = async (vehicleType: string) => {
     if (vehicleType === activeVehicleType || switchingVehicle) return;
@@ -351,29 +440,38 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
               icon={<ShoppingBag size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
               label="Markets"
             />
+            <TabButton
+              active={activeTab === 'rewards'}
+              onClick={() => setActiveTab('rewards')}
+              icon={<Gift size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
+              label="Rewards"
+            />
           </div>
         </div>
       </div>
 
-      {/* Mobile: Current Tab Indicator with Dropdown */}
+      {/* Mobile: Current Tab Indicator with Dropdown — RiderDashboard is
+          always rendered inside UnifiedDashboard, which already shows the
+          real profile avatar above this header, so this trigger is a plain
+          chevron rather than a second avatar-look button (a duplicate
+          account icon otherwise, per screenshot feedback on the customer
+          page's equivalent bar). */}
       <div className="md:hidden bg-white border-b border-slate-200 sticky top-12 xs:top-14 z-40">
-        <div className="container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setShowMobileMenu(!showMobileMenu)}
+          className="w-full container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between"
+        >
           <div className="flex items-center gap-2">
             {activeTab === 'overview' && <><TrendingUp size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Overview</span></>}
             {activeTab === 'requests' && <><Bell size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Requests</span></>}
             {activeTab === 'mode' && <><Settings size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Work Mode</span></>}
             {activeTab === 'locations' && <><Map size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Areas</span></>}
             {activeTab === 'partnerships' && <><ShoppingBag size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Markets</span></>}
+            {activeTab === 'rewards' && <><Gift size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Rewards</span></>}
           </div>
-          
-          {/* Mobile Menu Button */}
-          <button
-            onClick={() => setShowMobileMenu(!showMobileMenu)}
-            className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-          >
-            {showMobileMenu ? <X size={16} /> : <Menu size={16} />}
-          </button>
-        </div>
+          <ChevronDown size={16} className={`text-orange-500 transition-transform flex-shrink-0 ${showMobileMenu ? 'rotate-180' : ''}`} />
+        </button>
 
         {/* Mobile Dropdown Menu */}
         {showMobileMenu && (
@@ -440,6 +538,18 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
                 <Package size={14} className="xs:w-4 xs:h-4" />
                 <span className="text-xs xs:text-sm font-medium">Deliveries</span>
               </button>
+              <button
+                onClick={() => {
+                  setActiveTab('rewards');
+                  setShowMobileMenu(false);
+                }}
+                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
+                  activeTab === 'rewards' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <Gift size={14} className="xs:w-4 xs:h-4" />
+                <span className="text-xs xs:text-sm font-medium">Rewards</span>
+              </button>
             </div>
 
             {/* Profile */}
@@ -461,6 +571,27 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
       <div className="container mx-auto px-2 xs:px-3 sm:px-4 py-3 xs:py-4 sm:py-8">
         {activeTab === 'overview' && (
           <div className="space-y-4 sm:space-y-6">
+            {/* Greeting — this rider's own demand pattern: total jobs, the
+                hour customers request them most, and where those requests
+                mostly come from. Live via realtime on their own mbg_rides
+                rows (useRiderOwnRideInsights). */}
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base xs:text-lg font-bold text-slate-800">Hi, {riderName} 👋</h2>
+                {insightSlides.length > 0 && (
+                  <span className="flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" /> Live
+                  </span>
+                )}
+              </div>
+              <p className="text-xs xs:text-sm text-slate-500">Here's what's happening with your account today.</p>
+              {insightSlides.length > 0 && (
+                <div className="mt-2 max-w-sm">
+                  <InsightSlider slides={insightSlides} />
+                </div>
+              )}
+            </div>
+
             {/* Registered role — confirms which vehicle type this account
                 was approved for, since the rest of this dashboard doesn't
                 otherwise distinguish car/van/truck from a plain boda rider.
@@ -531,7 +662,7 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
             </button>
 
             {/* Stats Cards — live from Supabase (mbg_riders / mbg_rides) */}
-            <div className="grid grid-cols-2 xs:gap-3 gap-2 sm:grid-cols-4 sm:gap-6">
+            <div className="grid grid-cols-2 xs:gap-3 gap-2 sm:grid-cols-5 sm:gap-6">
               <StatCard
                 title="Today's Earnings"
                 value={riderStatsLoading ? '…' : formatEarnings(riderStats?.earningsTodayUGX || 0)}
@@ -556,6 +687,7 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
                 icon={<Settings size={20} className="sm:w-6 sm:h-6" />}
                 color="purple"
               />
+              <RewardsPointsCard userId={user?.id} onOpen={() => setActiveTab('rewards')} />
             </div>
 
             {/* ICAN Wallet Earnings */}
@@ -600,6 +732,14 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
                     <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Partnerships</h4>
                     <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">Work for supermarkets</p>
                   </button>
+                  <button
+                    onClick={() => setActiveTab('rewards')}
+                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg xs:rounded-xl border-2 border-amber-200 hover:border-amber-400 transition-all text-left"
+                  >
+                    <Gift className="text-amber-600 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
+                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Rewards</h4>
+                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">Earn points, redeem gear</p>
+                  </button>
                 </div>
               )}
             </div>
@@ -638,6 +778,10 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
 
         {activeTab === 'deliveries' && (
           <SupermarketDeliveryPool user={user} />
+        )}
+
+        {activeTab === 'rewards' && (
+          <RewardsHub user={user} role="rider" />
         )}
       </div>
 

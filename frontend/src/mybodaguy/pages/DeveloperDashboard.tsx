@@ -44,7 +44,7 @@ interface DeveloperDashboardProps {
 type DevPermissions = { isMain: boolean; allowedTabs: string[] | null };
 type DevOperatorRow = { email: string; is_main: boolean; allowed_tabs: string[] | null; added_at: string };
 
-const ALL_DEV_TAB_IDS = ['overview', 'users', 'applications', 'regions', 'commissions', 'supermarkets', 'transport', 'public-board', 'messages', 'settings'];
+const ALL_DEV_TAB_IDS = ['overview', 'users', 'applications', 'regions', 'commissions', 'supermarkets', 'transport', 'rewards', 'public-board', 'messages', 'settings'];
 
 export default function DeveloperDashboard({ user, onSignOut, embedded = false, onGoToWallet }: DeveloperDashboardProps) {
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
@@ -205,6 +205,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
     { id: 'commissions', label: 'Commissions', icon: DollarSign },
     { id: 'supermarkets', label: 'Supermarkets', icon: ShoppingBag },
     { id: 'transport', label: 'Transport', icon: Activity },
+    { id: 'rewards', label: 'Rewards', icon: Gift },
     { id: 'public-board', label: 'Public Board', icon: MessageSquare },
     { id: 'messages', label: 'Messages', icon: Mail },
     { id: 'settings', label: 'Settings', icon: Settings },
@@ -280,6 +281,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
           {activeTab === 'commissions' && <CommissionsTab />}
           {activeTab === 'supermarkets' && <SupermarketsTab />}
           {activeTab === 'transport' && <TransportOrdersTab orders={transportOrders} loading={transportLoading} onRefresh={loadTransportOrders} />}
+          {activeTab === 'rewards' && <RewardRedemptionsTab />}
           {activeTab === 'public-board' && <PublicBoardTab />}
           {activeTab === 'messages' && <MessagesTab />}
           {activeTab === 'settings' && <SettingsTab />}
@@ -762,6 +764,122 @@ function ApplicationsTab() {
             <div key={app.id} className="bg-slate-50 border border-slate-100 rounded-lg p-3 flex items-center justify-between text-sm">
               <span className="capitalize">{app.vehicle_type} — {app.plate_number} ({app.applicant?.full_name || app.user_id})</span>
               <span className={`font-semibold ${app.status === 'approved' ? 'text-green-600' : 'text-red-600'}`}>{app.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Fulfilment queue for physical reward redemptions (helmet, jacket,
+// reflectors, home goods) — points are already debited at redemption time
+// (mbg_redeem_points_for_item), this just tracks the offline delivery.
+const REDEMPTION_STATUSES = ['pending', 'processing', 'shipped', 'fulfilled', 'cancelled'] as const;
+
+function RewardRedemptionsTab() {
+  const [redemptions, setRedemptions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    const { data: rows } = await supabase
+      .from('mbg_reward_redemptions')
+      .select('*')
+      .order('created_at', { ascending: false });
+    const userIds = [...new Set((rows || []).map((r) => r.user_id))];
+    const { data: profiles } = userIds.length
+      ? await supabase.from('mbg_user_profiles').select('user_id, full_name').in('user_id', userIds)
+      : { data: [] as any[] };
+    const nameByUserId = new Map((profiles || []).map((p) => [p.user_id, p.full_name]));
+    setRedemptions((rows || []).map((r) => ({ ...r, recipient: nameByUserId.get(r.user_id) || r.user_id })));
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const updateStatus = async (id: string, status: string) => {
+    setBusyId(id);
+    try {
+      const { data, error } = await supabase.rpc('mbg_update_redemption_status', {
+        p_redemption_id: id,
+        p_status: status,
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Update failed');
+      toast.success(`Marked ${status}`);
+      await load();
+    } catch (err: any) {
+      toast.error(err.message || 'Update failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-slate-600">Loading redemptions...</p>
+      </div>
+    );
+  }
+
+  const active = redemptions.filter((r) => r.status !== 'fulfilled' && r.status !== 'cancelled');
+  const done = redemptions.filter((r) => r.status === 'fulfilled' || r.status === 'cancelled');
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Reward Redemptions</h2>
+          <p className="text-sm text-slate-600 mt-1">Points-for-gear requests from customers and riders — helmet, jacket, reflectors, home goods, or an instant ICAN coin conversion.</p>
+        </div>
+        <button onClick={load} className="px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all">
+          Refresh
+        </button>
+      </div>
+
+      <h3 className="font-semibold text-slate-700 mb-3">Needs Fulfilment ({active.length})</h3>
+      {active.length === 0 ? (
+        <p className="text-sm text-slate-400 mb-8">Nothing pending.</p>
+      ) : (
+        <div className="space-y-3 mb-8">
+          {active.map((r) => (
+            <div key={r.id} className="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold text-slate-800">{r.item_name}</div>
+                <div className="text-sm text-slate-500">{r.recipient} · {r.points_spent} pts</div>
+                <div className="text-xs text-slate-400 mt-1">
+                  {r.delivery_address ? `${r.delivery_address} · ${r.phone || '—'}` : 'No delivery details (instant redemption)'}
+                  {' '}· {new Date(r.created_at).toLocaleDateString()}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={r.status}
+                  disabled={busyId === r.id}
+                  onChange={(e) => updateStatus(r.id, e.target.value)}
+                  className="px-3 py-2 border border-slate-200 rounded-lg text-sm capitalize"
+                >
+                  {REDEMPTION_STATUSES.map((s) => <option key={s} value={s} className="capitalize">{s}</option>)}
+                </select>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h3 className="font-semibold text-slate-700 mb-3">History</h3>
+      {done.length === 0 ? (
+        <p className="text-sm text-slate-400">No completed redemptions yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {done.map((r) => (
+            <div key={r.id} className="bg-slate-50 border border-slate-100 rounded-lg p-3 flex items-center justify-between text-sm">
+              <span>{r.item_name} — {r.recipient}</span>
+              <span className={`font-semibold capitalize ${r.status === 'fulfilled' ? 'text-green-600' : 'text-red-600'}`}>{r.status}</span>
             </div>
           ))}
         </div>

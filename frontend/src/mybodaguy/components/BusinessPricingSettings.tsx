@@ -89,7 +89,7 @@ export default function BusinessPricingSettings({ businessProfileId, category }:
       {isEscort && (
         <div className="grid grid-cols-2 gap-3">
           {field('escort_flat_fee', 'Flat fee per ride (UGX)', 'e.g. 15000')}
-          {field('escort_hourly_rate', 'Hourly rate (UGX)', 'e.g. 10000')}
+          {field('escort_hourly_rate', 'Fallback fee if no flat fee set (UGX)', 'e.g. 10000')}
         </div>
       )}
 

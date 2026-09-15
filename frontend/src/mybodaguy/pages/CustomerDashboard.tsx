@@ -1,21 +1,24 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Bike, Clock, Star, LogOut, Package, ShoppingBag, History,
-  ShoppingCart, LayoutDashboard, Gift, User, Wallet, MoreVertical,
-  X, TrendingUp, CheckCircle, ArrowDownLeft, ArrowUpRight, RefreshCw,
+  ShoppingCart, LayoutDashboard, Gift, User, Wallet,
+  X, CheckCircle, RefreshCw, ChevronDown,
 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
-import { getBalance, getTransactions, type ICANBalance, type ICANTransaction } from '../services/icanWalletService';
 import EnhancedRideRequest from '../components/EnhancedRideRequest';
 import BecomeOperatorForm from '../components/BecomeOperatorForm';
 import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
 import IcanCoinCard from '../components/IcanCoinCard';
+import RewardsPointsCard from '../components/RewardsPointsCard';
+import RewardsHub from '../components/RewardsHub';
 import CustomerAreaManager from '../components/CustomerAreaManager';
 import RideCommsBar from '../components/RideCommsBar';
 import RideTrackingModal from '../components/RideTrackingModal';
 import ManageBusinessPanel from '../components/ManageBusinessPanel';
 import JourneyTracker from '../components/JourneyTracker';
 import RefundableDeliveries from '../components/RefundableDeliveries';
+import { computeOrderInsights, shortenLocation } from '../utils/orderInsights';
+import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
 
 interface CustomerDashboardProps {
   user: any;
@@ -56,109 +59,79 @@ const ALL_TABS = [
   { id: 'profile'   as TabType, label: 'Profile',   emoji: '👤' },
 ];
 
-// ── Rewards (ICAN wallet history) ─────────────────────────────────────────────
-function RewardsTab({ user, onGoToWallet }: { user: any; onGoToWallet: () => void }) {
-  const [balance, setBalance] = useState<ICANBalance | null>(null);
-  const [txs, setTxs]         = useState<ICANTransaction[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (!user?.id) return;
-    const load = async () => {
-      try {
-        const [bal, transactions] = await Promise.all([
-          getBalance(user.id),
-          getTransactions(user.id, 20),
-        ]);
-        setBalance(bal);
-        setTxs(transactions);
-      } catch (_) {}
-      setLoading(false);
-    };
-    load();
-  }, [user?.id]);
-
-  const TX_TYPE_LABEL: Record<string, string> = {
-    earn: 'Earned', transfer_in: 'Received', transfer_out: 'Sent',
-    tithe: 'Tithe', purchase: 'Purchase', sale: 'Sale',
-    cashback: 'Cashback', refund: 'Refund',
-  };
-
+// ── Ride/delivery row — collapsed to one line, expands in place on click ──────
+// Shared by Overview's "Recent Rides" and the Orders tab's "Rides &
+// Deliveries" list so both behave the same way instead of duplicating this
+// markup. Live map tracking still opens via onOpenTracking from inside the
+// expanded row, rather than firing straight from a row tap.
+function RideListItem({
+  ride, expanded, onToggle, selfUserId, selfName, contact, escortStatus, onOpenTracking, statusColor, serviceIcon,
+}: {
+  ride: any;
+  expanded: boolean;
+  onToggle: () => void;
+  selfUserId: string;
+  selfName: string;
+  contact?: { userId: string; name: string; phone: string | null };
+  escortStatus?: string;
+  onOpenTracking: () => void;
+  statusColor: (s: string) => string;
+  serviceIcon?: React.ReactNode;
+}) {
   return (
-    <div className="space-y-4">
-      {/* ICAN balance card */}
-      <div className="bg-gradient-to-br from-violet-600 to-purple-700 rounded-2xl p-5 text-white">
-        <p className="text-violet-200 text-sm mb-1">ICAN Balance</p>
-        <p className="text-4xl font-bold">{loading ? '…' : (balance?.ican ?? 0).toFixed(4)} <span className="text-2xl">₡</span></p>
-        <p className="text-violet-200 text-xs mt-1">≈ UGX {loading ? '…' : Number(balance?.ugx ?? 0).toLocaleString()}</p>
-        <div className="mt-4 grid grid-cols-3 gap-3 text-center">
-          {[
-            { label: 'Earned', value: balance?.totalEarned },
-            { label: 'Spent',  value: balance?.totalSpent },
-            { label: 'Tithe',  value: balance?.totalTithe },
-          ].map(s => (
-            <div key={s.label} className="bg-white/10 rounded-xl p-2">
-              <p className="text-xs text-violet-200">{s.label}</p>
-              <p className="font-bold text-sm">{loading ? '…' : (s.value ?? 0).toFixed(2)} ₡</p>
-            </div>
-          ))}
+    <div className="border-b border-slate-50 last:border-0">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between gap-2 py-2 px-2 -mx-2 rounded-lg hover:bg-slate-50 transition-colors text-left"
+      >
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-slate-700 truncate flex items-center gap-1.5">
+            {serviceIcon}{ride.pickup_location} → {ride.dropoff_location}
+          </p>
+          <p className="text-xs text-slate-400">{new Date(ride.created_at).toLocaleDateString()}</p>
         </div>
-        <button onClick={onGoToWallet}
-          className="mt-4 w-full py-2 bg-white/20 hover:bg-white/30 rounded-xl text-sm font-semibold transition-colors">
-          Open Full Wallet →
-        </button>
-      </div>
-
-      {/* Ride stats */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-        <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
-          <TrendingUp size={16} className="text-orange-500" /> Ride Stats
-        </h4>
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { label: 'Earn on rides', icon: '🏍️', value: 'Every ride' },
-            { label: 'Delivery cashback', icon: '📦', value: 'Per delivery' },
-            { label: 'Shop with ICAN', icon: '🛒', value: 'Pay at checkout' },
-          ].map(s => (
-            <div key={s.label} className="bg-orange-50 rounded-xl p-3 text-center">
-              <p className="text-xl mb-1">{s.icon}</p>
-              <p className="text-xs font-medium text-slate-700">{s.value}</p>
-              <p className="text-[10px] text-slate-400 mt-0.5">{s.label}</p>
-            </div>
-          ))}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+            contact ? 'bg-emerald-100 text-emerald-700 animate-pulse' : statusColor(ride.status)
+          }`}>
+            {contact ? '🟢 Active' : ride.status}
+          </span>
+          <ChevronDown size={14} className={`text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
         </div>
-      </div>
-
-      {/* Transaction history */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-        <h4 className="font-semibold text-slate-800 mb-3 flex items-center gap-2">
-          <History size={16} className="text-orange-500" /> Recent Transactions
-        </h4>
-        {loading ? (
-          <p className="text-slate-400 text-sm text-center py-4">Loading…</p>
-        ) : txs.length === 0 ? (
-          <p className="text-slate-400 text-sm text-center py-4">No transactions yet. Start using ICAN coins!</p>
-        ) : (
-          <div className="space-y-2">
-            {txs.map(tx => (
-              <div key={tx.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                <div className="flex items-center gap-2">
-                  {tx.direction === 'in'
-                    ? <ArrowDownLeft size={16} className="text-emerald-500" />
-                    : <ArrowUpRight size={16} className="text-red-400" />}
-                  <div>
-                    <p className="text-sm text-slate-700 font-medium">{TX_TYPE_LABEL[tx.transaction_type] || tx.transaction_type}</p>
-                    <p className="text-xs text-slate-400">{new Date(tx.created_at).toLocaleDateString()}</p>
-                  </div>
-                </div>
-                <p className={`font-bold text-sm ${tx.direction === 'in' ? 'text-emerald-600' : 'text-red-500'}`}>
-                  {tx.direction === 'in' ? '+' : '-'}{tx.ican_amount.toFixed(4)} ₡
-                </p>
-              </div>
-            ))}
+      </button>
+      {expanded && (
+        <div className="pb-3 px-2 -mx-2">
+          <div className="flex items-center justify-between text-sm py-1">
+            <span className="text-slate-500">Fare</span>
+            <span className="font-bold text-slate-800">UGX {(ride.fare || 0).toLocaleString()}</span>
           </div>
-        )}
-      </div>
+          {escortStatus && (
+            <div className="flex items-center justify-between text-sm py-1">
+              <span className="text-slate-500">Escort</span>
+              <span className="text-violet-700 font-medium">🛡️ {escortStatus}</span>
+            </div>
+          )}
+          {contact && (
+            <>
+              <button
+                onClick={onOpenTracking}
+                className="w-full mt-1 mb-2 py-1.5 text-xs font-semibold text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-50 transition-colors"
+              >
+                View live tracking →
+              </button>
+              <RideCommsBar
+                rideId={ride.id}
+                selfUserId={selfUserId}
+                selfName={selfName}
+                peerUserId={contact.userId}
+                peerName={contact.name}
+                peerPhone={contact.phone}
+              />
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -184,6 +157,26 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   // that component's in-memory state while actively booking, and is lost on
   // navigation or refresh.
   const [trackedRide, setTrackedRide] = useState<any>(null);
+  // "Recent Rides" (Overview) starts collapsed — it's a summary card, not
+  // the primary content of that tab, so it shouldn't eat vertical space
+  // until someone actually wants to look at it.
+  const [recentRidesOpen, setRecentRidesOpen] = useState(false);
+  // Each ride row (Overview + Orders) is collapsed to a single line by
+  // default; clicking it expands just that row in place instead of jumping
+  // straight to the live-tracking modal. Shared across both lists since
+  // only one row makes sense open at a time.
+  const [expandedRideId, setExpandedRideId] = useState<string | null>(null);
+  // All-time order count for the greeting's "traffic" stat — the `rides`
+  // list itself is capped at 20 (most recent), so it undercounts a
+  // long-time customer's real total.
+  const [totalOrderCount, setTotalOrderCount] = useState<number | null>(null);
+  // Stage with the most currently-online riders — a live hint for customers
+  // on where to expect the fastest (and, thanks to more riders competing
+  // for the same jobs, often cheapest) pickup.
+  const [busiestStage, setBusiestStage] = useState<{ stage_name: string; available_riders: number } | null>(null);
+  // Best-stocked shop right now — the same "live availability" idea as
+  // busiestStage, but for goods instead of riders.
+  const [bestStockedStore, setBestStockedStore] = useState<{ store_name: string; location: string | null; available_stock: number } | null>(null);
   const menuRef                         = useRef<HTMLDivElement>(null);
 
   // Close mobile menu on outside click
@@ -199,6 +192,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   useEffect(() => {
     if (!user?.id) return;
     setRidesLoading(true);
+    let channel: ReturnType<typeof supabase.channel> | null = null;
     const load = async () => {
       const { data: cr } = await supabase.from('mbg_customers').select('id').eq('user_id', user.id).maybeSingle();
       if (!cr?.id) { setRidesLoading(false); return; }
@@ -210,6 +204,38 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         .limit(20);
       setRides(data || []);
       setRidesLoading(false);
+
+      // All-time count for the greeting's traffic stat (the list above is
+      // capped at 20, so it isn't a reliable "total orders" number).
+      const { count } = await supabase
+        .from('mbg_rides')
+        .select('id', { count: 'exact', head: true })
+        .eq('customer_id', cr.id);
+      setTotalOrderCount(count ?? 0);
+
+      // Live updates — a new order, or any status change on an existing
+      // one, refreshes the list and the greeting's traffic/peak-time/
+      // top-location stats without the customer having to reload.
+      if (!channel) {
+        // supabase.channel() reuses an existing channel object if one with
+        // this topic is already registered on the client — if a previous
+        // run of this effect left one behind (e.g. cleanup racing the async
+        // load() above), that stale channel is already subscribed and
+        // calling .on() on it throws. Clear it out first so we always get
+        // a fresh, not-yet-subscribed channel to attach the listener to.
+        const topic = `realtime:mbg_customer_rides_${cr.id}`;
+        const stale = supabase.getChannels().find(c => c.topic === topic);
+        if (stale) supabase.removeChannel(stale);
+
+        channel = supabase
+          .channel(`mbg_customer_rides_${cr.id}`)
+          .on(
+            'postgres_changes',
+            { event: '*', schema: 'public', table: 'mbg_rides', filter: `customer_id=eq.${cr.id}` },
+            () => load()
+          )
+          .subscribe();
+      }
 
       const rideIds = (data || []).map(r => r.id);
       if (rideIds.length > 0) {
@@ -247,6 +273,27 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
       setActiveRideContacts(contacts);
     };
     load();
+    return () => { if (channel) supabase.removeChannel(channel); };
+  }, [user?.id]);
+
+  // Live "where are riders plentiful" + "which shop is best stocked" hints
+  // for the greeting slider — polled rather than subscribed, since both
+  // source tables churn far more often (every rider going on/offline, every
+  // sale anywhere) than these two aggregates need to move.
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    const load = () => {
+      supabase.rpc('mbg_get_busiest_rider_stage').then(({ data }) => {
+        if (!cancelled) setBusiestStage(data ?? null);
+      });
+      supabase.rpc('mbg_get_best_stocked_store').then(({ data }) => {
+        if (!cancelled) setBestStockedStore(data ?? null);
+      });
+    };
+    load();
+    const interval = setInterval(load, 45000);
+    return () => { cancelled = true; clearInterval(interval); };
   }, [user?.id]);
 
   useEffect(() => {
@@ -268,6 +315,49 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
     if (s === 'pending')   return 'bg-yellow-100 text-yellow-700';
     return 'bg-blue-100 text-blue-700';
   };
+
+  // Greeting insights — "traffic" (total orders), peak ordering hour, and
+  // top pickup location — derived from this customer's own recent rides.
+  // Recomputes live as `rides` updates via the realtime subscription above.
+  const orderInsights = useMemo(() => computeOrderInsights(rides), [rides]);
+
+  // Each stat gets its own slide in the greeting's carousel instead of all
+  // of them wrapping into one cramped, unreadable line — only real, live
+  // data ever appears here (a stat is simply omitted until it has one).
+  const insightSlides = useMemo<InsightSlide[]>(() => {
+    const slides: InsightSlide[] = [];
+    if (totalOrderCount !== null && totalOrderCount > 0) {
+      slides.push({
+        key: 'orders', emoji: '📦', tint: 'bg-orange-50 text-orange-700',
+        content: <><strong>{totalOrderCount}</strong> orders total</>,
+      });
+    }
+    if (orderInsights?.peakHourLabel) {
+      slides.push({
+        key: 'peak', emoji: '⏰', tint: 'bg-blue-50 text-blue-700',
+        content: <>You mostly order <strong>{orderInsights.peakHourLabel}</strong></>,
+      });
+    }
+    if (orderInsights?.topLocation) {
+      slides.push({
+        key: 'location', emoji: '📍', tint: 'bg-violet-50 text-violet-700',
+        content: <>Mostly from <strong>{shortenLocation(orderInsights.topLocation)}</strong></>,
+      });
+    }
+    if (busiestStage) {
+      slides.push({
+        key: 'riders', emoji: '🏍️', tint: 'bg-emerald-50 text-emerald-700',
+        content: <><strong>{busiestStage.available_riders}</strong> riders online near <strong>{busiestStage.stage_name}</strong> — fastest pickup</>,
+      });
+    }
+    if (bestStockedStore) {
+      slides.push({
+        key: 'stock', emoji: '🏬', tint: 'bg-pink-50 text-pink-700',
+        content: <><strong>{bestStockedStore.store_name}</strong> is well stocked right now</>,
+      });
+    }
+    return slides;
+  }, [totalOrderCount, orderInsights, busiestStage, bestStockedStore]);
 
   const switchTab = (id: TabType) => { setActiveTab(id); setMobileMenu(false); };
 
@@ -327,16 +417,36 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
           </div>
         </div>
 
-        {/* Mobile active-tab indicator bar — the one and only mobile menu trigger */}
-        <div className="sm:hidden bg-white border-b border-orange-100 px-4 py-2 flex items-center justify-between relative" ref={menuRef}>
-          <span className="text-sm font-semibold text-slate-700">
-            {ALL_TABS.find(t => t.id === activeTab)?.emoji}{' '}
-            {ALL_TABS.find(t => t.id === activeTab)?.label}
-          </span>
-          <button onClick={() => setMobileMenu(o => !o)}
-            className="text-xs text-orange-500 font-medium flex items-center gap-1">
-            {mobileMenuOpen ? <X size={14} /> : <MoreVertical size={14} />} Menu
-          </button>
+        {/* Mobile active-tab indicator bar — the one and only mobile menu trigger.
+            When embedded, UnifiedDashboard already shows the real profile
+            avatar above this header, so this row uses a plain chevron
+            instead of a second avatar-look button that would read as a
+            duplicate account icon (see screenshot feedback). Standalone
+            (not embedded — no other icon on the page), the trigger doubles
+            as the profile icon itself. */}
+        <div className="sm:hidden bg-white border-b border-orange-100 relative" ref={menuRef}>
+          {embedded ? (
+            <button type="button" onClick={() => setMobileMenu(o => !o)}
+              className="w-full px-4 py-2 flex items-center justify-between">
+              <span className="text-sm font-semibold text-slate-700">
+                {ALL_TABS.find(t => t.id === activeTab)?.emoji}{' '}
+                {ALL_TABS.find(t => t.id === activeTab)?.label}
+              </span>
+              <ChevronDown size={16} className={`text-orange-500 transition-transform flex-shrink-0 ${mobileMenuOpen ? 'rotate-180' : ''}`} />
+            </button>
+          ) : (
+            <div className="px-4 py-2 flex items-center justify-between">
+              <span className="text-sm font-semibold text-slate-700">
+                {ALL_TABS.find(t => t.id === activeTab)?.emoji}{' '}
+                {ALL_TABS.find(t => t.id === activeTab)?.label}
+              </span>
+              <button onClick={() => setMobileMenu(o => !o)}
+                aria-label="Open menu"
+                className="relative flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-yellow-500 text-white text-xs font-bold shadow-sm flex-shrink-0">
+                {mobileMenuOpen ? <X size={14} /> : (user?.email?.[0] || 'U').toUpperCase()}
+              </button>
+            </div>
+          )}
 
           {mobileMenuOpen && (
             <div className="absolute right-4 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
@@ -364,12 +474,40 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         {/* Overview */}
         {activeTab === 'overview' && (
           <div className="space-y-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Greeting — live traffic/peak-time/location insights update as
+                rides come in (realtime) and every 45s for the rider/stock
+                hotspots, cycling through an animated slider one at a time */}
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-lg font-bold text-slate-800">Hi, {customerName} 👋</h2>
+                {insightSlides.length > 0 && (
+                  <span className="flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" /> Live
+                  </span>
+                )}
+              </div>
+              <p className="text-sm text-slate-500">Here's what's happening with your account today.</p>
+              {insightSlides.length > 0 && (
+                <div className="mt-2 max-w-sm">
+                  <InsightSlider slides={insightSlides} />
+                </div>
+              )}
+            </div>
+
+            {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
+            <div className="grid grid-cols-2 gap-3">
               <IcanCoinCard userId={user?.id} onGoToWallet={goToWallet} />
+              <RewardsPointsCard userId={user?.id} onOpen={() => setActiveTab('rewards')} />
+            </div>
+
+            {/* Quick actions */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
               {[
-                { label: 'Book a Ride', desc: 'Boda ride or a delivery', emoji: '🏍️', tab: 'book-ride' as TabType },
+                { label: 'Book a Ride', desc: 'Boda, car, van or truck', emoji: '🏍️', tab: 'book-ride' as TabType },
+                { label: 'Delivery',    desc: 'From a store or a normal pickup', emoji: '📦', tab: 'delivery' as TabType },
                 { label: 'Scan & Checkout',  desc: 'POS · Pay with ICAN',     emoji: '🛒', tab: 'shop' as TabType },
                 { label: 'My Orders',       desc: 'Track rides & deliveries', emoji: '📋', tab: 'orders' as TabType },
+                { label: 'Rewards',       desc: 'Earn & redeem points', emoji: '🎁', tab: 'rewards' as TabType },
               ].map(c => (
                 <button key={c.tab} onClick={() => setActiveTab(c.tab)}
                   className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 text-left hover:shadow-md hover:border-orange-200 transition-all">
@@ -380,57 +518,42 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
               ))}
             </div>
 
-            {/* Recent rides */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-              <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <History size={16} className="text-orange-500" /> Recent Rides
-              </h3>
-              {ridesLoading ? (
-                <p className="text-slate-400 text-sm">Loading…</p>
-              ) : rides.length === 0 ? (
-                <p className="text-slate-400 text-sm text-center py-6">No rides yet — book your first one!</p>
-              ) : (
-                <div className="space-y-2">
-                  {rides.slice(0, 5).map(r => (
-                    <div
-                      key={r.id}
-                      onClick={() => setTrackedRide(r)}
-                      className="py-2 border-b border-slate-50 last:border-0 cursor-pointer hover:bg-slate-50 rounded-lg px-2 -mx-2 transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-slate-700">{r.pickup_location} → {r.dropoff_location}</p>
-                          <p className="text-xs text-slate-400">{new Date(r.created_at).toLocaleDateString()}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-sm font-bold text-slate-800">UGX {(r.fare || 0).toLocaleString()}</p>
-                          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                            activeRideContacts[r.id] ? 'bg-emerald-100 text-emerald-700 animate-pulse' : statusColor(r.status)
-                          }`}>
-                            {activeRideContacts[r.id] ? '🟢 Active' : r.status}
-                          </span>
-                          {escortStatusByRideId[r.id] && (
-                            <span className="block mt-1 text-xs px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700">
-                              🛡️ Escort: {escortStatusByRideId[r.id]}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {activeRideContacts[r.id] && (
-                        <div onClick={(e) => e.stopPropagation()}>
-                          <RideCommsBar
-                            rideId={r.id}
-                            selfUserId={user.id}
-                            selfName={customerName}
-                            peerUserId={activeRideContacts[r.id].userId}
-                            peerName={activeRideContacts[r.id].name}
-                            peerPhone={activeRideContacts[r.id].phone}
-                            className="mt-2"
-                          />
-                        </div>
-                      )}
+            {/* Recent rides — collapsed by default, tap the header to reveal */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setRecentRidesOpen(o => !o)}
+                className="w-full flex items-center justify-between p-5"
+              >
+                <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                  <History size={16} className="text-orange-500" /> Recent Rides
+                </h3>
+                <ChevronDown size={18} className={`text-slate-400 transition-transform ${recentRidesOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {recentRidesOpen && (
+                <div className="px-5 pb-5">
+                  {ridesLoading ? (
+                    <p className="text-slate-400 text-sm">Loading…</p>
+                  ) : rides.length === 0 ? (
+                    <p className="text-slate-400 text-sm text-center py-6">No rides yet — book your first one!</p>
+                  ) : (
+                    <div>
+                      {rides.slice(0, 5).map(r => (
+                        <RideListItem
+                          key={r.id}
+                          ride={r}
+                          expanded={expandedRideId === r.id}
+                          onToggle={() => setExpandedRideId(id => id === r.id ? null : r.id)}
+                          selfUserId={user.id}
+                          selfName={customerName}
+                          contact={activeRideContacts[r.id]}
+                          escortStatus={escortStatusByRideId[r.id]}
+                          onOpenTracking={() => setTrackedRide(r)}
+                          statusColor={statusColor}
+                        />
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
               )}
             </div>
@@ -503,49 +626,21 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                 </button>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div>
                 {rides.map(r => (
-                  <div
+                  <RideListItem
                     key={r.id}
-                    onClick={() => setTrackedRide(r)}
-                    className="p-3 bg-slate-50 rounded-xl cursor-pointer hover:bg-slate-100 transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-medium text-slate-800 text-sm flex items-center gap-1.5">
-                          {r.service_type === 'delivery' ? <Package size={14} className="text-blue-500" /> : <Bike size={14} className="text-orange-500" />}
-                          {r.pickup_location} → {r.dropoff_location}
-                        </p>
-                        <p className="text-xs text-slate-400 mt-0.5">{new Date(r.created_at).toLocaleString()}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-slate-800 text-sm">UGX {(r.fare || 0).toLocaleString()}</p>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                          activeRideContacts[r.id] ? 'bg-emerald-100 text-emerald-700 animate-pulse' : statusColor(r.status)
-                        }`}>
-                          {activeRideContacts[r.id] ? '🟢 Active' : r.status}
-                        </span>
-                        {escortStatusByRideId[r.id] && (
-                          <span className="block mt-1 text-xs px-2 py-0.5 rounded-full font-medium bg-violet-100 text-violet-700">
-                            🛡️ Escort: {escortStatusByRideId[r.id]}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {activeRideContacts[r.id] && (
-                      <div onClick={(e) => e.stopPropagation()}>
-                        <RideCommsBar
-                          rideId={r.id}
-                          selfUserId={user.id}
-                          selfName={customerName}
-                          peerUserId={activeRideContacts[r.id].userId}
-                          peerName={activeRideContacts[r.id].name}
-                          peerPhone={activeRideContacts[r.id].phone}
-                          className="mt-2"
-                        />
-                      </div>
-                    )}
-                  </div>
+                    ride={r}
+                    expanded={expandedRideId === r.id}
+                    onToggle={() => setExpandedRideId(id => id === r.id ? null : r.id)}
+                    selfUserId={user.id}
+                    selfName={customerName}
+                    contact={activeRideContacts[r.id]}
+                    escortStatus={escortStatusByRideId[r.id]}
+                    onOpenTracking={() => setTrackedRide(r)}
+                    statusColor={statusColor}
+                    serviceIcon={r.service_type === 'delivery' ? <Package size={14} className="text-blue-500" /> : <Bike size={14} className="text-orange-500" />}
+                  />
                 ))}
               </div>
             )}
@@ -558,7 +653,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         {activeTab === 'areas' && <CustomerAreaManager customerId={user?.id} />}
 
         {/* Rewards */}
-        {activeTab === 'rewards' && <RewardsTab user={user} onGoToWallet={goToWallet} />}
+        {activeTab === 'rewards' && <RewardsHub user={user} role="customer" onGoToWallet={goToWallet} />}
 
         {/* Profile */}
         {activeTab === 'profile' && (

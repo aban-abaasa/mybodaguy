@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, TrendingUp, User, X, Check, Search, Calendar, CreditCard, Menu, BarChart3, Settings } from 'lucide-react';
+import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings } from 'lucide-react';
 import { chairpersonService, SubordinateChairperson, CommitteeMember } from '../services/chairpersonService';
 import { riderService, Rider } from '../services/riderService';
 import { supabase } from '../services/supabaseClient';
@@ -269,24 +269,26 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
         </div>
       </div>
 
-      {/* Mobile: Current Tab Indicator with Dropdown */}
+      {/* Mobile: Current Tab Indicator with Dropdown — this dashboard is
+          always rendered inside UnifiedDashboard, which already shows the
+          real profile avatar above this header (the "Profile Avatar Menu"
+          at the top of the no-committee fallback screen is the exception,
+          untouched here), so this trigger is a plain chevron rather than a
+          second avatar-look button. */}
       <div className="md:hidden bg-white border-b border-slate-200 sticky top-12 xs:top-14 z-40">
-        <div className="container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setShowMobileMenu(!showMobileMenu)}
+          className="w-full container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between"
+        >
           <div className="flex items-center gap-2">
             {activeTab === 'overview' && <><TrendingUp size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Overview</span></>}
             {activeTab === 'subordinates' && <><Users size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Chairpersons</span></>}
             {activeTab === 'riders' && <><Bike size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Riders</span></>}
             {activeTab === 'commission' && <><DollarSign size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Commission</span></>}
           </div>
-          
-          {/* Mobile Menu Button */}
-          <button
-            onClick={() => setShowMobileMenu(!showMobileMenu)}
-            className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
-          >
-            {showMobileMenu ? <X size={16} /> : <Menu size={16} />}
-          </button>
-        </div>
+          <ChevronDown size={16} className={`text-orange-500 transition-transform flex-shrink-0 ${showMobileMenu ? 'rotate-180' : ''}`} />
+        </button>
 
         {/* Mobile Dropdown Menu */}
         {showMobileMenu && (

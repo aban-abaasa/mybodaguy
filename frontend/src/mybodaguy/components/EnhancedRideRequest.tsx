@@ -12,6 +12,7 @@ import LiveTrackingMap from './LiveTrackingMap';
 import JourneyBookingFlow from './JourneyBookingFlow';
 import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type CountryLookup } from '../services/geocodeService';
 import { verifyPin } from '../services/pinService';
+import { productService, type Product } from '../services/productService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
@@ -86,6 +87,18 @@ const BUSINESS_TYPE_FILTERS: { value: BusinessTypeFilter; label: string; emoji: 
 
 const typeEmoji = (t: string) => BUSINESS_TYPE_FILTERS.find(f => f.value === t)?.emoji || '🏪';
 
+// Straight-line distance in km — plenty accurate for "which of these stores
+// is closest" ranking; no backend geo/PostGIS support exists for this yet
+// (see productService.ts), so this is computed client-side against whatever
+// stores already have real latitude/longitude on file.
+function haversineKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
+  const R = 6371;
+  const dLat = (b.lat - a.lat) * Math.PI / 180;
+  const dLng = (b.lng - a.lng) * Math.PI / 180;
+  const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+}
+
 interface EnhancedRideRequestProps {
   customerId: string;
   /** Locks the flow to 'ride' or 'delivery' and hides the toggle — used to
@@ -98,6 +111,16 @@ interface EnhancedRideRequestProps {
    * separate top-level tab. Only passed from the "Book a Ride" tab —
    * Delivery doesn't offer it. */
   showJourneyOption?: boolean;
+}
+
+// Wallet payments carry the same convenience surcharge the backend applies
+// when it actually debits the wallet (commission.wallet_customer_surcharge_percentage,
+// mbg_respond_to_ride / mbg_complete_ride) — folded into the one number shown
+// here so the customer always sees a single all-in payable amount, matching
+// what leaves their wallet, with no separate fee breakdown on screen.
+const WALLET_SURCHARGE_PCT = 7;
+function payableFare(fare: number, paymentMethod: 'wallet' | 'cash' | 'company'): number {
+  return paymentMethod === 'wallet' ? Math.round(fare * (1 + WALLET_SURCHARGE_PCT / 100)) : fare;
 }
 
 export default function EnhancedRideRequest({ customerId, fixedServiceType, showJourneyOption }: EnhancedRideRequestProps) {
@@ -125,6 +148,24 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [supermarkets, setSupermarkets] = useState<Supermarket[]>([]);
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
   const [storeTypeFilter, setStoreTypeFilter] = useState<BusinessTypeFilter>('all');
+  // Lets the customer search the store list by name/area instead of only
+  // scrolling it, and — paired with customerGpsLocation below — ranks
+  // stores by real distance so "nearest available" is an actual answer,
+  // not just whichever store happens to sort first alphabetically.
+  const [storeSearchQuery, setStoreSearchQuery] = useState('');
+  const [customerGpsLocation, setCustomerGpsLocation] = useState<{ lat: number; lng: number } | null>(null);
+  // Normal delivery's own "smart" nearby-products preview — a few real
+  // products (never mock data, straight from productService against the
+  // same public.products/inventory tables ProductPicker uses) pulled from
+  // each of the closest few stores, shown before the customer has picked
+  // anything. Keyed by supermarket id so each store's preview only loads
+  // once. Tapping a product jumps into 'supermarket' mode locked to that
+  // one store (see jumpToStoreProduct below) — an order can only ever be
+  // scoped to a single supermarket_id (mbg_request_ride, delivery_mode
+  // CHECK constraint), so this is a fast on-ramp into a real single-store
+  // order, not a cross-store cart.
+  const [nearbyStoreProducts, setNearbyStoreProducts] = useState<Record<string, Product[]>>({});
+  const [loadingNearbyProducts, setLoadingNearbyProducts] = useState(false);
   const [deliveryCart, setDeliveryCart] = useState<CartLine[]>([]);
   // How long the customer is willing to wait for a store order before the
   // rider is warned and, after a grace period, the customer can pull a
@@ -145,6 +186,15 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // (previously the goods leg was hardcoded "business", the fare leg always
   // fell back to "personal", regardless of what the order actually was).
   const [deliveryExpenseType, setDeliveryExpenseType] = useState<'personal_expense' | 'business_expense'>('personal_expense');
+  // Every real business this customer belongs to (owner, active team member,
+  // or co-owner — mbg_my_business_memberships(), same three-table lookup
+  // PayMoneyModal.jsx already does for its own "Choose the business for
+  // this report" picker), so a customer who's in more than one company can
+  // actually say which one a "Business" delivery is filed under instead of
+  // it just meaning business-in-general.
+  const [myBusinesses, setMyBusinesses] = useState<{ id: string; business_name: string }[]>([]);
+  const [loadingMyBusinesses, setLoadingMyBusinesses] = useState(false);
+  const [selectedBusinessId, setSelectedBusinessId] = useState('');
   const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<VehicleTypeFilter>('any');
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
@@ -181,6 +231,27 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       setPaymentMethod('company');
     });
   }, [customerId]);
+
+  // Loaded lazily — only once the customer actually taps "Business" — same
+  // as PayMoneyModal's own guard, so a purely-personal customer never pays
+  // for this lookup. Auto-picks the one business when there's only one;
+  // more than one leaves it for the customer to choose (see the picker
+  // rendered below the Personal/Business toggle).
+  useEffect(() => {
+    if (!customerId || serviceType !== 'delivery' || deliveryExpenseType !== 'business_expense' || myBusinesses.length > 0 || loadingMyBusinesses) return;
+    setLoadingMyBusinesses(true);
+    supabase.rpc('mbg_my_business_memberships').then(({ data, error }) => {
+      if (error) {
+        console.warn('[EnhancedRideRequest] Could not load business memberships:', error.message);
+        setLoadingMyBusinesses(false);
+        return;
+      }
+      const businesses = data || [];
+      setMyBusinesses(businesses);
+      setSelectedBusinessId(prev => prev || (businesses.length === 1 ? businesses[0].id : ''));
+      setLoadingMyBusinesses(false);
+    });
+  }, [customerId, serviceType, deliveryExpenseType, myBusinesses.length, loadingMyBusinesses]);
 
   // Clear any selected products once the customer leaves the supermarket
   // delivery flow or switches stores, so a stale cart never gets submitted.
@@ -311,7 +382,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       p_country: null,
       p_vehicle_type: vehicleTypeFilter === 'any' ? null : vehicleTypeFilter,
     }).then(({ data, error }) => {
-      if (!error) setRideCompanies(data || []);
+      if (error) {
+        console.error('mbg_list_ride_companies failed:', error);
+        return;
+      }
+      setRideCompanies(data || []);
     });
   }, [customerId, vehicleTypeFilter]);
 
@@ -364,6 +439,20 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       });
   }, []);
 
+  // Customer's own live position — fetched once, best-effort, the moment
+  // they're in the delivery flow, so the store list can be ranked "nearest
+  // first" instead of the customer having to already know which store is
+  // close. Silent on denial/failure: it's an enhancement, not a
+  // requirement — the store list just stays in its existing name order.
+  useEffect(() => {
+    if (serviceType !== 'delivery' || customerGpsLocation || !navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setCustomerGpsLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => {},
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+    );
+  }, [serviceType, customerGpsLocation]);
+
   // Bounds for the delivery-window picker — public settings, safe to read
   // directly (mbg_platform_settings RLS allows SELECT where is_public=true).
   // Falls back to the defaults above if the row isn't there yet.
@@ -381,11 +470,113 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       });
   }, []);
 
-  // Store list filtered by the chosen business type — reset the current
-  // selection if it no longer belongs to the active filter.
-  const filteredStores = storeTypeFilter === 'all'
+  // Store list filtered by the chosen business type, then ranked nearest
+  // first (once the customer's GPS position is known) so "recommend the
+  // nearest available store" is an actual sort, not just a label. Stores
+  // with no coordinates on file yet (see SupermarketProductManager.tsx's
+  // location editor) sort to the end rather than being hidden — still
+  // choosable, just not rankable.
+  const filteredStores = (storeTypeFilter === 'all'
     ? supermarkets
-    : supermarkets.filter(sm => sm.business_type === storeTypeFilter);
+    : supermarkets.filter(sm => sm.business_type === storeTypeFilter)
+  )
+    .map(sm => ({
+      ...sm,
+      distanceKm: (customerGpsLocation && sm.latitude != null && sm.longitude != null)
+        ? haversineKm(customerGpsLocation, { lat: sm.latitude, lng: sm.longitude })
+        : null,
+    }))
+    .sort((a, b) => {
+      if (a.distanceKm == null && b.distanceKm == null) return 0;
+      if (a.distanceKm == null) return 1;
+      if (b.distanceKm == null) return -1;
+      return a.distanceKm - b.distanceKm;
+    });
+
+  const nearestStoreId = filteredStores.find(sm => sm.distanceKm != null)?.id ?? null;
+
+  // For "normal" (non-store) delivery, ranked across every registered store
+  // regardless of type since that flow never shows the type pills. Same
+  // "sort nulls last, never filter them out" rule as filteredStores above —
+  // a store with no coordinates on file yet (the common case right now:
+  // nothing has used SupermarketProductManager's location editor yet) still
+  // shows up here with its real products, just not distance-ranked, instead
+  // of the whole preview going empty because nothing happens to have geodata.
+  const nearestAnyStores = supermarkets
+    .map(sm => ({
+      ...sm,
+      distanceKm: (customerGpsLocation && sm.latitude != null && sm.longitude != null)
+        ? haversineKm(customerGpsLocation, { lat: sm.latitude, lng: sm.longitude })
+        : null,
+    }))
+    .sort((a, b) => {
+      if (a.distanceKm == null && b.distanceKm == null) return 0;
+      if (a.distanceKm == null) return 1;
+      if (b.distanceKm == null) return -1;
+      return a.distanceKm - b.distanceKm;
+    });
+
+  // Only ever offered as a suggestion the customer can tap to accept, and
+  // only once there's a real measured distance to name — never claims a
+  // store is "nearest" without actually knowing that. A normal delivery is
+  // just as often "pick this up from my house" as "pick this up from a
+  // shop", so it must also never silently overwrite a pickup the customer
+  // is typing themselves (see the pickup-field render below).
+  const nearestAnyStore = nearestAnyStores.find(sm => sm.distanceKm != null) ?? null;
+
+  // "Be smart" for Normal Delivery: auto-load a real product preview, no
+  // button, no store picked yet. Real data only (productService against
+  // public.products/inventory, same as ProductPicker), capped to a handful
+  // per store since this is a preview, not the full catalog. Fetches a
+  // wider pool of 8 candidate stores (not just the 3 shown) because most
+  // stores don't have coordinates set yet (see SupermarketProductManager's
+  // location editor) — without real distances to rank by, "nearest 3" falls
+  // back to alphabetical, and the literal first 3 alphabetically might
+  // happen to be the ones with no products listed. Casting a wider net and
+  // showing the first 3 that actually have real products (see
+  // storesWithProducts in the render below) means an existing store's real
+  // catalog reliably shows up instead of an empty "no products" preview.
+  const previewCandidateIds = nearestAnyStores.slice(0, 8).map(sm => sm.id).join(',');
+  useEffect(() => {
+    if (serviceType !== 'delivery' || deliveryMode !== 'normal') return;
+    const targets = nearestAnyStores.slice(0, 8).filter(sm => !(sm.id in nearbyStoreProducts));
+    if (targets.length === 0) return;
+    let cancelled = false;
+    setLoadingNearbyProducts(true);
+    Promise.all(targets.map(sm =>
+      productService.getActiveProducts(sm.id)
+        .then(products => [sm.id, products.slice(0, 6)] as const)
+        .catch(() => [sm.id, []] as const)
+    )).then(results => {
+      if (cancelled) return;
+      setNearbyStoreProducts(prev => {
+        const next = { ...prev };
+        results.forEach(([id, products]) => { next[id] = products; });
+        return next;
+      });
+    }).finally(() => { if (!cancelled) setLoadingNearbyProducts(false); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceType, deliveryMode, previewCandidateIds]);
+
+  // Jumping straight into a real single-store order from the nearby-products
+  // preview — an order can only ever belong to one supermarket_id, so
+  // picking a product here commits to that store the same way manually
+  // searching and selecting it in "From a Store" mode would.
+  const jumpToStoreProduct = (supermarketId: string) => {
+    setDeliveryMode('supermarket');
+    setStoreTypeFilter('all');
+    setSelectedSupermarketId(supermarketId);
+  };
+
+  // Always searchable — a text filter on top of the type pills, matched
+  // against name/area so the customer never has to scroll a long list.
+  const visibleStores = storeSearchQuery.trim()
+    ? filteredStores.filter(sm => {
+        const q = storeSearchQuery.trim().toLowerCase();
+        return sm.name.toLowerCase().includes(q) || (sm.location || '').toLowerCase().includes(q);
+      })
+    : filteredStores;
 
   useEffect(() => {
     if (!selectedSupermarketId) return;
@@ -394,6 +585,18 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeTypeFilter]);
+
+  // "Be smart" default: as soon as a store type is being browsed and none
+  // is chosen yet, auto-pick the nearest available one (falling back to the
+  // first in the list if GPS/coordinates aren't available) instead of
+  // leaving the customer staring at an empty picker — they can still
+  // search/switch to a different store afterwards.
+  useEffect(() => {
+    if (serviceType !== 'delivery' || deliveryMode !== 'supermarket') return;
+    if (selectedSupermarketId) return;
+    const fallback = nearestStoreId ?? filteredStores[0]?.id ?? null;
+    if (fallback) setSelectedSupermarketId(fallback);
+  }, [serviceType, deliveryMode, selectedSupermarketId, nearestStoreId, filteredStores]);
 
   useEffect(() => {
     if (!customerId) return;
@@ -774,6 +977,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       toast.error(`Choose a delivery window between ${deliveryWindowBounds.min} and ${deliveryWindowBounds.max} hours`);
       return;
     }
+    if (serviceType === 'delivery' && deliveryExpenseType === 'business_expense' && myBusinesses.length > 1 && !selectedBusinessId) {
+      toast.error('Choose which business this delivery is for');
+      return;
+    }
 
     // Paying a store for real goods (not just the ride fare) with the
     // ICANera wallet — require the transaction PIN here, before the order
@@ -850,6 +1057,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               p_cart: cartPayload,
               p_max_delivery_hours: deliveryMode === 'supermarket' ? maxDeliveryHours : null,
               p_expense_classification: serviceType === 'delivery' ? deliveryExpenseType : null,
+              p_customer_business_profile_id: serviceType === 'delivery' && deliveryExpenseType === 'business_expense'
+                ? (selectedBusinessId || null)
+                : null,
             });
 
       if (error) throw error;
@@ -1158,6 +1368,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         pickup={selectedPickup!}
         dropoff={selectedDropoff!}
         onStartNew={handleStartNewRide}
+        paymentMethod={paymentMethod}
       />
     );
   }
@@ -1243,7 +1454,12 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             {/* Personal vs Business — applies to the WHOLE order (goods +
                 fare for a store delivery, just the fare for a normal one),
                 so it shows up as one consistent side of the ICANera Wallet
-                Personal/Business split instead of being silently divided. */}
+                Personal/Business split instead of being silently divided.
+                A customer who belongs to more than one real business (owner
+                of one, team member of another, co-owner of a third — see
+                mbg_my_business_memberships) gets to say which one this
+                delivery is filed under, same as the ICAN Wallet's own
+                PayMoneyModal already lets them do for a direct payment. */}
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">This delivery is for</label>
               <div className="grid grid-cols-2 gap-2">
@@ -1257,14 +1473,112 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                 </button>
                 <button
                   onClick={() => setDeliveryExpenseType('business_expense')}
-                  className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                  className={`py-2 px-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all truncate ${
                     deliveryExpenseType === 'business_expense' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
                   }`}
+                  title={myBusinesses.length === 1 ? myBusinesses[0].business_name : undefined}
                 >
-                  🏢 Business
+                  🏢 {myBusinesses.length === 1 ? myBusinesses[0].business_name : 'Business'}
                 </button>
               </div>
+
+              {deliveryExpenseType === 'business_expense' && (
+                loadingMyBusinesses ? (
+                  <p className="text-[11px] text-slate-400 mt-1">Loading your businesses…</p>
+                ) : myBusinesses.length > 1 ? (
+                  <div className="mt-1.5">
+                    <p className="text-[11px] text-slate-500 mb-1">Which business is this for?</p>
+                    <select
+                      value={selectedBusinessId}
+                      onChange={(e) => setSelectedBusinessId(e.target.value)}
+                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-400 outline-none"
+                    >
+                      <option value="">Select a business…</option>
+                      {myBusinesses.map(b => (
+                        <option key={b.id} value={b.id}>{b.business_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : myBusinesses.length === 0 ? (
+                  <p className="text-[11px] text-amber-600 mt-1">
+                    No business profile found on your account — this will still be recorded as a business expense.
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-purple-600 mt-1">
+                    Filed as a business expense under {myBusinesses[0].business_name}.
+                  </p>
+                )
+              )}
             </div>
+
+            {/* Normal Delivery's own smart on-ramp: real products auto-loaded
+                from the closest few stores, no store picked yet. Purely a
+                shortcut — tapping anything here commits to that one store
+                via jumpToStoreProduct, same as manually choosing it in
+                "From a Store" would. */}
+            {deliveryMode === 'normal' && (() => {
+              const previewCandidates = nearestAnyStores.slice(0, 8);
+              const storesWithProducts = previewCandidates.filter(sm => (nearbyStoreProducts[sm.id]?.length ?? 0) > 0).slice(0, 3);
+              const stillLoading = loadingNearbyProducts && storesWithProducts.length === 0 && previewCandidates.some(sm => !(sm.id in nearbyStoreProducts));
+              return (
+                <div>
+                  <p className="text-xs font-medium text-slate-500 mb-1.5">🛒 Or shop from a nearby store</p>
+                  {!customerGpsLocation && (
+                    <p className="text-[11px] text-slate-400 mb-1.5">📍 Turn on location to see which store is actually nearest.</p>
+                  )}
+                  {supermarkets.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">No stores registered yet.</p>
+                  ) : stillLoading && storesWithProducts.length === 0 ? (
+                    <p className="text-xs text-slate-400 py-3 text-center">Loading nearby stores…</p>
+                  ) : storesWithProducts.length === 0 ? (
+                    <p className="text-[11px] text-slate-400">Stores near you haven't listed products yet — describe what you need below instead.</p>
+                  ) : (
+                    <div className="space-y-3">
+                      {storesWithProducts.map(sm => {
+                        const products = nearbyStoreProducts[sm.id] || [];
+                        return (
+                          <div key={sm.id} className="border border-slate-200 rounded-lg p-2.5">
+                            <button type="button" onClick={() => jumpToStoreProduct(sm.id)} className="w-full flex items-center justify-between gap-2 mb-2 text-left">
+                              <span className="min-w-0 truncate text-xs font-semibold text-slate-700">
+                                {typeEmoji(sm.business_type)} {sm.name}
+                                {sm.distanceKm != null && (
+                                  <span className="ml-1.5 text-[10px] font-normal text-slate-400">
+                                    {sm.distanceKm < 1 ? `${Math.round(sm.distanceKm * 1000)}m away` : `${sm.distanceKm.toFixed(1)}km away`}
+                                  </span>
+                                )}
+                              </span>
+                              <span className="flex-shrink-0 text-[11px] text-blue-600 font-medium">Shop here →</span>
+                            </button>
+                            <div className="flex gap-2 overflow-x-auto pb-0.5">
+                              {products.map(p => (
+                                <button
+                                  key={p.id}
+                                  type="button"
+                                  onClick={() => jumpToStoreProduct(sm.id)}
+                                  className="flex-shrink-0 w-20 text-left"
+                                >
+                                  <div className="w-20 h-20 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
+                                    {p.image_url ? (
+                                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                      <Package size={18} className="text-slate-300" />
+                                    )}
+                                  </div>
+                                  <p className="text-[10px] text-slate-700 truncate mt-1">{p.name}</p>
+                                  <p className="text-[10px] text-orange-600 font-semibold">
+                                    UGX {Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100)).toLocaleString()}
+                                  </p>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {deliveryMode === 'supermarket' && (
               <>
@@ -1282,19 +1596,54 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                   ))}
                 </div>
 
-                <select
-                  value={selectedSupermarketId}
-                  onChange={(e) => setSelectedSupermarketId(e.target.value)}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                >
-                  <option value="">Select a store…</option>
-                  {filteredStores.map(sm => (
-                    <option key={sm.id} value={sm.id}>{typeEmoji(sm.business_type)} {sm.name} — {sm.location}</option>
-                  ))}
-                </select>
-                {filteredStores.length === 0 && (
-                  <p className="text-xs text-slate-400">No stores of this type yet.</p>
+                {/* Always searchable, and ranked nearest-first once the
+                    customer's GPS position resolves — see the
+                    customerGpsLocation effect and filteredStores sort
+                    above. */}
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={storeSearchQuery}
+                    onChange={(e) => setStoreSearchQuery(e.target.value)}
+                    placeholder="Search stores by name or area…"
+                    className="w-full pl-8 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                  />
+                </div>
+                {!customerGpsLocation && (
+                  <p className="text-[11px] text-slate-400 -mt-1">
+                    📍 Turn on location to see which store is nearest.
+                  </p>
                 )}
+
+                <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                  {visibleStores.map(sm => (
+                    <button
+                      key={sm.id}
+                      type="button"
+                      onClick={() => setSelectedSupermarketId(sm.id)}
+                      className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                        selectedSupermarketId === sm.id ? 'bg-orange-50 text-orange-700' : 'hover:bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <span className="min-w-0 truncate flex items-center gap-1.5">
+                        {typeEmoji(sm.business_type)} {sm.name} — {sm.location}
+                        {sm.id === nearestStoreId && (
+                          <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-semibold">Nearest</span>
+                        )}
+                      </span>
+                      {sm.distanceKm != null && (
+                        <span className="flex-shrink-0 text-xs text-slate-400">
+                          {sm.distanceKm < 1 ? `${Math.round(sm.distanceKm * 1000)}m` : `${sm.distanceKm.toFixed(1)}km`}
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                  {visibleStores.length === 0 && (
+                    <p className="px-3 py-3 text-xs text-slate-400 text-center">
+                      {storeSearchQuery ? 'No stores match your search.' : 'No stores of this type yet.'}
+                    </p>
+                  )}
+                </div>
 
                 {selectedSupermarketId && (
                   <ProductPicker supermarketId={selectedSupermarketId} onCartChange={setDeliveryCart} />
@@ -1557,8 +1906,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         </div>
 
         {/* Payment method — Wallet settles automatically the instant the
-            trip ends (fare + 7% convenience surcharge); Cash means paying
-            the rider directly in person, no surcharge. */}
+            trip ends, for the all-in amount shown as the fare; Cash means
+            paying the rider directly in person. */}
         <div className="mb-4">
           <p className="text-xs font-semibold text-slate-500 mb-2">Payment method</p>
           <div className={companyTransport.eligible ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-2 gap-2'}>
@@ -1590,7 +1939,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           {paymentMethod === 'company' ? (
             <p className="text-[11px] text-blue-600 mt-1">Paid by {companyTransport.business_name || 'your company'} from its business wallet ({companyTransport.billing_mode === 'monthly' ? 'monthly settlement' : 'per ride'}).</p>
           ) : paymentMethod === 'wallet' ? (
-            <p className="text-[11px] text-slate-400 mt-1">Charged automatically when the trip ends (fare + 7% convenience fee).</p>
+            <p className="text-[11px] text-slate-400 mt-1">Charged automatically when the trip ends.</p>
           ) : (
             <p className="text-[11px] text-slate-400 mt-1">Pay the rider directly in cash at the end of the trip.</p>
           )}
@@ -1653,6 +2002,35 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               <p className="text-xs text-amber-600 mt-1">
                 Couldn't automatically locate this store — please confirm the pickup point manually.
               </p>
+            )}
+
+            {/* Smart nearest-place suggestion for normal delivery — only
+                while the pickup is still empty, and only ever a tap-to-use
+                suggestion, never auto-applied (see nearestAnyStore above). */}
+            {serviceType === 'delivery' && deliveryMode === 'normal' && !selectedPickup && nearestAnyStore && (
+              <button
+                type="button"
+                onClick={() => {
+                  const loc: Location = {
+                    id: `supermarket_${nearestAnyStore.id}`,
+                    name: nearestAnyStore.name,
+                    area: nearestAnyStore.location,
+                    fullAddress: nearestAnyStore.address || `${nearestAnyStore.name}, ${nearestAnyStore.location}`,
+                    coordinates: { lat: nearestAnyStore.latitude as number, lng: nearestAnyStore.longitude as number },
+                  };
+                  setSelectedPickup(loc);
+                  setPickup(loc.fullAddress);
+                }}
+                className="mt-1.5 w-full flex items-center justify-between gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-left text-xs text-blue-700 hover:bg-blue-100 transition-colors"
+              >
+                <span className="truncate">
+                  📍 Nearest place: {typeEmoji(nearestAnyStore.business_type)} {nearestAnyStore.name}
+                  {' '}({(nearestAnyStore.distanceKm as number) < 1
+                    ? `${Math.round((nearestAnyStore.distanceKm as number) * 1000)}m`
+                    : `${(nearestAnyStore.distanceKm as number).toFixed(1)}km`})
+                </span>
+                <span className="flex-shrink-0 font-semibold">Use this</span>
+              </button>
             )}
 
             {/* Pickup Suggestions */}
@@ -1860,6 +2238,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                     rider={rider}
                     onRequest={handleRequestRide}
                     isSelected={selectedRider?.rider_id === rider.rider_id}
+                    paymentMethod={paymentMethod}
                   />
                 ))}
               </div>
@@ -1975,11 +2354,13 @@ function VipDemandInsight({ riders }: { riders: MatchedRider[] }) {
 function RiderCard({
   rider,
   onRequest,
-  isSelected
+  isSelected,
+  paymentMethod
 }: {
   rider: MatchedRider;
   onRequest: (rider: MatchedRider) => void;
   isSelected: boolean;
+  paymentMethod: 'wallet' | 'cash' | 'company';
 }) {
   const modeConfig = {
     normal: { color: 'slate', icon: DollarSign, label: 'Standard' },
@@ -2059,7 +2440,7 @@ function RiderCard({
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-baseline gap-2">
               <span className="text-xl sm:text-2xl font-bold text-slate-800">
-                UGX {rider.fare.toLocaleString()}
+                UGX {payableFare(rider.fare, paymentMethod).toLocaleString()}
               </span>
             </div>
 
@@ -2337,7 +2718,7 @@ function RiderOnTheWay({
           <div className="flex items-center justify-between">
             <span className="text-slate-600">Fare Amount</span>
             <span className="text-2xl font-bold text-slate-800">
-              UGX {rider.fare.toLocaleString()}
+              UGX {payableFare(rider.fare, paymentMethod).toLocaleString()}
             </span>
           </div>
           <PaymentMethodSwitcher paymentMethod={paymentMethod} onChange={onChangePaymentMethod} />
@@ -2487,7 +2868,7 @@ function JourneyStarted({
           <div className="flex items-center justify-between">
             <span className="text-slate-600 font-medium">Trip Fare</span>
             <span className="text-2xl sm:text-3xl font-bold text-green-600">
-              UGX {rider.fare.toLocaleString()}
+              UGX {payableFare(rider.fare, paymentMethod).toLocaleString()}
             </span>
           </div>
           <PaymentMethodSwitcher paymentMethod={paymentMethod} onChange={onChangePaymentMethod} />
@@ -2510,12 +2891,14 @@ function JourneyCompleted({
   rider,
   pickup,
   dropoff,
-  onStartNew
+  onStartNew,
+  paymentMethod
 }: {
   rider: MatchedRider;
   pickup: Location;
   dropoff: Location;
   onStartNew: () => void;
+  paymentMethod: 'wallet' | 'cash' | 'company';
 }) {
   const [rating, setRating] = React.useState(0);
   const [hoveredRating, setHoveredRating] = React.useState(0);
@@ -2565,7 +2948,7 @@ function JourneyCompleted({
           <div className="flex justify-between py-2 border-t-2 border-slate-200 pt-4">
             <span className="text-slate-700 font-medium text-lg">Total Fare</span>
             <span className="text-2xl sm:text-3xl font-bold text-green-600">
-              UGX {rider.fare.toLocaleString()}
+              UGX {payableFare(rider.fare, paymentMethod).toLocaleString()}
             </span>
           </div>
         </div>

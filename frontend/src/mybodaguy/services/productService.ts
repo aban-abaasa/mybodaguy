@@ -36,6 +36,9 @@ export interface SupermarketProfile {
   id: string;
   name: string;
   location: string | null;
+  address: string | null;
+  latitude: number | null;
+  longitude: number | null;
   background_image_url: string | null;
 }
 
@@ -226,16 +229,31 @@ export const productService = {
 
   // Storefront profile — background_image_url is the existing Supermartkera
   // branding column (digital-city-era's ADD_SUPERMARKET_BRANDING.sql), reused
-  // as-is rather than adding a MyBodaGuy-only duplicate.
+  // as-is rather than adding a MyBodaGuy-only duplicate. latitude/longitude
+  // are ADD_SUPERMARKET_GEOLOCATION.sql's columns — read here (and written
+  // by updateStoreLocation below) so the customer-side nearest-store search
+  // in EnhancedRideRequest.tsx has real coordinates to sort by instead of
+  // silently falling back to an unsorted list for every store.
   async getSupermarketProfile(supermarketId: string): Promise<SupermarketProfile | null> {
     const { data, error } = await supabase
       .from('supermarkets')
-      .select('id, name, location, background_image_url')
+      .select('id, name, location, address, latitude, longitude, background_image_url')
       .eq('id', supermarketId)
       .maybeSingle();
 
     if (error) return null;
     return data;
+  },
+
+  // Sets/updates the store's real pickup coordinates — the one thing that
+  // makes this store findable by the customer app's "nearest store" search
+  // and lets a delivery's pickup point auto-fill instead of needing a
+  // geocode round-trip against the store's address text every time.
+  async updateStoreLocation(supermarketId: string, location: { latitude: number; longitude: number; address?: string | null }): Promise<void> {
+    const updates: Record<string, any> = { latitude: location.latitude, longitude: location.longitude };
+    if (location.address !== undefined) updates.address = location.address;
+    const { error } = await supabase.from('supermarkets').update(updates).eq('id', supermarketId);
+    if (error) throw error;
   },
 
   // Optional — a supermarket doesn't need a background photo to sell products.

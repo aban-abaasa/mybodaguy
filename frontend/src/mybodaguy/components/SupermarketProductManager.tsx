@@ -6,9 +6,11 @@
  * same Supabase project (see productService.ts for details).
  */
 import { useState, useEffect, useRef } from 'react';
-import { Plus, Pencil, Trash2, X, Image as ImageIcon, Package, Camera } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, Image as ImageIcon, Package, Camera, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { productService, Product, ProductInput, SupermarketProfile } from '../services/productService';
+import LocationPickerMap from './LocationPickerMap';
+import type { Location } from '../data/mockLocations';
 
 interface SupermarketProductManagerProps {
   supermarketId: string;
@@ -58,6 +60,7 @@ export default function SupermarketProductManager({ supermarketId, supermarketNa
 
   return (
     <div className="space-y-4">
+      <StoreLocationEditor supermarketId={supermarketId} />
       <StoreBackgroundEditor supermarketId={supermarketId} />
 
       <div className="flex items-center justify-between">
@@ -315,6 +318,113 @@ function ProductEditModal({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Unlike the background photo below, this one isn't just cosmetic — without
+// real coordinates on file, the customer app's "nearest store" search
+// (EnhancedRideRequest.tsx) can't rank or even show this store by distance,
+// and a delivery's pickup point falls back to geocoding the store's address
+// text on every order instead of using an exact, reliable pin.
+function StoreLocationEditor({ supermarketId }: { supermarketId: string }) {
+  const [profile, setProfile] = useState<SupermarketProfile | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [pin, setPin] = useState<Location | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    productService.getSupermarketProfile(supermarketId).then(setProfile);
+  }, [supermarketId]);
+
+  const hasLocation = profile?.latitude != null && profile?.longitude != null;
+
+  const openEditor = () => {
+    setPin(hasLocation ? {
+      id: 'store_location',
+      name: profile!.name,
+      area: profile!.name,
+      fullAddress: profile!.address || profile!.location || '',
+      coordinates: { lat: profile!.latitude!, lng: profile!.longitude! },
+    } : null);
+    setEditing(true);
+  };
+
+  const save = async () => {
+    if (!pin) { toast.error('Search, use GPS, or tap the map to drop a pin first'); return; }
+    setSaving(true);
+    try {
+      await productService.updateStoreLocation(supermarketId, {
+        latitude: pin.coordinates.lat,
+        longitude: pin.coordinates.lng,
+        address: pin.fullAddress,
+      });
+      setProfile(p => p ? { ...p, latitude: pin.coordinates.lat, longitude: pin.coordinates.lng, address: pin.fullAddress } : p);
+      toast.success('Store location saved');
+      setEditing(false);
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to save location');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className={`rounded-xl border p-4 flex items-center justify-between gap-3 ${hasLocation ? 'border-slate-200 bg-white' : 'border-amber-300 bg-amber-50'}`}>
+      <div className="min-w-0">
+        <p className="text-sm font-medium text-slate-700 flex items-center gap-1.5">
+          <MapPin size={14} className={hasLocation ? 'text-green-600' : 'text-amber-600'} />
+          Store location
+        </p>
+        <p className="text-xs text-slate-500 truncate">
+          {hasLocation
+            ? (profile?.address || 'Set — findable in nearest-store search and delivery pickup auto-fills')
+            : "Not set — customers won't find this store in nearest-store search"}
+        </p>
+      </div>
+      <button
+        type="button"
+        onClick={openEditor}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 flex-shrink-0"
+      >
+        <MapPin size={14} />
+        {hasLocation ? 'Update' : 'Set location'}
+      </button>
+
+      {editing && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-bold text-slate-800">Set store location</h3>
+              <button onClick={() => setEditing(false)} className="text-slate-400 hover:text-slate-600"><X size={22} /></button>
+            </div>
+            <p className="text-xs text-slate-500 mb-3">
+              Search for it, use your current location, or tap the map — exactly where customers should get picked up from.
+            </p>
+            <LocationPickerMap
+              pickup={pin}
+              dropoff={null}
+              onPickupChange={setPin}
+              onDropoffChange={() => {}}
+              selectionMode="pickup"
+              gpsTarget="pickup"
+            />
+            {pin && <p className="text-xs text-slate-500 mt-2 truncate">📍 {pin.fullAddress}</p>}
+            <div className="flex gap-3 pt-4">
+              <button onClick={() => setEditing(false)} disabled={saving} className="flex-1 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 disabled:opacity-50">
+                Cancel
+              </button>
+              <button
+                onClick={save}
+                disabled={saving || !pin}
+                className="flex-1 py-2.5 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:opacity-90 disabled:opacity-50"
+              >
+                {saving ? 'Saving…' : 'Save Location'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
