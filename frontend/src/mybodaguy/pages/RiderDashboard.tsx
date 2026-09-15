@@ -746,22 +746,28 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
           </div>
         )}
 
-        {activeTab === 'requests' && (
-          riderStats?.operatorType === 'escort' ? (
-            <div className="space-y-4">
-              {/* Escorts with their own vehicle can be booked directly as
-                  the ride (mbg_request_security's self-transport path,
-                  which assigns them via mbg_rides like any other rider) —
-                  RiderEscortRequests alone only watches the add-on table
-                  (mbg_ride_escort_requests) and would miss those offers. */}
-              {riderStats.escortHasOwnTransport && (
-                <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} />
-              )}
-              <RiderEscortRequests riderId={user.id} />
-            </div>
-          ) : (
-            <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} />
-          )
+        {/* Ride/escort request feeds — always mounted regardless of
+            activeTab (rather than only once the rider taps into the
+            Requests tab) so polling, the realtime subscription, and the
+            full-screen ringing overlay for a brand-new request keep working
+            no matter which tab the rider is currently looking at. Each
+            component collapses its own visible list down to nothing (still
+            showing the ringing overlay if a request comes in) until
+            activeTab === 'requests'. */}
+        {riderStats?.operatorType === 'escort' ? (
+          <div className="space-y-4">
+            {/* Escorts with their own vehicle can be booked directly as
+                the ride (mbg_request_security's self-transport path,
+                which assigns them via mbg_rides like any other rider) —
+                RiderEscortRequests alone only watches the add-on table
+                (mbg_ride_escort_requests) and would miss those offers. */}
+            {riderStats.escortHasOwnTransport && (
+              <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} collapsed={activeTab !== 'requests'} />
+            )}
+            <RiderEscortRequests riderId={user.id} collapsed={activeTab !== 'requests'} />
+          </div>
+        ) : (
+          <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} collapsed={activeTab !== 'requests'} />
         )}
 
         {activeTab === 'mode' && (

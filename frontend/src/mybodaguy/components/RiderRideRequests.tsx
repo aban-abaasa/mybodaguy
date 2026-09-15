@@ -30,7 +30,7 @@ interface CustomerContact {
   phone: string | null;
 }
 
-export default function RiderRideRequests({ riderId, vehicleType }: { riderId: string; vehicleType: string | null }) {
+export default function RiderRideRequests({ riderId, vehicleType, collapsed = false }: { riderId: string; vehicleType: string | null; collapsed?: boolean }) {
   const [riderRowId, setRiderRowId] = useState<string | null>(null);
   const [pending, setPending] = useState<RideRow | null>(null);
   const [active, setActive] = useState<RideRow | null>(null);
@@ -249,6 +249,7 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
   };
 
   if (loading) {
+    if (collapsed) return null;
     return (
       <div className="bg-white rounded-xl shadow-lg p-10 text-center">
         <div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full mx-auto" />
@@ -257,6 +258,7 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
   }
 
   if (!riderRowId) {
+    if (collapsed) return null;
     return (
       <div className="bg-white rounded-xl shadow-lg p-10 text-center text-slate-500">
         Your rider profile isn't set up yet.
@@ -265,10 +267,14 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
   }
 
   return (
-    <div className="space-y-4">
+    <>
       {/* Full-screen ringing overlay — mirrors CallController's incoming-call
           screen so a new job is as hard to miss as an incoming call. Keeps
-          ringing (startJobRingLoop, 2s loop) until accepted/declined. */}
+          ringing (startJobRingLoop, 2s loop) until accepted/declined. Shown
+          even while `collapsed` (e.g. rider is on the Overview tab) — this
+          component is always mounted so a request rings the instant it
+          arrives instead of only after the rider taps into the Requests
+          tab. */}
       {pending && (
         <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center">
@@ -302,129 +308,133 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <h3 className="text-xl font-bold text-slate-800">Ride &amp; Delivery Requests</h3>
-        <button onClick={load} className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1">
-          <RefreshCw size={14} /> Refresh
-        </button>
-      </div>
-
-      {pending && (
-        <div className="border-2 border-orange-400 bg-orange-50 rounded-xl p-5 shadow-md animate-pulse-slow">
-          <div className="flex items-center justify-between mb-3">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-500 text-white text-xs font-bold rounded-full">
-              {pending.service_type === 'delivery' ? <Package size={12} /> : <Bike size={12} />}
-              New {pending.service_type === 'delivery' ? 'Delivery' : 'Ride'} Request
-            </span>
-            <span className="text-xs text-slate-500">{new Date(pending.created_at).toLocaleTimeString()}</span>
-          </div>
-
-          <RideSummary ride={pending} />
-
-          <div className="flex gap-3 mt-4">
-            <button
-              onClick={() => respond(true)}
-              disabled={acting}
-              className="flex-1 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <Check size={18} /> Accept
-            </button>
-            <button
-              onClick={() => respond(false)}
-              disabled={acting}
-              className="flex-1 py-3 bg-white border-2 border-red-300 text-red-600 font-bold rounded-lg hover:bg-red-50 disabled:opacity-50 flex items-center justify-center gap-2"
-            >
-              <X size={18} /> Decline
+      {!collapsed && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-bold text-slate-800">Ride &amp; Delivery Requests</h3>
+            <button onClick={load} className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1">
+              <RefreshCw size={14} /> Refresh
             </button>
           </div>
-        </div>
-      )}
 
-      {active && (
-        <div className="border-2 border-green-400 bg-green-50 rounded-xl p-5 shadow-md">
-          <div className="flex items-center justify-between mb-3">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-full capitalize">
-              {active.status === 'accepted' ? 'Accepted — head to pickup' : 'Trip in progress'}
-            </span>
-          </div>
+          {pending && (
+            <div className="border-2 border-orange-400 bg-orange-50 rounded-xl p-5 shadow-md animate-pulse-slow">
+              <div className="flex items-center justify-between mb-3">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-500 text-white text-xs font-bold rounded-full">
+                  {pending.service_type === 'delivery' ? <Package size={12} /> : <Bike size={12} />}
+                  New {pending.service_type === 'delivery' ? 'Delivery' : 'Ride'} Request
+                </span>
+                <span className="text-xs text-slate-500">{new Date(pending.created_at).toLocaleTimeString()}</span>
+              </div>
 
-          <RideSummary ride={active} />
+              <RideSummary ride={pending} />
 
-          {activeCustomer && (
-            <RideCommsBar
-              rideId={active.id}
-              selfUserId={riderId}
-              selfName={selfName}
-              peerUserId={activeCustomer.userId}
-              peerName={activeCustomer.name}
-              peerPhone={activeCustomer.phone}
-              className="mt-4"
-            />
-          )}
-
-          {active.service_type === 'delivery' && (
-            <button
-              onClick={viewReceipt}
-              className="w-full mt-3 py-2.5 bg-white border-2 border-orange-300 text-orange-600 font-semibold rounded-lg hover:bg-orange-50 flex items-center justify-center gap-2 text-sm"
-            >
-              <Receipt size={16} /> Receipts
-            </button>
-          )}
-
-          {active.status === 'accepted' ? (
-            <button
-              onClick={startTrip}
-              disabled={acting}
-              className="w-full mt-4 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50"
-            >
-              Mark Picked Up — Start Trip
-            </button>
-          ) : paymentPickerOpen ? (
-            <div className="mt-4 border-2 border-teal-400 bg-teal-50 rounded-lg p-4">
-              <p className="text-sm font-semibold text-teal-800 mb-3">How did the customer pay?</p>
-              <div className="flex gap-3">
+              <div className="flex gap-3 mt-4">
                 <button
-                  onClick={() => completeTrip('cash')}
-                  disabled={completingMethod !== null}
-                  className="flex-1 py-3 bg-white border-2 border-amber-400 text-amber-700 font-bold rounded-lg hover:bg-amber-50 disabled:opacity-50 flex flex-col items-center gap-1"
+                  onClick={() => respond(true)}
+                  disabled={acting}
+                  className="flex-1 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  <Banknote size={20} />
-                  {completingMethod === 'cash' ? 'Confirming…' : 'Cash'}
+                  <Check size={18} /> Accept
                 </button>
                 <button
-                  onClick={() => completeTrip('wallet')}
-                  disabled={completingMethod !== null}
-                  className="flex-1 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50 flex flex-col items-center gap-1"
+                  onClick={() => respond(false)}
+                  disabled={acting}
+                  className="flex-1 py-3 bg-white border-2 border-red-300 text-red-600 font-bold rounded-lg hover:bg-red-50 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  <Wallet size={20} />
-                  {completingMethod === 'wallet' ? 'Charging…' : 'Wallet'}
+                  <X size={18} /> Decline
                 </button>
               </div>
-              <button
-                onClick={() => setPaymentPickerOpen(false)}
-                disabled={completingMethod !== null}
-                className="w-full mt-2 py-1.5 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-50"
-              >
-                Cancel
-              </button>
             </div>
-          ) : (
-            <button
-              onClick={() => setPaymentPickerOpen(true)}
-              disabled={acting}
-              className="w-full mt-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50"
-            >
-              Mark Delivered — Complete Trip
-            </button>
           )}
-        </div>
-      )}
 
-      {!pending && !active && (
-        <div className="bg-white rounded-2xl p-12 text-center text-slate-400 shadow-sm">
-          <p className="text-4xl mb-3">🛵</p>
-          <p>No requests right now.</p>
-          <p className="text-sm mt-1">Make sure you're available and your areas/vehicle info are up to date.</p>
+          {active && (
+            <div className="border-2 border-green-400 bg-green-50 rounded-xl p-5 shadow-md">
+              <div className="flex items-center justify-between mb-3">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-full capitalize">
+                  {active.status === 'accepted' ? 'Accepted — head to pickup' : 'Trip in progress'}
+                </span>
+              </div>
+
+              <RideSummary ride={active} />
+
+              {activeCustomer && (
+                <RideCommsBar
+                  rideId={active.id}
+                  selfUserId={riderId}
+                  selfName={selfName}
+                  peerUserId={activeCustomer.userId}
+                  peerName={activeCustomer.name}
+                  peerPhone={activeCustomer.phone}
+                  className="mt-4"
+                />
+              )}
+
+              {active.service_type === 'delivery' && (
+                <button
+                  onClick={viewReceipt}
+                  className="w-full mt-3 py-2.5 bg-white border-2 border-orange-300 text-orange-600 font-semibold rounded-lg hover:bg-orange-50 flex items-center justify-center gap-2 text-sm"
+                >
+                  <Receipt size={16} /> Receipts
+                </button>
+              )}
+
+              {active.status === 'accepted' ? (
+                <button
+                  onClick={startTrip}
+                  disabled={acting}
+                  className="w-full mt-4 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50"
+                >
+                  Mark Picked Up — Start Trip
+                </button>
+              ) : paymentPickerOpen ? (
+                <div className="mt-4 border-2 border-teal-400 bg-teal-50 rounded-lg p-4">
+                  <p className="text-sm font-semibold text-teal-800 mb-3">How did the customer pay?</p>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => completeTrip('cash')}
+                      disabled={completingMethod !== null}
+                      className="flex-1 py-3 bg-white border-2 border-amber-400 text-amber-700 font-bold rounded-lg hover:bg-amber-50 disabled:opacity-50 flex flex-col items-center gap-1"
+                    >
+                      <Banknote size={20} />
+                      {completingMethod === 'cash' ? 'Confirming…' : 'Cash'}
+                    </button>
+                    <button
+                      onClick={() => completeTrip('wallet')}
+                      disabled={completingMethod !== null}
+                      className="flex-1 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50 flex flex-col items-center gap-1"
+                    >
+                      <Wallet size={20} />
+                      {completingMethod === 'wallet' ? 'Charging…' : 'Wallet'}
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => setPaymentPickerOpen(false)}
+                    disabled={completingMethod !== null}
+                    className="w-full mt-2 py-1.5 text-xs text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setPaymentPickerOpen(true)}
+                  disabled={acting}
+                  className="w-full mt-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50"
+                >
+                  Mark Delivered — Complete Trip
+                </button>
+              )}
+            </div>
+          )}
+
+          {!pending && !active && (
+            <div className="bg-white rounded-2xl p-12 text-center text-slate-400 shadow-sm">
+              <p className="text-4xl mb-3">🛵</p>
+              <p>No requests right now.</p>
+              <p className="text-sm mt-1">Make sure you're available and your areas/vehicle info are up to date.</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -436,7 +446,7 @@ export default function RiderRideRequests({ riderId, vehicleType }: { riderId: s
           onClose={() => setDeliveryReceipt(null)}
         />
       )}
-    </div>
+    </>
   );
 }
 

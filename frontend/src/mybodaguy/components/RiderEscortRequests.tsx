@@ -17,7 +17,7 @@ interface EscortRequestRow {
   } | null;
 }
 
-export default function RiderEscortRequests({ riderId }: { riderId: string }) {
+export default function RiderEscortRequests({ riderId, collapsed = false }: { riderId: string; collapsed?: boolean }) {
   const [escortRowId, setEscortRowId] = useState<string | null>(null);
   const [pending, setPending] = useState<EscortRequestRow | null>(null);
   const [active, setActive] = useState<EscortRequestRow | null>(null);
@@ -92,6 +92,7 @@ export default function RiderEscortRequests({ riderId }: { riderId: string }) {
   };
 
   if (loading) {
+    if (collapsed) return null;
     return (
       <div className="bg-white rounded-xl shadow-lg p-10 text-center">
         <div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full mx-auto" />
@@ -100,6 +101,7 @@ export default function RiderEscortRequests({ riderId }: { riderId: string }) {
   }
 
   if (!escortRowId) {
+    if (collapsed) return null;
     return (
       <div className="bg-white rounded-xl shadow-lg p-10 text-center text-slate-500">
         Your escort profile isn't set up yet.
@@ -131,7 +133,11 @@ export default function RiderEscortRequests({ riderId }: { riderId: string }) {
   );
 
   return (
-    <div className="space-y-4">
+    <>
+      {/* Always rendered (even while `collapsed`) so a new escort request
+          rings the instant it arrives instead of waiting for the rider to
+          tap into the Requests tab — see RiderRideRequests for the same
+          pattern. */}
       {pending && (
         <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center">
@@ -153,51 +159,55 @@ export default function RiderEscortRequests({ riderId }: { riderId: string }) {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
-        <h3 className="text-xl font-bold text-slate-800">Escort Requests</h3>
-        <button onClick={load} className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1">
-          <RefreshCw size={14} /> Refresh
-        </button>
-      </div>
-
-      {pending && (
-        <div className="border-2 border-violet-400 bg-violet-50 rounded-xl p-5 shadow-md">
-          <div className="flex items-center justify-between mb-3">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-violet-500 text-white text-xs font-bold rounded-full">
-              <ShieldCheck size={12} /> New Escort Request
-            </span>
-            <span className="text-xs text-slate-500">{new Date(pending.requested_at).toLocaleTimeString()}</span>
-          </div>
-          <Summary row={pending} />
-          <div className="flex gap-3 mt-4">
-            <button onClick={() => respond(true)} disabled={acting} className="flex-1 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
-              <Check size={18} /> Accept
-            </button>
-            <button onClick={() => respond(false)} disabled={acting} className="flex-1 py-3 bg-white border-2 border-red-300 text-red-600 font-bold rounded-lg hover:bg-red-50 disabled:opacity-50 flex items-center justify-center gap-2">
-              <X size={18} /> Decline
+      {!collapsed && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-bold text-slate-800">Escort Requests</h3>
+            <button onClick={load} className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1">
+              <RefreshCw size={14} /> Refresh
             </button>
           </div>
-        </div>
-      )}
 
-      {active && (
-        <div className="border-2 border-green-400 bg-green-50 rounded-xl p-5 shadow-md">
-          <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-full mb-3">
-            Accepted — escorting
-          </span>
-          <Summary row={active} />
-          <button onClick={completeEscort} disabled={acting} className="w-full mt-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50">
-            Mark Escort Complete
-          </button>
-        </div>
-      )}
+          {pending && (
+            <div className="border-2 border-violet-400 bg-violet-50 rounded-xl p-5 shadow-md">
+              <div className="flex items-center justify-between mb-3">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-violet-500 text-white text-xs font-bold rounded-full">
+                  <ShieldCheck size={12} /> New Escort Request
+                </span>
+                <span className="text-xs text-slate-500">{new Date(pending.requested_at).toLocaleTimeString()}</span>
+              </div>
+              <Summary row={pending} />
+              <div className="flex gap-3 mt-4">
+                <button onClick={() => respond(true)} disabled={acting} className="flex-1 py-3 bg-gradient-to-r from-green-500 to-emerald-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50 flex items-center justify-center gap-2">
+                  <Check size={18} /> Accept
+                </button>
+                <button onClick={() => respond(false)} disabled={acting} className="flex-1 py-3 bg-white border-2 border-red-300 text-red-600 font-bold rounded-lg hover:bg-red-50 disabled:opacity-50 flex items-center justify-center gap-2">
+                  <X size={18} /> Decline
+                </button>
+              </div>
+            </div>
+          )}
 
-      {!pending && !active && (
-        <div className="bg-white rounded-2xl p-12 text-center text-slate-400 shadow-sm">
-          <p className="text-4xl mb-3">🛡️</p>
-          <p>No escort requests right now.</p>
+          {active && (
+            <div className="border-2 border-green-400 bg-green-50 rounded-xl p-5 shadow-md">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-green-600 text-white text-xs font-bold rounded-full mb-3">
+                Accepted — escorting
+              </span>
+              <Summary row={active} />
+              <button onClick={completeEscort} disabled={acting} className="w-full mt-4 py-3 bg-gradient-to-r from-emerald-500 to-teal-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50">
+                Mark Escort Complete
+              </button>
+            </div>
+          )}
+
+          {!pending && !active && (
+            <div className="bg-white rounded-2xl p-12 text-center text-slate-400 shadow-sm">
+              <p className="text-4xl mb-3">🛡️</p>
+              <p>No escort requests right now.</p>
+            </div>
+          )}
         </div>
       )}
-    </div>
+    </>
   );
 }
