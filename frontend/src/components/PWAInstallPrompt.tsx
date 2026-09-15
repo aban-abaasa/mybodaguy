@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
+import { X, Share, PlusSquare } from 'lucide-react';
 
 interface InstallPromptEvent extends Event {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
+}
+
+// iOS Safari and iOS Chrome (both WebKit) never fire beforeinstallprompt —
+// there is no programmatic install API on iOS at all. The Chrome-menu
+// instructions below are wrong there, so this detects iOS/iPadOS to swap
+// in the real Share -> Add to Home Screen steps.
+function isIos() {
+  const ua = navigator.userAgent || '';
+  const isIpadOs13Plus = navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  return /iPad|iPhone|iPod/.test(ua) || isIpadOs13Plus;
 }
 
 function getAppName() {
@@ -26,6 +36,7 @@ export default function PWAInstallPrompt() {
   const promptRef = useRef<InstallPromptEvent | null>(null);
   const appName = getAppName();
   const appIcon = getAppIcon();
+  const [iosDevice] = useState(isIos);
 
   useEffect(() => {
     const standalone = window.matchMedia('(display-mode: standalone)').matches ||
@@ -131,9 +142,26 @@ export default function PWAInstallPrompt() {
                 <X size={19} />
               </button>
             </div>
-            <p className="text-sm leading-6 text-slate-600">
-              In Chrome, open the <strong>⋮</strong> menu, choose <strong>Install app</strong> or <strong>Add to Home screen</strong>, then confirm.
-            </p>
+            {iosDevice ? (
+              <ol className="space-y-3 text-sm text-slate-600">
+                <li className="flex items-center gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-100 font-semibold text-orange-600">1</span>
+                  <span className="flex items-center gap-1.5">Tap the Share icon <Share size={16} className="inline text-orange-600" /> in Safari or Chrome's toolbar</span>
+                </li>
+                <li className="flex items-center gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-100 font-semibold text-orange-600">2</span>
+                  <span className="flex items-center gap-1.5">Scroll down and tap <strong>Add to Home Screen</strong> <PlusSquare size={16} className="inline text-orange-600" /></span>
+                </li>
+                <li className="flex items-center gap-3">
+                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-orange-100 font-semibold text-orange-600">3</span>
+                  <span>Tap <strong>Add</strong> to confirm</span>
+                </li>
+              </ol>
+            ) : (
+              <p className="text-sm leading-6 text-slate-600">
+                In Chrome, open the <strong>⋮</strong> menu, choose <strong>Install app</strong> or <strong>Add to Home screen</strong>, then confirm.
+              </p>
+            )}
             <button onClick={() => setShowInstructions(false)} className="mt-4 w-full rounded-xl bg-orange-500 px-4 py-3 font-semibold text-white hover:bg-orange-600">
               Got it
             </button>

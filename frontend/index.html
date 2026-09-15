@@ -11,11 +11,12 @@
     />
     <link rel="stylesheet" href="/src/index.css" />
     <link id="app-manifest" rel="manifest" href="/manifest-bodagoera.webmanifest" />
-    <link id="app-icon" rel="icon" type="image/jpeg" href="/images/bodagoera-apk.jpg" />
-    <link id="app-apple-icon" rel="apple-touch-icon" href="/images/bodagoera-apk.jpg" />
+    <link id="app-icon" rel="icon" type="image/png" href="/icons/bodagoera-192.png" />
+    <link id="app-apple-icon" rel="apple-touch-icon" href="/icons/bodagoera-apple-touch-icon.png" />
     <meta name="theme-color" content="#f97316" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="BodaGoEra" />
     <script>
       (function () {
@@ -24,9 +25,10 @@
         if (manifest) manifest.setAttribute('href', supermarket ? '/manifest-supermarketera.webmanifest' : '/manifest-bodagoera.webmanifest');
         var appIcon = document.getElementById('app-icon');
         var appleIcon = document.getElementById('app-apple-icon');
-        var iconPath = supermarket ? '/icons/supermarketera-192.png' : '/images/bodagoera-apk.jpg';
+        var iconPath = supermarket ? '/icons/supermarketera-192.png' : '/icons/bodagoera-192.png';
+        var appleIconPath = supermarket ? '/icons/supermarketera-192.png' : '/icons/bodagoera-apple-touch-icon.png';
         if (appIcon) appIcon.setAttribute('href', iconPath);
-        if (appleIcon) appleIcon.setAttribute('href', iconPath);
+        if (appleIcon) appleIcon.setAttribute('href', appleIconPath);
         document.querySelector('meta[name="theme-color"]').setAttribute('content', supermarket ? '#33765b' : '#f97316');
         document.querySelector('meta[name="apple-mobile-web-app-title"]').setAttribute('content', supermarket ? 'SupermartKera' : 'BodaGoEra');
         document.title = supermarket ? 'SupermartKera — Shop & Delivery' : 'BodaGoEra — Transport & Delivery';
