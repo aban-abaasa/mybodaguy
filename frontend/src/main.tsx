@@ -8,7 +8,28 @@ import VerifyReceiptPage from "./mybodaguy/components/VerifyReceiptPage";
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js')
-      .then(() => console.log('[BodaGoEra PWA] Service worker ready'))
+      .then((registration) => {
+        console.log('[BodaGoEra PWA] Service worker ready');
+
+        // This app ships one big bundle (no route code-splitting), so a
+        // stale cached index.html doesn't fail to load — it silently
+        // renders whatever old JS/CSS it references, with no error to
+        // catch. A tab left open across a deploy needs something to
+        // actively notice the update: sw.js calls skipWaiting()+
+        // clients.claim() on every install, so the moment a new deploy's
+        // service worker takes over, 'controllerchange' fires here and we
+        // reload once to pick it up.
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+          if (refreshing) return;
+          refreshing = true;
+          window.location.reload();
+        });
+
+        // Proactively poll for a new deploy every 5 minutes instead of
+        // only checking when the browser happens to re-navigate.
+        setInterval(() => registration.update().catch(() => undefined), 5 * 60 * 1000);
+      })
       .catch((error) => console.error('[BodaGoEra PWA] Service worker registration failed', error));
   });
 }

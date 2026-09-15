@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bodagoera-app-v2';
+const CACHE_NAME = 'bodagoera-app-v3';
 const APP_SHELL = [
   '/',
   '/bodagoera/',
