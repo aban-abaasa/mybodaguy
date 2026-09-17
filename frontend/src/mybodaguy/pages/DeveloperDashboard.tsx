@@ -274,7 +274,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
 
         {/* Tab Content */}
         <div className="bg-white rounded-xl shadow-lg p-6">
-          {activeTab === 'overview' && <OverviewTab onSwitchToRegions={() => setActiveTab('regions')} userId={user?.id} />}
+          {activeTab === 'overview' && <OverviewTab onSwitchToRegions={() => setActiveTab('regions')} onSwitchToCommissions={() => setActiveTab('commissions')} userId={user?.id} onGoToWallet={goToWallet} />}
           {activeTab === 'users' && <UsersTab users={users} loading={loading} onReload={loadUsers} />}
           {activeTab === 'applications' && <ApplicationsTab />}
           {activeTab === 'regions' && <RegionsManagement />}
@@ -429,6 +429,7 @@ function TransportOrdersTab({
   loading: boolean;
   onRefresh: () => void;
 }) {
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const pending = orders.filter((order) => order.request_status === 'pending').length;
   const active = orders.filter((order) => ['approved', 'dispatched'].includes(order.request_status)).length;
   const completed = orders.filter((order) => order.request_status === 'completed').length;
@@ -469,34 +470,58 @@ function TransportOrdersTab({
         </div>
       ) : (
         <div className="space-y-3">
-          {orders.map((order) => (
-            <div key={order.request_id} className="rounded-xl border border-slate-200 p-4 hover:border-orange-300 transition-colors">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-slate-800">{order.contract_name || 'Corporate transport contract'}</p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    BodaGo request {String(order.request_id).slice(0, 8)} · CMMS {order.cmms_requisition_number || 'unlinked'}
-                  </p>
-                </div>
-                <span className="px-2.5 py-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold capitalize">
-                  {order.request_status || 'pending'}
-                </span>
+          {orders.map((order) => {
+            const isOpen = expandedId === order.request_id;
+            return (
+              <div key={order.request_id} className="rounded-xl border border-slate-200 hover:border-orange-300 transition-colors overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(isOpen ? null : order.request_id)}
+                  className="w-full text-left p-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-800">{order.contract_name || 'Corporate transport contract'}</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        BodaGo request {String(order.request_id).slice(0, 8)} · CMMS {order.cmms_requisition_number || 'unlinked'}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 rounded-full bg-orange-100 text-orange-700 text-xs font-semibold capitalize">
+                        {order.request_status || 'pending'}
+                      </span>
+                      <ChevronRight size={16} className={`text-slate-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                    </div>
+                  </div>
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 mt-4 text-xs text-slate-600">
+                    <span>Rides: <strong>{order.ride_count || 0}</strong></span>
+                    <span>Vehicle: <strong>{order.vehicle_type || 'Any'}</strong></span>
+                    <span>CMMS status: <strong>{order.cmms_status || '—'}</strong></span>
+                    <span>Created: <strong>{order.created_at ? new Date(order.created_at).toLocaleString() : '—'}</strong></span>
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="border-t border-slate-100 bg-slate-50 p-4 grid sm:grid-cols-2 gap-3 text-xs text-slate-600">
+                    <span>Contract: <strong>{order.contract_name || '—'}</strong></span>
+                    <span>Business: <strong>{order.business_name || '—'}</strong></span>
+                    <span>CMMS requisition: <strong>{order.cmms_requisition_number || 'unlinked'}</strong></span>
+                    <span>CMMS status: <strong>{order.cmms_status || '—'}</strong></span>
+                    <span>Pickup location: <strong>{order.pickup_location || '—'}</strong></span>
+                    <span>Dropoff location: <strong>{order.dropoff_location || '—'}</strong></span>
+                    <span>Scheduled for: <strong>{order.scheduled_for ? new Date(order.scheduled_for).toLocaleString() : '—'}</strong></span>
+                    <span>Requested rides: <strong>{order.ride_count || 0}</strong></span>
+                  </div>
+                )}
               </div>
-              <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-2 mt-4 text-xs text-slate-600">
-                <span>Rides: <strong>{order.ride_count || 0}</strong></span>
-                <span>Vehicle: <strong>{order.vehicle_type || 'Any'}</strong></span>
-                <span>CMMS status: <strong>{order.cmms_status || '—'}</strong></span>
-                <span>Created: <strong>{order.created_at ? new Date(order.created_at).toLocaleString() : '—'}</strong></span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
   );
 }
 
-function OverviewTab({ onSwitchToRegions, userId }: { onSwitchToRegions: () => void; userId?: string }) {
+function OverviewTab({ onSwitchToRegions, onSwitchToCommissions, userId, onGoToWallet }: { onSwitchToRegions: () => void; onSwitchToCommissions: () => void; userId?: string; onGoToWallet: () => void }) {
   return (
     <div>
       <h2 className="text-2xl font-bold text-slate-800 mb-6">Platform Overview</h2>
@@ -506,7 +531,7 @@ function OverviewTab({ onSwitchToRegions, userId }: { onSwitchToRegions: () => v
         <StatCard title="Active Riders" value="0" icon={<Bike className="text-orange-500" />} />
         <StatCard title="Total Rides" value="0" icon={<TrendingUp className="text-orange-500" />} />
         <StatCard title="Total Revenue" value="0 UGX" icon={<DollarSign className="text-orange-500" />} />
-        {userId && <IcanCoinCard userId={userId} onGoToWallet={goToWallet} />}
+        {userId && <IcanCoinCard userId={userId} onGoToWallet={onGoToWallet} />}
       </div>
 
       <div className="bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl p-8 text-center">
@@ -523,7 +548,10 @@ function OverviewTab({ onSwitchToRegions, userId }: { onSwitchToRegions: () => v
           >
             Setup Regions
           </button>
-          <button className="px-6 py-2 bg-white text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-all shadow-md border border-slate-200">
+          <button
+            onClick={onSwitchToCommissions}
+            className="px-6 py-2 bg-white text-slate-700 font-semibold rounded-lg hover:bg-slate-50 transition-all shadow-md border border-slate-200"
+          >
             Configure Commissions
           </button>
         </div>
@@ -1817,15 +1845,124 @@ function SupermarketsTab() {
   );
 }
 
+type CommissionSetting = {
+  key: string;
+  value: string;
+  description: string | null;
+};
+
 function CommissionsTab() {
+  const [settings, setSettings] = useState<CommissionSetting[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('mbg_dev_get_commission_settings');
+      if (error) throw error;
+      const rows: CommissionSetting[] = data || [];
+      setSettings(rows);
+      setDrafts(Object.fromEntries(rows.map((row) => [row.key, row.value])));
+    } catch (error: any) {
+      console.error('Error loading commission settings:', error);
+      toast.error(error?.message || 'Failed to load commission settings');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  const saveSetting = async (key: string) => {
+    const raw = drafts[key];
+    const numeric = Number(raw);
+    if (!raw || Number.isNaN(numeric) || numeric < 0 || numeric > 100) {
+      toast.error('Enter a percentage between 0 and 100');
+      return;
+    }
+    setSavingKey(key);
+    try {
+      const { error } = await supabase.rpc('mbg_dev_update_commission_setting', {
+        p_key: key,
+        p_value: numeric,
+      });
+      if (error) throw error;
+      setSettings((prev) => prev.map((row) => (row.key === key ? { ...row, value: String(numeric) } : row)));
+      toast.success('Commission percentage updated');
+    } catch (error: any) {
+      console.error('Error updating commission setting:', error);
+      toast.error(error?.message || 'Failed to update commission percentage');
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const labelFor = (setting: CommissionSetting) => setting.description || setting.key;
+
   return (
     <div>
-      <h2 className="text-2xl font-bold text-slate-800 mb-6">Commission Settings</h2>
-      <div className="bg-slate-50 rounded-lg p-8 text-center">
-        <DollarSign className="w-12 h-12 text-slate-400 mx-auto mb-4" />
-        <p className="text-slate-600 mb-4">Commission configuration coming soon</p>
-        <p className="text-sm text-slate-500">Configure commission percentages for each level of the hierarchy.</p>
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Commission Settings</h2>
+          <p className="text-sm text-slate-600 mt-1">Configure commission percentages for each level of the hierarchy.</p>
+        </div>
+        <button
+          onClick={loadSettings}
+          disabled={loading}
+          className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg disabled:opacity-50"
+        >
+          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+          Refresh
+        </button>
       </div>
+
+      {loading ? (
+        <div className="py-12 text-center text-sm text-slate-500">Loading commission settings...</div>
+      ) : settings.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-300 py-12 text-center">
+          <DollarSign className="mx-auto mb-3 text-slate-400" size={36} />
+          <p className="font-semibold text-slate-700">No commission settings found</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {settings.map((setting) => {
+            const isDirty = drafts[setting.key] !== setting.value;
+            return (
+              <div key={setting.key} className="rounded-xl border border-slate-200 p-4 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="font-semibold text-slate-800">{labelFor(setting)}</p>
+                  <p className="text-xs text-slate-500 mt-1 font-mono">{setting.key}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step="0.1"
+                      value={drafts[setting.key] ?? ''}
+                      onChange={(e) => setDrafts((prev) => ({ ...prev, [setting.key]: e.target.value }))}
+                      className="w-28 pr-7 pl-3 py-2 border border-slate-300 rounded-lg text-right focus:outline-none focus:ring-2 focus:ring-orange-400"
+                    />
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+                  </div>
+                  <button
+                    onClick={() => saveSetting(setting.key)}
+                    disabled={!isDirty || savingKey === setting.key}
+                    className="px-4 py-2 bg-slate-800 text-white text-sm font-semibold rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-700 transition-colors"
+                  >
+                    {savingKey === setting.key ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

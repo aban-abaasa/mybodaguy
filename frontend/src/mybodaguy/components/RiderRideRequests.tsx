@@ -16,6 +16,7 @@ interface RideRow {
   status: string;
   fare: number;
   rider_earning: number | null;
+  payment_method: 'cash' | 'wallet' | null;
   distance_km: number | null;
   duration_minutes: number | null;
   power_type_requested: string | null;
@@ -499,11 +500,31 @@ function RideSummary({ ride }: { ride: RideRow }) {
           </div>
         </div>
       )}
-      <div className="flex items-center justify-between pt-2 border-t border-slate-100">
-        <span className="text-xs text-slate-400">Your earning</span>
-        <span className="text-lg font-bold text-orange-600">
-          UGX {Number(ride.rider_earning ?? 0).toLocaleString()}
-        </span>
+      <div className="pt-2 border-t border-slate-100 space-y-1">
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <span>Fare</span>
+          <span>UGX {Number(ride.fare ?? 0).toLocaleString()}</span>
+        </div>
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <span>{ride.payment_method === 'cash' ? 'Chairperson + ICANera fees' : 'Chairperson fee'}</span>
+          <span>− UGX {Math.max(0, Number(ride.fare ?? 0) - Number(ride.rider_earning ?? 0)).toLocaleString()}</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-slate-500 font-medium">You take home — no further deductions</span>
+          <span className="text-lg font-bold text-orange-600">
+            UGX {Number(ride.rider_earning ?? 0).toLocaleString()}
+          </span>
+        </div>
+        {ride.payment_method === 'cash' && (
+          <p className="text-[11px] text-amber-600 bg-amber-50 rounded px-2 py-1 mt-1">
+            💵 Customer pays you cash directly — the ICANera platform fee shown above is already netted out of your take-home; it's collected from your wallet on your next wallet-paid trip, not on top.
+          </p>
+        )}
+        {ride.payment_method === 'wallet' && (
+          <p className="text-[11px] text-emerald-600 bg-emerald-50 rounded px-2 py-1 mt-1">
+            📱 Customer pays by wallet — ICANera's fee is added to their total automatically; it never touches your earning above.
+          </p>
+        )}
       </div>
     </div>
   );

@@ -8,6 +8,7 @@ import { supabase } from '../../services/supabaseClient';
 import EnhancedRideRequest from '../components/EnhancedRideRequest';
 import BecomeOperatorForm from '../components/BecomeOperatorForm';
 import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
+import BrowseServicesAndBook from '../components/booking/BrowseServicesAndBook';
 import IcanCoinCard from '../components/IcanCoinCard';
 import RewardsPointsCard from '../components/RewardsPointsCard';
 import RewardsHub from '../components/RewardsHub';
@@ -44,12 +45,13 @@ interface CustomerDashboardProps {
 // delivery toggle and vice versa. Book a Journey is inbuilt into Book a
 // Ride itself (a mode toggle inside EnhancedRideRequest, showJourneyOption)
 // rather than its own tab.
-type TabType = 'overview' | 'book-ride' | 'shop' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'become-operator' | 'manage-business' | 'profile';
+type TabType = 'overview' | 'book-ride' | 'shop' | 'book-service' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'become-operator' | 'manage-business' | 'profile';
 
 const ALL_TABS = [
   { id: 'overview'  as TabType, label: 'Overview',  emoji: '🏠' },
   { id: 'book-ride' as TabType, label: 'Book a Ride', emoji: '🏍️' },
   { id: 'shop'      as TabType, label: 'Shop',      emoji: '🛒' },
+  { id: 'book-service' as TabType, label: 'Book', emoji: '📅' },
   { id: 'delivery'  as TabType, label: 'Delivery',  emoji: '📦' },
   { id: 'orders'    as TabType, label: 'Orders',    emoji: '📋' },
   { id: 'areas'     as TabType, label: 'My Areas',  emoji: '📍' },
@@ -602,6 +604,22 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         {activeTab === 'shop' && (
           <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
             <CustomerSelfCheckout user={user} />
+          </div>
+        )}
+
+        {/* Book — appointment-style service bookings against the same
+            shared service_bookings tables digital-city-era's Book tab uses,
+            reusing chatService/useDirectCall for follow-up with the store */}
+        {activeTab === 'book-service' && (
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            <BrowseServicesAndBook
+              identity={{
+                userId: user?.id,
+                name: user?.user_metadata?.full_name || user?.email || 'Customer',
+                email: user?.email,
+                phone: '',
+              }}
+            />
           </div>
         )}
 
