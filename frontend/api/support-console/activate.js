@@ -5,13 +5,27 @@ import { applyCors } from '../_lib/cors.js';
 
 // Public (anon-key) client used only to sign the freshly-minted throwaway
 // account in for real and hand back a session — a normal email/password
-// login, the same path every real BodaGoEra user already uses. Reuses the
-// project's existing anon key (already configured for the Vite client
-// build under VITE_SUPABASE_ANON_KEY) rather than requiring a new env var.
-const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-const supabasePublic = createClient(process.env.SUPABASE_URL, anonKey, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+// login, the same path every real BodaGoEra user already uses.
+//
+// Built lazily, inside the handler, not at module load — createClient()
+// throws synchronously if the URL/key are missing, and doing that at the
+// top level crashes the ENTIRE function on cold start (including plain
+// CORS preflight OPTIONS requests, before applyCors() ever runs), which is
+// indistinguishable from a CORS misconfiguration in the browser. Building
+// it lazily lets applyCors() and the env-var check below run first, so a
+// misconfiguration comes back as a normal JSON error instead of a raw
+// Vercel FUNCTION_INVOCATION_FAILED with no CORS headers at all.
+function getSupabasePublic() {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    console.error('[support-console/activate] missing env vars', {
+      hasUrl: !!url, hasAnonKey: !!anonKey,
+    });
+    return null;
+  }
+  return createClient(url, anonKey, { auth: { autoRefreshToken: false, persistSession: false } });
+}
 
 /**
  * Support Console activation (see backend/database/ADD_SUPPORT_CONSOLE.sql
@@ -37,6 +51,14 @@ export default async function handler(req, res) {
   const { token, password } = req.body || {};
   if (!token || !password) {
     return res.status(400).json({ success: false, error: 'Missing token or password.' });
+  }
+
+  const supabasePublic = getSupabasePublic();
+  if (!supabasePublic) {
+    return res.status(500).json({
+      success: false,
+      error: 'Support Console is not fully configured on the server (missing SUPABASE_URL/SUPABASE_ANON_KEY env vars).',
+    });
   }
 
   try {
