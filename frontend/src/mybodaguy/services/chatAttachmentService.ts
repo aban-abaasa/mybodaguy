@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { compressImageFile } from '../utils/imageCompression';
 
 const BUCKET = 'chat-attachments';
 const MAX_SIZE_MB = 8;
@@ -25,12 +26,13 @@ export const uploadChatImage = async (file: File): Promise<ChatAttachment> => {
     throw new Error(`Image must be under ${MAX_SIZE_MB}MB.`);
   }
 
-  const ext = file.name.split('.').pop() || 'jpg';
+  const compressed = await compressImageFile(file, 1600, 0.75);
+  const ext = compressed.name.split('.').pop() || 'jpg';
   const path = `mybodaguy/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
 
   const { error: uploadError } = await supabase.storage
     .from(BUCKET)
-    .upload(path, file, { upsert: false, cacheControl: '3600', contentType: file.type });
+    .upload(path, compressed, { upsert: false, cacheControl: '31536000', contentType: compressed.type });
   if (uploadError) throw uploadError;
 
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path);

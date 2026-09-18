@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { compressImageFile } from '../utils/imageCompression';
 
 // Reads/writes the SHARED product catalog that digital-city-era ("Supermartkera")
 // already runs on this same Supabase project: public.products, public.inventory,
@@ -195,12 +196,13 @@ export const productService = {
   // Uploads to the public `product-photos` bucket, then points the product's
   // `images` column (already read by lookup_product_by_barcode elsewhere) at it.
   async uploadProductImage(supermarketId: string, productId: string, file: File): Promise<string> {
-    const ext = file.name.split('.').pop() || 'jpg';
+    const compressed = await compressImageFile(file, 1280, 0.8);
+    const ext = compressed.name.split('.').pop() || 'jpg';
     const path = `${supermarketId}/${productId}-${Date.now()}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from(PRODUCT_IMAGE_BUCKET)
-      .upload(path, file, { upsert: true, cacheControl: '3600' });
+      .upload(path, compressed, { upsert: true, cacheControl: '31536000' });
     if (uploadError) throw uploadError;
 
     const { data } = supabase.storage.from(PRODUCT_IMAGE_BUCKET).getPublicUrl(path);
@@ -258,12 +260,13 @@ export const productService = {
 
   // Optional — a supermarket doesn't need a background photo to sell products.
   async uploadStoreBackground(supermarketId: string, file: File): Promise<string> {
-    const ext = file.name.split('.').pop() || 'jpg';
+    const compressed = await compressImageFile(file, 1600, 0.8);
+    const ext = compressed.name.split('.').pop() || 'jpg';
     const path = `${supermarketId}/branding/background-${Date.now()}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from(PRODUCT_IMAGE_BUCKET)
-      .upload(path, file, { upsert: true, cacheControl: '3600' });
+      .upload(path, compressed, { upsert: true, cacheControl: '31536000' });
     if (uploadError) throw uploadError;
 
     const { data } = supabase.storage.from(PRODUCT_IMAGE_BUCKET).getPublicUrl(path);

@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient';
+import { compressImageFile } from '../utils/imageCompression';
 
 const AVATAR_BUCKET = 'avatars';
 const MAX_SIZE_MB = 2;
@@ -16,12 +17,13 @@ export const avatarService = {
       throw new Error(`Image must be under ${MAX_SIZE_MB}MB.`);
     }
 
-    const ext = file.name.split('.').pop() || 'jpg';
+    const compressed = await compressImageFile(file, 512, 0.85);
+    const ext = compressed.name.split('.').pop() || 'jpg';
     const path = `${userId}/avatar-${Date.now()}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from(AVATAR_BUCKET)
-      .upload(path, file, { upsert: true, cacheControl: '3600' });
+      .upload(path, compressed, { upsert: true, cacheControl: '31536000' });
     if (uploadError) throw uploadError;
 
     const { data } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path);

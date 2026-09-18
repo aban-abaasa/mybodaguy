@@ -3,7 +3,7 @@ import {
   Bike, Users, MapPin, DollarSign, Settings,
   TrendingUp, LogOut, Menu, X, Shield, Search,
   MessageSquare, RefreshCw, Globe, Lock, Trash2, Send, CheckCircle, Mail, Gift,
-  ShoppingBag, ChevronRight, Truck, XCircle, Activity,
+  ShoppingBag, ChevronRight, Truck, XCircle, Activity, Share2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '../services/userService';
@@ -214,6 +214,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
 
   if (permissions.isMain) {
     tabs.push({ id: 'operators', label: 'Developers', icon: Lock });
+    tabs.push({ id: 'support-links', label: 'Support Links', icon: Share2 });
   }
 
   return (
@@ -300,6 +301,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
               onGrant={grantDeveloperTo}
             />
           )}
+          {activeTab === 'support-links' && permissions.isMain && <SupportLinksTab />}
         </div>
       </div>
     </div>
@@ -417,6 +419,314 @@ function DeveloperAccessTab({
           {operators.length === 0 && <p className="text-sm text-slate-500">No developers yet.</p>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// SUPPORT LINKS — lets the main developer generate a password-protected link
+// (/support-console?key=<token>) that opens a scoped, read/reply-only view of
+// Public Board + Messages for someone with no mybodaguy account at all —
+// mirrors ICAN's Support Console. Backed by ADD_SUPPORT_CONSOLE.sql. Only
+// these two tabs are offered here — see that file's header for why every
+// other DeveloperDashboard tab isn't reachable this way yet.
+// ============================================================================
+type SupportLinkRow = {
+  id: string;
+  token: string;
+  label: string | null;
+  allowed_tabs: string[];
+  revoked_at: string | null;
+  view_count: number;
+  failed_attempts: number;
+  locked_until: string | null;
+  created_at: string;
+};
+
+const SUPPORT_LINK_TAB_OPTIONS = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'users', label: 'Users' },
+  { id: 'applications', label: 'Applications' },
+  { id: 'regions', label: 'Regions' },
+  { id: 'commissions', label: 'Commissions' },
+  { id: 'supermarkets', label: 'Supermarkets' },
+  { id: 'transport', label: 'Transport' },
+  { id: 'rewards', label: 'Rewards' },
+  { id: 'public-board', label: 'Public Board' },
+  { id: 'messages', label: 'Messages' },
+  { id: 'settings', label: 'Settings' },
+];
+const LOW_RISK_SUPPORT_TABS = new Set(['messages', 'public-board']);
+
+function SupportLinksTab() {
+  const [links, setLinks] = useState<SupportLinkRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newLabel, setNewLabel] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newAllowedTabs, setNewAllowedTabs] = useState<string[]>(['messages', 'public-board']);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [justCreated, setJustCreated] = useState<{ token: string; label: string } | null>(null);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
+
+  const [editingTabsId, setEditingTabsId] = useState<string | null>(null);
+  const [editTabs, setEditTabs] = useState<string[]>([]);
+  const [savingTabs, setSavingTabs] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase.rpc('mbg_dev_list_support_links');
+    if (error) console.error('[SupportLinksTab] mbg_dev_list_support_links:', error.message);
+    setLinks(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const toggleNewTab = (id: string) => {
+    setNewAllowedTabs((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
+  };
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCreateError(''); setJustCreated(null);
+    if (creating) return;
+    if (newPassword.trim().length < 4) {
+      setCreateError('Set a password of at least 4 characters.');
+      return;
+    }
+    if (!newAllowedTabs.length) {
+      setCreateError('Pick at least one tab for this link to open.');
+      return;
+    }
+    setCreating(true);
+    try {
+      const { data, error } = await supabase.rpc('mbg_dev_create_support_link', {
+        p_label: newLabel.trim() || null,
+        p_password: newPassword.trim(),
+        p_allowed_tabs: newAllowedTabs,
+      });
+      if (error || !data?.success) { setCreateError(data?.error || error?.message || 'Failed to create link.'); return; }
+      setJustCreated({ token: data.token, label: newLabel.trim() });
+      setNewLabel(''); setNewPassword(''); setNewAllowedTabs(['messages', 'public-board']);
+      await refresh();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const toggleRevoke = async (row: SupportLinkRow) => {
+    setRevokingId(row.id);
+    try {
+      const fn = row.revoked_at ? 'mbg_dev_reactivate_support_link' : 'mbg_dev_revoke_support_link';
+      await supabase.rpc(fn, { p_link_id: row.id });
+      await refresh();
+    } finally {
+      setRevokingId(null);
+    }
+  };
+
+  const startEditTabs = (row: SupportLinkRow) => { setEditingTabsId(row.id); setEditTabs(row.allowed_tabs); };
+  const cancelEditTabs = () => { setEditingTabsId(null); setEditTabs([]); };
+  const toggleEditTab = (id: string) => {
+    setEditTabs((prev) => (prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id]));
+  };
+  const saveEditTabs = async (row: SupportLinkRow) => {
+    if (!editTabs.length || savingTabs) return;
+    setSavingTabs(true);
+    try {
+      const { data, error } = await supabase.rpc('mbg_dev_update_support_link_tabs', {
+        p_link_id: row.id, p_allowed_tabs: editTabs,
+      });
+      if (error || !data?.success) return;
+      cancelEditTabs();
+      await refresh();
+    } finally {
+      setSavingTabs(false);
+    }
+  };
+
+  const linkUrl = (token: string) => `${window.location.origin}/support-console?key=${token}`;
+
+  const shareLink = async (row: { token: string; label: string | null }) => {
+    const url = linkUrl(row.token);
+    const text = row.label ? `BodaGoEra Support Console access for ${row.label}` : 'BodaGoEra Support Console access';
+    if ((navigator as any).share) {
+      try { await (navigator as any).share({ title: 'BodaGoEra Support Console', text, url }); return; } catch { /* user canceled */ }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedToken(row.token);
+      setTimeout(() => setCopiedToken((prev) => (prev === row.token ? null : prev)), 2000);
+    } catch { /* clipboard unavailable */ }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <h2 className="text-2xl font-bold text-slate-800">Support Links ({links.length})</h2>
+        <button
+          onClick={refresh}
+          disabled={loading}
+          className="flex items-center gap-2 px-3 py-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-40"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+      <p className="text-sm text-slate-600 mb-4">
+        Generate a password-protected link that opens Messages and/or Public Board for someone
+        with no mybodaguy account — no sign-in required, just the URL and password you share.
+      </p>
+
+      <form onSubmit={handleCreate} className="space-y-2 mb-6 rounded-xl border border-slate-200 p-4">
+        <div className="flex flex-wrap gap-2">
+          <input
+            value={newLabel} onChange={(e) => setNewLabel(e.target.value)} type="text"
+            placeholder="Who's this for? (optional)"
+            className="min-w-[160px] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
+          />
+          <input
+            value={newPassword} onChange={(e) => setNewPassword(e.target.value)} type="text"
+            placeholder="Password (4+ characters)"
+            className="min-w-[160px] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
+          />
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          {SUPPORT_LINK_TAB_OPTIONS.map((t) => {
+            const on = newAllowedTabs.includes(t.id);
+            return (
+              <button
+                key={t.id} type="button" onClick={() => toggleNewTab(t.id)}
+                className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  on ? 'border-orange-400 bg-orange-50 text-orange-600' : 'border-slate-200 bg-slate-50 text-slate-500'
+                }`}
+              >
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+        {newAllowedTabs.some((id) => !LOW_RISK_SUPPORT_TABS.has(id)) && (
+          <p className="text-[11px] leading-snug text-amber-600">
+            ⚠️ Anything beyond Messages/Public Board gives whoever opens this link a real (anonymous) developer
+            account with access to that tab's real data — user info, wallets, commissions, etc. Only pick these
+            for someone you'd trust with that.
+          </p>
+        )}
+        <button
+          type="submit" disabled={creating}
+          className="rounded-lg px-4 py-2 text-sm font-bold text-white disabled:opacity-40 bg-gradient-to-r from-orange-500 to-yellow-500"
+        >
+          {creating ? 'Creating…' : 'Create link'}
+        </button>
+      </form>
+      {createError && <p className="mb-3 text-xs text-rose-500">{createError}</p>}
+
+      {justCreated && (
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3">
+          <p className="mb-2 text-xs font-bold text-amber-700">Share this link (and the password, separately):</p>
+          <div className="flex items-center gap-2">
+            <p className="flex-1 text-xs break-all text-slate-800">{linkUrl(justCreated.token)}</p>
+            <button
+              onClick={() => shareLink(justCreated)}
+              className="flex-shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-bold text-white bg-amber-500"
+            >
+              {copiedToken === justCreated.token ? 'Copied!' : 'Share / Copy'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {loading && <p className="text-sm text-slate-500">Loading…</p>}
+
+      <div className="space-y-2">
+        {links.map((row) => {
+          const revoked = !!row.revoked_at;
+          const locked = row.locked_until && new Date(row.locked_until) > new Date();
+          const isEditingTabs = editingTabsId === row.id;
+          return (
+            <div key={row.id} className="rounded-lg border border-slate-200 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-800 truncate">
+                    {row.label || 'Untitled link'}
+                    {revoked && <span className="ml-1.5 text-[10px] font-bold text-rose-500">revoked</span>}
+                  </p>
+                  <p className="text-[11px] text-slate-500 truncate">
+                    {row.view_count || 0} {row.view_count === 1 ? 'use' : 'uses'} · created {new Date(row.created_at).toLocaleDateString()}
+                    {locked && ' · locked'}
+                  </p>
+                  {!isEditingTabs && (
+                    <p className="mt-0.5 text-[11px] text-slate-500">
+                      Opens: {row.allowed_tabs.map((id) => SUPPORT_LINK_TAB_OPTIONS.find((t) => t.id === id)?.label || id).join(', ')}
+                      {' '}
+                      <button onClick={() => startEditTabs(row)} className="underline text-slate-600">edit</button>
+                    </p>
+                  )}
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-1.5">
+                  {!revoked && (
+                    <button
+                      onClick={() => shareLink(row)}
+                      className="rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-600"
+                    >
+                      {copiedToken === row.token ? 'Copied!' : 'Share / Copy'}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => toggleRevoke(row)}
+                    disabled={revokingId === row.id}
+                    className={`rounded-lg border px-2.5 py-1 text-[10px] font-bold disabled:opacity-40 ${
+                      !revoked ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-emerald-300 bg-emerald-50 text-emerald-600'
+                    }`}
+                  >
+                    {revokingId === row.id ? '…' : revoked ? 'Reactivate' : 'Revoke'}
+                  </button>
+                </div>
+              </div>
+
+              {isEditingTabs && (
+                <div className="mt-2 rounded-lg border border-slate-200 p-3">
+                  <div className="flex flex-wrap gap-1.5">
+                    {SUPPORT_LINK_TAB_OPTIONS.map((t) => {
+                      const on = editTabs.includes(t.id);
+                      return (
+                        <button
+                          key={t.id} type="button" onClick={() => toggleEditTab(t.id)}
+                          className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                            on ? 'border-orange-400 bg-orange-50 text-orange-600' : 'border-slate-200 bg-slate-50 text-slate-500'
+                          }`}
+                        >
+                          {t.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {editTabs.some((id) => !LOW_RISK_SUPPORT_TABS.has(id)) && (
+                    <p className="mt-2 text-[11px] leading-snug text-amber-600">
+                      ⚠️ Anything beyond Messages/Public Board hands out a real (anonymous) developer account
+                      scoped to that tab's real data.
+                    </p>
+                  )}
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      onClick={() => saveEditTabs(row)} disabled={!editTabs.length || savingTabs}
+                      className="rounded-lg px-2.5 py-1 text-[10px] font-bold text-white disabled:opacity-40 bg-gradient-to-r from-orange-500 to-yellow-500"
+                    >
+                      {savingTabs ? 'Saving…' : 'Save'}
+                    </button>
+                    <button onClick={cancelEditTabs} disabled={savingTabs} className="rounded-lg border border-slate-200 px-2.5 py-1 text-[10px] font-bold text-slate-500">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {!loading && links.length === 0 && <p className="text-sm text-slate-500">No support links created yet.</p>}
+      </div>
     </div>
   );
 }

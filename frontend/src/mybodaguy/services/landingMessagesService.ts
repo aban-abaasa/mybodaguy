@@ -281,7 +281,10 @@ export const subscribeToPublicLandingMessages = (onInsert: (row: LandingMessage)
 // other 3 apps; its developer surface is DeveloperDashboard.tsx, shown only
 // to a real authenticated account where mbg_users.role_type = 'developer'.
 // landing_messages_is_dev() checks auth.uid() against that as a second
-// authorization path, so these calls omit dev_token entirely.
+// authorization path, so these calls omit dev_token entirely. A Support
+// Console visitor (ADD_SUPPORT_CONSOLE_ANY_TAB.sql) reaches this the same
+// way — their anonymous session is elevated to role_type = 'developer' by
+// mbg_support_activate_link(), so no separate token parameter is needed here.
 export const devListAllLandingMessages = async (): Promise<LandingMessage[]> => {
   const { data, error } = await supabase.rpc('dev_get_landing_messages', {});
   if (error) throw error;

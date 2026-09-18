@@ -4,6 +4,7 @@ import App from "./App";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
 import VerifyReceiptPage from "./mybodaguy/components/VerifyReceiptPage";
+import SupportConsole from "./mybodaguy/pages/SupportConsole";
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
@@ -41,6 +42,12 @@ if ('serviceWorker' in navigator) {
 // so this is a plain pathname check.
 let verifyMatch = window.location.pathname.match(/^\/verify\/([A-Za-z0-9]+)/);
 
+// Support Console (?key=<token>, see ADD_SUPPORT_CONSOLE.sql /
+// SupportConsole.tsx) — a password-gated link into Public Board + Messages
+// for someone with no mybodaguy account. Same plain-pathname-check
+// precedent as /verify above; no router wired up in this app.
+const isSupportConsole = window.location.pathname === '/support-console';
+
 // VerifyReceiptPage's "Sign in with Google to Approve" passes
 // redirectTo: window.location.href, so Google should bounce straight back
 // to /verify/<code> — but if this Supabase project's OAuth redirect
@@ -59,6 +66,8 @@ if (!verifyMatch && window.location.hash.includes('access_token')) {
 createRoot(document.getElementById("root")!).render(
   verifyMatch ? (
     <VerifyReceiptPage code={verifyMatch[1]} />
+  ) : isSupportConsole ? (
+    <SupportConsole />
   ) : (
     <ThemeProvider>
       <App />

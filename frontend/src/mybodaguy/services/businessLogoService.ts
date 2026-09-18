@@ -1,4 +1,5 @@
 import { supabase } from '../../services/supabaseClient';
+import { compressImageFile } from '../utils/imageCompression';
 
 const LOGO_BUCKET = 'business-logos';
 const MAX_SIZE_MB = 2;
@@ -17,12 +18,13 @@ export const businessLogoService = {
       throw new Error(`Image must be under ${MAX_SIZE_MB}MB.`);
     }
 
-    const ext = file.name.split('.').pop() || 'jpg';
+    const compressed = await compressImageFile(file, 800, 0.85);
+    const ext = compressed.name.split('.').pop() || 'jpg';
     const path = `${businessProfileId}/logo-${Date.now()}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from(LOGO_BUCKET)
-      .upload(path, file, { upsert: true, cacheControl: '3600' });
+      .upload(path, compressed, { upsert: true, cacheControl: '31536000' });
     if (uploadError) throw uploadError;
 
     const { data } = supabase.storage.from(LOGO_BUCKET).getPublicUrl(path);
