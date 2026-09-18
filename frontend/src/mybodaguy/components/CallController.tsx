@@ -15,6 +15,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
+import { ICE_SERVERS } from '../lib/webrtc/iceServers';
 
 type CallMode = 'voice' | 'video';
 type CallPhase = 'idle' | 'outgoing' | 'incoming' | 'active';
@@ -31,11 +32,6 @@ interface CallControllerProps {
   outgoingRequest: CallMode | null;
   onOutgoingConsumed: () => void;
 }
-
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
 
 function useRingtone() {
   const audioCtxRef = useRef<AudioContext | null>(null);

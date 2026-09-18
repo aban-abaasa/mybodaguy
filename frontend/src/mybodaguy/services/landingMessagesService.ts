@@ -23,6 +23,7 @@ export interface LandingMessage {
   attachment_url?: string | null;
   attachment_type?: string | null;
   attachment_name?: string | null;
+  sender_avatar_url?: string | null;
 }
 
 export interface LandingThread extends LandingMessage {
@@ -49,6 +50,7 @@ export const createLandingMessage = async ({
   authId,
   isPublic,
   attachment,
+  senderAvatarUrl,
 }: {
   name?: string;
   email?: string;
@@ -57,6 +59,7 @@ export const createLandingMessage = async ({
   authId?: string | null;
   isPublic?: boolean;
   attachment?: { url: string; type: string; name: string } | null;
+  senderAvatarUrl?: string | null;
 }): Promise<LandingMessage> => {
   const { data, error } = await supabase
     .from('landing_messages')
@@ -74,6 +77,7 @@ export const createLandingMessage = async ({
       attachment_url: attachment?.url || null,
       attachment_type: attachment?.type || null,
       attachment_name: attachment?.name || null,
+      sender_avatar_url: senderAvatarUrl || null,
     })
     .select()
     .single();
@@ -90,6 +94,7 @@ export const replyToLandingMessage = async ({
   authId,
   message,
   attachment,
+  senderAvatarUrl,
 }: {
   parentId: string;
   name?: string;
@@ -97,6 +102,7 @@ export const replyToLandingMessage = async ({
   authId?: string | null;
   message: string;
   attachment?: { url: string; type: string; name: string } | null;
+  senderAvatarUrl?: string | null;
 }): Promise<LandingMessage> => {
   const { data, error } = await supabase
     .from('landing_messages')
@@ -112,6 +118,7 @@ export const replyToLandingMessage = async ({
       attachment_url: attachment?.url || null,
       attachment_type: attachment?.type || null,
       attachment_name: attachment?.name || null,
+      sender_avatar_url: senderAvatarUrl || null,
     })
     .select()
     .single();

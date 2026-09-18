@@ -18,11 +18,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../services/supabaseClient';
-
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
+import { ICE_SERVERS } from '../lib/webrtc/iceServers';
 
 const RING_INTERVAL_MS = 3000;
 const RING_TIMEOUT_MS = 45000;

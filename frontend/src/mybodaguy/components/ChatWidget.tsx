@@ -28,6 +28,8 @@ import {
 import { useDirectCall } from '../hooks/useDirectCall';
 import { Linkify } from '../utils/linkify';
 import { uploadChatImage, type ChatAttachment } from '../services/chatAttachmentService';
+import ImageLightbox from './common/ImageLightbox';
+import { ChatAvatar } from '../utils/avatar';
 import { useCommunityLive } from '../hooks/useCommunityLive';
 import CallDock from './calls/CallDock';
 import CallStage from './calls/CallStage';
@@ -101,6 +103,7 @@ export default function ChatWidget() {
 
   const [communityThreads, setCommunityThreads] = useState<LandingThread[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const [liveChatDraft, setLiveChatDraft] = useState('');
   const [liveChatSending, setLiveChatSending] = useState(false);
@@ -265,11 +268,31 @@ export default function ChatWidget() {
 
   const selectedThread = communityThreads.find((t) => t.id === selectedThreadId) || null;
 
+  // Smart auto-scroll: always jump to the latest message on open/channel/
+  // thread switches (deliberate navigation), but once you've scrolled up to
+  // read older messages, a new one arriving shouldn't yank you back down —
+  // only re-pin to the bottom if you were already near it (tracked by
+  // handleListScroll below, which reflects your position BEFORE the new
+  // message renders).
+  const isNearBottomRef = useRef(true);
+  const handleListScroll = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  };
+
   useEffect(() => {
     if (open && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      isNearBottomRef.current = true;
     }
-  }, [supportMessages, communityThreads, selectedThreadId, open, channel]);
+  }, [open, channel, selectedThreadId]);
+
+  useEffect(() => {
+    if (open && scrollRef.current && isNearBottomRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [supportMessages, communityThreads]);
 
   const markChannelRead = (ch: 'support' | 'community') => {
     if (ch === 'support') {
@@ -342,14 +365,16 @@ export default function ChatWidget() {
     if (!who) return;
 
     setSending(true);
+    isNearBottomRef.current = true;
     try {
       const attachment = pendingAttachment;
+      const senderAvatarUrl = who.isGuest ? null : ((who as any).avatarUrl || null);
       if (channel === 'community') {
         const senderAuthId = who.isGuest ? null : (who as any).authId;
         if (selectedThreadId) {
-          await replyToLandingMessage({ parentId: selectedThreadId, name: who.name, email: who.email, authId: senderAuthId, message: body, attachment });
+          await replyToLandingMessage({ parentId: selectedThreadId, name: who.name, email: who.email, authId: senderAuthId, message: body, attachment, senderAvatarUrl });
         } else {
-          await createLandingMessage({ name: who.name, email: who.email, authId: senderAuthId, message: body, isPublic: true, attachment });
+          await createLandingMessage({ name: who.name, email: who.email, authId: senderAuthId, message: body, isPublic: true, attachment, senderAvatarUrl });
         }
         setCommunityThreads(await fetchPublicThreads(50, { authId: senderAuthId, guestKey: guestLikeKey }));
       } else {
@@ -369,7 +394,7 @@ export default function ChatWidget() {
           setSupportConvId(convId);
         }
         const senderRole = who.isGuest ? 'guest' : ((who as any).role || 'guest');
-        const msg = await sendMessage(convId, { senderRole, senderName: who.name, body, attachment });
+        const msg = await sendMessage(convId, { senderRole, senderName: who.name, senderAvatarUrl, body, attachment });
         setSupportMessages((prev) => dedupe(prev, msg));
       }
       setDraft('');
@@ -395,6 +420,7 @@ export default function ChatWidget() {
   return (
     <>
       <IncomingCallOverlay call={supportCall} onAccept={() => { setOpen(true); setChannel('support'); supportCall.acceptCall(); }} />
+      {lightboxSrc && <ImageLightbox src={lightboxSrc} onClose={() => setLightboxSrc(null)} />}
       {showCommunityLiveStage && (
         <CommunityLiveStage
           live={communityLive}
@@ -465,55 +491,70 @@ export default function ChatWidget() {
             </button>
           </div>
 
-          <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3">
+          <div ref={scrollRef} onScroll={handleListScroll} className="flex-1 space-y-2 overflow-y-auto bg-slate-50 px-3 py-3">
             {channel === 'community' ? (
               selectedThread ? (
                 <>
                   <button onClick={() => setSelectedThreadId(null)} className="mb-1 text-[11px] font-medium text-orange-600">
                     ← Back to Community
                   </button>
-                  <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800">
-                    <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">
-                      {selectedThread.name || 'Website visitor'}
-                    </p>
-                    {selectedThread.attachment_url && (
-                      <img src={selectedThread.attachment_url} alt="" className="mb-1.5 max-h-52 rounded-lg object-cover" />
-                    )}
-                    {selectedThread.message && <p className="whitespace-pre-wrap break-words"><Linkify text={selectedThread.message} /></p>}
-                    <button
-                      onClick={() => handleLike(selectedThread.id)}
-                      disabled={selectedThread.likedByMe}
-                      className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                        selectedThread.likedByMe ? 'text-orange-500' : 'opacity-70 hover:opacity-100'
-                      }`}
-                    >
-                      <ThumbsUp className="h-3 w-3" /> {selectedThread.likeCount || 0}
-                    </button>
-                  </div>
-                  {selectedThread.replies.map((r) => (
-                    <div
-                      key={r.id}
-                      className={`ml-4 mt-2 rounded-xl px-3 py-2 text-sm ${
-                        r.sender_role === 'dev' ? 'bg-gradient-to-br from-orange-500 to-yellow-500 text-white' : 'border border-slate-200 bg-white text-slate-800'
-                      }`}
-                    >
-                      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-80">
-                        {r.sender_role === 'dev' ? 'BodaGoEra Team' : (r.name || 'Website visitor')}
-                        {r.reward_reason && ' · 🪙'}
+                  <div className="flex items-start gap-2">
+                    <ChatAvatar id={selectedThread.user_id || selectedThread.email || selectedThread.name} name={selectedThread.name} url={selectedThread.sender_avatar_url} size="mt-0.5 h-7 w-7 text-[10px]" />
+                    <div className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800">
+                      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">
+                        {selectedThread.name || 'Website visitor'}
                       </p>
-                      {r.attachment_url && (
-                        <img src={r.attachment_url} alt="" className="mb-1.5 max-h-52 rounded-lg object-cover" />
+                      {selectedThread.attachment_url && (
+                        <img
+                          src={selectedThread.attachment_url}
+                          alt=""
+                          className="mb-1.5 max-h-52 cursor-pointer rounded-lg object-cover"
+                          onClick={() => setLightboxSrc(selectedThread.attachment_url)}
+                        />
                       )}
-                      {r.message && <p className="whitespace-pre-wrap break-words"><Linkify text={r.message} /></p>}
+                      {selectedThread.message && <p className="whitespace-pre-wrap break-words"><Linkify text={selectedThread.message} /></p>}
                       <button
-                        onClick={() => handleLike(r.id)}
-                        disabled={r.likedByMe}
-                        className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                          r.likedByMe ? 'text-orange-200' : 'opacity-70 hover:opacity-100'
+                        onClick={() => handleLike(selectedThread.id)}
+                        disabled={selectedThread.likedByMe}
+                        className={`mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                          selectedThread.likedByMe ? 'text-orange-500' : 'opacity-70 hover:opacity-100'
                         }`}
                       >
-                        <ThumbsUp className="h-3 w-3" /> {r.likeCount || 0}
+                        <ThumbsUp className="h-3 w-3" /> {selectedThread.likeCount || 0}
                       </button>
+                    </div>
+                  </div>
+                  {selectedThread.replies.map((r) => (
+                    <div key={r.id} className="ml-4 mt-2 flex items-start gap-2">
+                      <ChatAvatar id={r.user_id || r.email || r.name} name={r.sender_role === 'dev' ? 'BodaGoEra Team' : r.name} url={r.sender_avatar_url} size="mt-0.5 h-6 w-6 text-[9px]" />
+                      <div
+                        className={`min-w-0 flex-1 rounded-xl px-3 py-2 text-sm ${
+                          r.sender_role === 'dev' ? 'bg-gradient-to-br from-orange-500 to-yellow-500 text-white' : 'border border-slate-200 bg-white text-slate-800'
+                        }`}
+                      >
+                        <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide opacity-80">
+                          {r.sender_role === 'dev' ? 'BodaGoEra Team' : (r.name || 'Website visitor')}
+                          {r.reward_reason && ' · 🪙'}
+                        </p>
+                        {r.attachment_url && (
+                          <img
+                            src={r.attachment_url}
+                            alt=""
+                            className="mb-1.5 max-h-52 cursor-pointer rounded-lg object-cover"
+                            onClick={() => setLightboxSrc(r.attachment_url)}
+                          />
+                        )}
+                        {r.message && <p className="whitespace-pre-wrap break-words"><Linkify text={r.message} /></p>}
+                        <button
+                          onClick={() => handleLike(r.id)}
+                          disabled={r.likedByMe}
+                          className={`mt-1 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                            r.likedByMe ? 'text-orange-200' : 'opacity-70 hover:opacity-100'
+                          }`}
+                        >
+                          <ThumbsUp className="h-3 w-3" /> {r.likeCount || 0}
+                        </button>
+                      </div>
                     </div>
                   ))}
                   {selectedThread.replies.length === 0 && (
@@ -529,12 +570,17 @@ export default function ChatWidget() {
                     onClick={() => setSelectedThreadId(t.id)}
                     className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-800 transition hover:bg-slate-50"
                   >
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-500">{t.name || 'Website visitor'}</p>
-                    <div className="mt-0.5 flex items-start gap-2">
-                      {t.attachment_url && (
-                        <img src={t.attachment_url} alt="" className="h-8 w-8 flex-shrink-0 rounded object-cover" />
-                      )}
-                      <p className="line-clamp-2 whitespace-pre-wrap break-words">{t.message || (t.attachment_url ? 'Photo' : '')}</p>
+                    <div className="flex items-start gap-2">
+                      <ChatAvatar id={t.user_id || t.email || t.name} name={t.name} url={t.sender_avatar_url} size="mt-0.5 h-7 w-7 text-[10px]" />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-500">{t.name || 'Website visitor'}</p>
+                        <div className="mt-0.5 flex items-start gap-2">
+                          {t.attachment_url && (
+                            <img src={t.attachment_url} alt="" className="h-8 w-8 flex-shrink-0 rounded object-cover" />
+                          )}
+                          <p className="line-clamp-2 whitespace-pre-wrap break-words">{t.message || (t.attachment_url ? 'Photo' : '')}</p>
+                        </div>
+                      </div>
                     </div>
                     {t.replies.length > 0 && (
                       <p className="mt-1 text-[10px] text-slate-400">{t.replies.length} {t.replies.length === 1 ? 'reply' : 'replies'}</p>
@@ -550,7 +596,8 @@ export default function ChatWidget() {
                 {supportMessages.map((m) => {
                   const isMe = m.sender_role !== 'dev';
                   return (
-                    <div key={m.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
+                    <div key={m.id} className={`flex items-end gap-2 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                      {!isMe && <ChatAvatar id="team" name="Team" url={m.sender_avatar_url} size="h-6 w-6 text-[9px]" />}
                       <div
                         className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
                           isMe ? 'bg-gradient-to-br from-orange-500 to-yellow-500 text-white' : 'border border-slate-200 bg-white text-slate-800'
@@ -558,7 +605,12 @@ export default function ChatWidget() {
                       >
                         {!isMe && <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">Team</p>}
                         {m.attachment_url && (
-                          <img src={m.attachment_url} alt="" className="mb-1.5 max-h-52 rounded-lg object-cover" />
+                          <img
+                            src={m.attachment_url}
+                            alt=""
+                            className="mb-1.5 max-h-52 cursor-pointer rounded-lg object-cover"
+                            onClick={() => setLightboxSrc(m.attachment_url)}
+                          />
                         )}
                         {m.body && <p className="whitespace-pre-wrap break-words"><Linkify text={m.body} /></p>}
                       </div>

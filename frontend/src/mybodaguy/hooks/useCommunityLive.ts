@@ -12,11 +12,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '../services/supabaseClient';
-
-const ICE_SERVERS = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-];
+import { ICE_SERVERS } from '../lib/webrtc/iceServers';
 
 // Shared prefix (not app-specific) so a scope like 'community' is the same
 // Realtime room across ICAN, digital-city-era, and mybodaguy — they already

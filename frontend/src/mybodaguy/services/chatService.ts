@@ -16,6 +16,7 @@ export interface ChatIdentity {
   name: string;
   email: string;
   role: string;
+  avatarUrl?: string | null;
 }
 
 export const getGuestIdentity = (): GuestChatIdentity | null => {
@@ -77,13 +78,14 @@ export const fetchMessages = async (conversationId: string) => {
   return data || [];
 };
 
-export const sendMessage = async (conversationId: string, { senderRole, senderName, body, attachment }: { senderRole: string; senderName?: string; body: string; attachment?: { url: string; type: string; name: string } | null; }) => {
+export const sendMessage = async (conversationId: string, { senderRole, senderName, senderAvatarUrl, body, attachment }: { senderRole: string; senderName?: string; senderAvatarUrl?: string | null; body: string; attachment?: { url: string; type: string; name: string } | null; }) => {
   const { data, error } = await supabase
     .from('chat_messages')
     .insert({
       conversation_id: conversationId,
       sender_role: senderRole,
       sender_name: senderName || null,
+      sender_avatar_url: senderAvatarUrl || null,
       body,
       attachment_url: attachment?.url || null,
       attachment_type: attachment?.type || null,
@@ -157,9 +159,11 @@ export const resolveChatIdentity = async (): Promise<ChatIdentity | null> => {
     if (!user) return null;
 
     let name = (user as any).user_metadata?.full_name || user.email || 'User';
+    let avatarUrl: string | null = null;
     try {
       const profile = await userService.getUserProfile(user.id);
       if (profile?.full_name) name = profile.full_name;
+      avatarUrl = profile?.avatar_url || null;
     } catch {
       // profile lookup is best-effort
     }
@@ -177,6 +181,7 @@ export const resolveChatIdentity = async (): Promise<ChatIdentity | null> => {
       name,
       email: user.email || '',
       role,
+      avatarUrl,
     };
   } catch {
     return null;
