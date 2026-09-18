@@ -22,6 +22,74 @@
 -- Safe to re-run.
 -- ============================================================================
 
+-- mbg_dev_create_support_link / mbg_dev_update_support_link_tabs
+-- (ADD_SUPPORT_CONSOLE.sql) only ever validated allowed_tabs against
+-- ('messages', 'public-board') — the UI lets an admin pick 'users' too
+-- (DeveloperDashboard.tsx's SUPPORT_LINK_TAB_OPTIONS), but it was being
+-- silently dropped by this WHERE filter on save, so a link "created" with
+-- Users checked would end up with allowed_tabs = {messages,public-board}
+-- and mbg_support_list_users() would then correctly refuse it as
+-- unauthorized (mbg_support_link_is_valid(token,'users') = false). Widen
+-- the filter to match reality.
+CREATE OR REPLACE FUNCTION public.mbg_dev_create_support_link(
+  p_label TEXT DEFAULT NULL,
+  p_password TEXT DEFAULT NULL,
+  p_allowed_tabs TEXT[] DEFAULT ARRAY['messages', 'public-board']
+) RETURNS JSONB SECURITY DEFINER SET search_path = public, extensions LANGUAGE plpgsql AS $$
+DECLARE
+  v_token  TEXT;
+  v_secret TEXT;
+  v_tabs   TEXT[];
+  v_id     UUID;
+BEGIN
+  IF NOT public.is_main_mbg_developer() THEN RAISE EXCEPTION 'unauthorized'; END IF;
+
+  IF p_password IS NULL OR length(p_password) < 4 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Password must be at least 4 characters.');
+  END IF;
+
+  SELECT array_agg(DISTINCT t) INTO v_tabs
+  FROM unnest(COALESCE(p_allowed_tabs, ARRAY['messages', 'public-board'])) AS t
+  WHERE t IN ('messages', 'public-board', 'users');
+
+  IF v_tabs IS NULL OR array_length(v_tabs, 1) IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Pick at least one tab.');
+  END IF;
+
+  v_token  := encode(gen_random_bytes(24), 'hex');
+  v_secret := encode(gen_random_bytes(24), 'hex');
+
+  INSERT INTO public.mbg_support_links (token, board_secret, label, password_hash, allowed_tabs, created_by)
+  VALUES (v_token, v_secret, p_label, crypt(p_password, gen_salt('bf')), v_tabs, auth.uid())
+  RETURNING id INTO v_id;
+
+  RETURN jsonb_build_object('success', true, 'id', v_id, 'token', v_token);
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.mbg_dev_update_support_link_tabs(p_link_id UUID, p_allowed_tabs TEXT[])
+RETURNS JSONB SECURITY DEFINER SET search_path = public LANGUAGE plpgsql AS $$
+DECLARE
+  v_tabs TEXT[];
+BEGIN
+  IF NOT public.is_main_mbg_developer() THEN RAISE EXCEPTION 'unauthorized'; END IF;
+
+  SELECT array_agg(DISTINCT t) INTO v_tabs
+  FROM unnest(COALESCE(p_allowed_tabs, '{}'::TEXT[])) AS t
+  WHERE t IN ('messages', 'public-board', 'users');
+
+  IF v_tabs IS NULL OR array_length(v_tabs, 1) IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Pick at least one tab.');
+  END IF;
+
+  UPDATE public.mbg_support_links SET allowed_tabs = v_tabs WHERE id = p_link_id;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Link not found.');
+  END IF;
+  RETURN jsonb_build_object('success', true);
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.mbg_support_list_users(p_token TEXT)
 RETURNS TABLE (
   id             UUID,
