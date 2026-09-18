@@ -443,18 +443,16 @@ type SupportLinkRow = {
   created_at: string;
 };
 
+// Only tabs with a matching mbg_support_* read-only RPC belong here — every
+// other DeveloperDashboard tab (Applications, Regions, Commissions,
+// Supermarkets, Transport, Rewards, Settings) needs one written first (see
+// ADD_SUPPORT_CONSOLE.sql / ADD_SUPPORT_CONSOLE_USERS_READONLY.sql) before
+// it can be added to this list — this is pure browser-to-Postgres RPC, no
+// backend server involved, so an unwired tab would just show nothing.
 const SUPPORT_LINK_TAB_OPTIONS = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'users', label: 'Users' },
-  { id: 'applications', label: 'Applications' },
-  { id: 'regions', label: 'Regions' },
-  { id: 'commissions', label: 'Commissions' },
-  { id: 'supermarkets', label: 'Supermarkets' },
-  { id: 'transport', label: 'Transport' },
-  { id: 'rewards', label: 'Rewards' },
   { id: 'public-board', label: 'Public Board' },
   { id: 'messages', label: 'Messages' },
-  { id: 'settings', label: 'Settings' },
+  { id: 'users', label: 'Users' },
 ];
 const LOW_RISK_SUPPORT_TABS = new Set(['messages', 'public-board']);
 
@@ -575,7 +573,7 @@ function SupportLinksTab() {
         </button>
       </div>
       <p className="text-sm text-slate-600 mb-4">
-        Generate a password-protected link that opens Messages and/or Public Board for someone
+        Generate a password-protected link that opens whichever tabs you pick below for someone
         with no mybodaguy account — no sign-in required, just the URL and password you share.
       </p>
 
@@ -609,9 +607,8 @@ function SupportLinksTab() {
         </div>
         {newAllowedTabs.some((id) => !LOW_RISK_SUPPORT_TABS.has(id)) && (
           <p className="text-[11px] leading-snug text-amber-600">
-            ⚠️ Anything beyond Messages/Public Board gives whoever opens this link a real (anonymous) developer
-            account with access to that tab's real data — user info, wallets, commissions, etc. Only pick these
-            for someone you'd trust with that.
+            ⚠️ Anything beyond Messages/Public Board exposes real user data (names, emails, roles) to whoever
+            opens this link. Only pick this for someone you'd trust with that.
           </p>
         )}
         <button
@@ -705,8 +702,7 @@ function SupportLinksTab() {
                   </div>
                   {editTabs.some((id) => !LOW_RISK_SUPPORT_TABS.has(id)) && (
                     <p className="mt-2 text-[11px] leading-snug text-amber-600">
-                      ⚠️ Anything beyond Messages/Public Board hands out a real (anonymous) developer account
-                      scoped to that tab's real data.
+                      ⚠️ Anything beyond Messages/Public Board exposes real user data to whoever holds this link.
                     </p>
                   )}
                   <div className="mt-2 flex items-center gap-2">
@@ -726,6 +722,121 @@ function SupportLinksTab() {
           );
         })}
         {!loading && links.length === 0 && <p className="text-sm text-slate-500">No support links created yet.</p>}
+      </div>
+
+      <IwosOnboardingSection />
+    </div>
+  );
+}
+
+// Onboard a REAL mybodaguy account (looked up by their own email — not a
+// support-link visitor, who has no identity to pay) as a paid contract
+// worker of IWOS, the same platform-fee business every app's real fee
+// already flows into (fn_credit_platform_fee_to_business — see
+// ADD_ICANERA_UNIFIED_PLATFORM_FEE.sql). Mirrors ICAN's own Support Team
+// tab. See ADD_SUPPORT_IWOS_ONBOARDING.sql.
+function IwosOnboardingSection() {
+  const [overview, setOverview] = useState<{ members: any[] }>({ members: [] });
+  const [loading, setLoading] = useState(true);
+
+  const [email, setEmail] = useState('');
+  const [amount, setAmount] = useState('');
+  const [currency, setCurrency] = useState('UGX');
+  const [frequency, setFrequency] = useState('contract');
+  const [onboarding, setOnboarding] = useState(false);
+  const [error, setError] = useState('');
+  const [ok, setOk] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    const { data, error: err } = await supabase.rpc('mbg_dev_get_iwos_overview');
+    if (err) console.error('[IwosOnboardingSection] mbg_dev_get_iwos_overview:', err.message);
+    setOverview(data || { members: [] });
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(''); setOk(false);
+    const amt = parseFloat(amount);
+    if (!email.trim() || !amt || amt <= 0 || onboarding) return;
+    setOnboarding(true);
+    try {
+      const { data, error: err } = await supabase.rpc('mbg_dev_onboard_iwos_support_staff', {
+        p_target_email: email.trim(),
+        p_base_pay_amount: amt,
+        p_currency: currency.toUpperCase(),
+        p_pay_frequency: frequency,
+      });
+      if (err || !data?.success) { setError(data?.error || err?.message || 'Failed to onboard.'); return; }
+      setOk(true);
+      setEmail(''); setAmount('');
+      await refresh();
+    } finally {
+      setOnboarding(false);
+    }
+  };
+
+  return (
+    <div className="mt-6 space-y-6">
+      <div className="rounded-xl border border-slate-200 p-4">
+        <h3 className="text-lg font-bold text-slate-800">Onboard as IWOS contractor</h3>
+        <p className="mt-1 mb-3 text-xs text-slate-500">
+          Independent of the links above — this pays a real mybodaguy account out of IWOS's wallet
+          (the same business every app's platform fee flows into), looked up by their account email.
+        </p>
+        <form onSubmit={handleSubmit} className="flex flex-wrap items-center gap-2">
+          <input
+            value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="their@account.email"
+            className="min-w-[180px] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
+          />
+          <input
+            value={amount} onChange={(e) => setAmount(e.target.value)} type="number" min="0" step="1" placeholder="Pay amount"
+            className="w-28 rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
+          />
+          <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 outline-none">
+            <option value="UGX">UGX</option>
+            <option value="USD">USD</option>
+            <option value="KES">KES</option>
+          </select>
+          <select value={frequency} onChange={(e) => setFrequency(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-2 text-sm text-slate-800 outline-none">
+            <option value="contract">Per contract</option>
+            <option value="monthly">Monthly</option>
+            <option value="weekly">Weekly</option>
+            <option value="daily">Daily</option>
+            <option value="hourly">Hourly</option>
+          </select>
+          <button
+            type="submit" disabled={onboarding || !email.trim() || !(parseFloat(amount) > 0)}
+            className="rounded-lg px-3 py-2 text-xs font-bold text-white disabled:opacity-40 bg-gradient-to-r from-orange-500 to-yellow-500"
+          >
+            {onboarding ? 'Onboarding…' : 'Onboard'}
+          </button>
+        </form>
+        {error && <p className="mt-2 text-xs text-rose-500">{error}</p>}
+        {ok && <p className="mt-2 text-xs text-emerald-600">Onboarded.</p>}
+      </div>
+
+      <div className="rounded-xl border border-slate-200 p-4">
+        <h3 className="text-lg font-bold text-slate-800">IWOS staff on the books ({overview.members?.length || 0})</h3>
+        <div className="mt-3 space-y-2">
+          {loading && <p className="text-sm text-slate-500">Loading…</p>}
+          {!loading && (overview.members || []).map((m: any) => (
+            <div key={m.id} className="flex items-center justify-between rounded-lg border border-slate-200 px-3 py-2">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-slate-800">{m.job_title || 'Staff'}</p>
+                <p className="text-[11px] text-slate-500">
+                  {m.employment_status} · joined {m.joined_at ? new Date(m.joined_at).toLocaleDateString() : '—'}
+                </p>
+              </div>
+            </div>
+          ))}
+          {!loading && (overview.members || []).length === 0 && (
+            <p className="text-sm text-slate-500">No IWOS staff on the books yet.</p>
+          )}
+        </div>
       </div>
     </div>
   );
