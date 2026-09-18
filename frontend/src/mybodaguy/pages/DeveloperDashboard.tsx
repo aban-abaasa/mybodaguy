@@ -12,6 +12,7 @@ import RegionsManagement from '../components/RegionsManagement';
 import IcanCoinCard from '../components/IcanCoinCard';
 import SupermarketProductManager from '../components/SupermarketProductManager';
 import { supabase } from '../services/supabaseClient';
+import { Linkify } from '../utils/linkify';
 import {
   devListAllLandingMessages,
   devDeleteLandingMessage,
@@ -281,7 +282,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
           {activeTab === 'commissions' && <CommissionsTab />}
           {activeTab === 'supermarkets' && <SupermarketsTab />}
           {activeTab === 'transport' && <TransportOrdersTab orders={transportOrders} loading={transportLoading} onRefresh={loadTransportOrders} />}
-          {activeTab === 'rewards' && <RewardRedemptionsTab />}
+          {activeTab === 'rewards' && <RewardsTab />}
           {activeTab === 'public-board' && <PublicBoardTab />}
           {activeTab === 'messages' && <MessagesTab />}
           {activeTab === 'settings' && <SettingsTab />}
@@ -805,6 +806,376 @@ function ApplicationsTab() {
 // (mbg_redeem_points_for_item), this just tracks the offline delivery.
 const REDEMPTION_STATUSES = ['pending', 'processing', 'shipped', 'fulfilled', 'cancelled'] as const;
 
+// Matches the CHECK constraints on mbg_reward_catalog in
+// ADD_REWARD_POINTS_LOYALTY_SYSTEM.sql — keep these in sync with the DB.
+const CATALOG_CATEGORIES = ['safety_gear', 'home'] as const;
+const CATALOG_ROLE_SCOPES = ['both', 'customer', 'rider'] as const;
+
+type CatalogItem = {
+  id: string;
+  category: typeof CATALOG_CATEGORIES[number];
+  name: string;
+  description: string | null;
+  emoji: string;
+  points_cost: number;
+  role_scope: typeof CATALOG_ROLE_SCOPES[number];
+  stock_qty: number | null;
+  active: boolean;
+  sort_order: number;
+};
+
+// Parent tab: what the loyalty program actually looks like right now
+// (Overview), what's redeemable and at what price (Catalog — the live
+// mbg_reward_catalog table, editable here instead of by hand-written SQL),
+// and the existing offline fulfilment queue (Redemptions).
+function RewardsTab() {
+  const [subTab, setSubTab] = useState<'overview' | 'catalog' | 'redemptions'>('overview');
+  const subTabs = [
+    { id: 'overview' as const, label: 'Overview' },
+    { id: 'catalog' as const, label: 'Catalog' },
+    { id: 'redemptions' as const, label: 'Redemptions' },
+  ];
+
+  return (
+    <div>
+      <div className="mb-6">
+        <h2 className="text-2xl font-bold text-slate-800">Rewards</h2>
+        <p className="text-sm text-slate-600 mt-1">Loyalty points earned automatically from real ICAN ride activity — redeemable for gear or an instant ICAN coin conversion.</p>
+      </div>
+
+      <div className="flex gap-2 mb-6 border-b border-slate-200">
+        {subTabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setSubTab(t.id)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              subTab === t.id ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {subTab === 'overview' && <RewardsOverviewTab />}
+      {subTab === 'catalog' && <RewardsCatalogTab />}
+      {subTab === 'redemptions' && <RewardRedemptionsTab />}
+    </div>
+  );
+}
+
+// Read-only snapshot of how the program is actually doing — pulls straight
+// from mbg_reward_points and mbg_reward_redemptions (both readable by the
+// developer role via RLS: reward_points_admin_read / reward_redemptions_admin_all),
+// no separate stats table to keep in sync.
+function RewardsOverviewTab() {
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<{
+    userCount: number;
+    pointsInCirculation: number;
+    lifetimePointsIssued: number;
+    byTier: Record<string, number>;
+    gearByStatus: Record<string, number>;
+    gearRedeemed: number;
+    coinConversions: number;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const [{ data: pointsRows }, { data: redemptionRows }] = await Promise.all([
+        supabase.from('mbg_reward_points').select('points_balance, lifetime_points, tier'),
+        supabase.from('mbg_reward_redemptions').select('status, item_name'),
+      ]);
+      if (cancelled) return;
+
+      const byTier: Record<string, number> = {};
+      let pointsInCirculation = 0;
+      let lifetimePointsIssued = 0;
+      for (const r of pointsRows || []) {
+        pointsInCirculation += Number(r.points_balance) || 0;
+        lifetimePointsIssued += Number(r.lifetime_points) || 0;
+        byTier[r.tier] = (byTier[r.tier] || 0) + 1;
+      }
+
+      // Coin conversions are always filed as an instantly-'fulfilled' row
+      // (mbg_redeem_points_for_coins) — split them out so the status
+      // breakdown below reflects gear fulfilment only, not silently
+      // inflated by every coin conversion landing in "fulfilled".
+      const gearByStatus: Record<string, number> = {};
+      let gearRedeemed = 0;
+      let coinConversions = 0;
+      for (const r of redemptionRows || []) {
+        if (r.item_name?.includes('ICAN Coins')) {
+          coinConversions += 1;
+        } else {
+          gearRedeemed += 1;
+          gearByStatus[r.status] = (gearByStatus[r.status] || 0) + 1;
+        }
+      }
+
+      setStats({
+        userCount: (pointsRows || []).length,
+        pointsInCirculation,
+        lifetimePointsIssued,
+        byTier,
+        gearByStatus,
+        gearRedeemed,
+        coinConversions,
+      });
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-slate-600">Loading rewards overview...</p>
+      </div>
+    );
+  }
+
+  if (!stats || stats.userCount === 0) {
+    return (
+      <p className="text-sm text-slate-400 py-8 text-center">
+        Nobody has earned reward points yet — points are awarded automatically the moment a customer pays (or a rider gets paid) in ICAN, not cash. Once real ICAN-wallet rides start flowing, this fills in on its own.
+      </p>
+    );
+  }
+
+  const tierOrder = ['platinum', 'gold', 'silver', 'bronze'] as const;
+
+  return (
+    <div className="space-y-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard title="Members earning points" value={String(stats.userCount)} icon={<Users size={20} className="text-orange-500" />} />
+        <StatCard title="Points in circulation" value={stats.pointsInCirculation.toLocaleString()} icon={<TrendingUp size={20} className="text-orange-500" />} />
+        <StatCard title="Lifetime points issued" value={stats.lifetimePointsIssued.toLocaleString()} icon={<Gift size={20} className="text-orange-500" />} />
+        <StatCard title="ICAN coin conversions" value={String(stats.coinConversions)} icon={<CheckCircle size={20} className="text-orange-500" />} />
+      </div>
+
+      <div>
+        <h3 className="font-semibold text-slate-700 mb-3">Members by tier</h3>
+        <div className="flex flex-wrap gap-3">
+          {tierOrder.map((tier) => (
+            <div key={tier} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+              <span className="capitalize font-medium text-slate-700">{tier}</span>
+              <span className="ml-2 text-slate-500">{stats.byTier[tier] || 0}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="font-semibold text-slate-700 mb-3">Gear redemptions by status ({stats.gearRedeemed} total)</h3>
+        {stats.gearRedeemed === 0 ? (
+          <p className="text-sm text-slate-400">No gear redeemed yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-3">
+            {REDEMPTION_STATUSES.map((status) => (
+              <div key={status} className="px-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm">
+                <span className="capitalize font-medium text-slate-700">{status}</span>
+                <span className="ml-2 text-slate-500">{stats.gearByStatus[status] || 0}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Admin catalog management — the shared reward shop customers and riders
+// redeem from. Backed directly by mbg_reward_catalog; the
+// reward_catalog_admin_all RLS policy already grants the developer role
+// full read/write here, so this is plain Supabase table access, no RPC.
+// Deactivating (not deleting) is the intended way to retire an item: a
+// redeemed item's name is snapshotted onto its mbg_reward_redemptions row,
+// but the FK from redemptions to the catalog row would block a hard delete
+// of anything ever redeemed anyway.
+function RewardsCatalogTab() {
+  const [items, setItems] = useState<CatalogItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [form, setForm] = useState({
+    category: 'safety_gear' as CatalogItem['category'],
+    name: '',
+    description: '',
+    emoji: '🎁',
+    points_cost: '',
+    role_scope: 'both' as CatalogItem['role_scope'],
+    stock_qty: '',
+  });
+
+  const load = async () => {
+    setLoading(true);
+    const { data } = await supabase
+      .from('mbg_reward_catalog')
+      .select('*')
+      .order('category', { ascending: true })
+      .order('sort_order', { ascending: true });
+    setItems((data as CatalogItem[]) || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const saveField = async (id: string, patch: Partial<CatalogItem>) => {
+    setBusyId(id);
+    try {
+      const { error } = await supabase.from('mbg_reward_catalog').update(patch).eq('id', id);
+      if (error) throw error;
+      setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+      toast.success('Saved');
+    } catch (err: any) {
+      toast.error(err.message || 'Save failed');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const addItem = async () => {
+    const pointsCost = Number(form.points_cost);
+    if (!form.name.trim() || !pointsCost || pointsCost <= 0) {
+      toast.error('Name and a points cost above 0 are required');
+      return;
+    }
+    setAdding(true);
+    try {
+      const { error } = await supabase.from('mbg_reward_catalog').insert({
+        category: form.category,
+        name: form.name.trim(),
+        description: form.description.trim() || null,
+        emoji: form.emoji.trim() || '🎁',
+        points_cost: pointsCost,
+        role_scope: form.role_scope,
+        stock_qty: form.stock_qty === '' ? null : Number(form.stock_qty),
+        sort_order: items.length,
+      });
+      if (error) throw error;
+      toast.success('Reward added to catalog');
+      setForm({ category: 'safety_gear', name: '', description: '', emoji: '🎁', points_cost: '', role_scope: 'both', stock_qty: '' });
+      setShowAdd(false);
+      await load();
+    } catch (err: any) {
+      toast.error(err.message || 'Could not add item — name may already be in use');
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="text-center py-12">
+        <div className="w-12 h-12 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+        <p className="text-slate-600">Loading catalog...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <p className="text-sm text-slate-500 max-w-xl">What customers and riders can spend points on. Deactivate an item instead of deleting it — past redemptions keep their own snapshot of the name and don't change.</p>
+        <button
+          onClick={() => setShowAdd((v) => !v)}
+          className="px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all whitespace-nowrap"
+        >
+          {showAdd ? 'Cancel' : '+ Add reward'}
+        </button>
+      </div>
+
+      {showAdd && (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6 grid sm:grid-cols-2 gap-3">
+          <input placeholder="Emoji" value={form.emoji} onChange={(e) => setForm({ ...form, emoji: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+          <input placeholder="Item name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+          <textarea placeholder="Description" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm sm:col-span-2" rows={2} />
+          <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as CatalogItem['category'] })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm capitalize">
+            {CATALOG_CATEGORIES.map((c) => <option key={c} value={c}>{c.replace('_', ' ')}</option>)}
+          </select>
+          <select value={form.role_scope} onChange={(e) => setForm({ ...form, role_scope: e.target.value as CatalogItem['role_scope'] })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm capitalize">
+            {CATALOG_ROLE_SCOPES.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <input type="number" min={1} placeholder="Points cost" value={form.points_cost} onChange={(e) => setForm({ ...form, points_cost: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+          <input type="number" min={0} placeholder="Stock (blank = unlimited)" value={form.stock_qty} onChange={(e) => setForm({ ...form, stock_qty: e.target.value })} className="px-3 py-2 border border-slate-200 rounded-lg text-sm" />
+          <button onClick={addItem} disabled={adding} className="sm:col-span-2 px-4 py-2 bg-orange-500 text-white font-semibold rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-all">
+            {adding ? 'Adding...' : 'Add to catalog'}
+          </button>
+        </div>
+      )}
+
+      {items.length === 0 ? (
+        <p className="text-sm text-slate-400">Catalog is empty.</p>
+      ) : (
+        <div className="space-y-3">
+          {items.map((item) => (
+            <div key={item.id} className={`bg-white border rounded-lg p-4 flex flex-wrap items-center gap-4 ${item.active ? 'border-slate-200' : 'border-slate-100 opacity-60'}`}>
+              <div className="text-2xl">{item.emoji}</div>
+              <div className="flex-1 min-w-[160px]">
+                <div className="font-semibold text-slate-800">{item.name}</div>
+                <div className="text-xs text-slate-400 capitalize">{item.category.replace('_', ' ')} · {item.role_scope}</div>
+              </div>
+              <label className="flex items-center gap-1 text-sm text-slate-600">
+                Cost
+                <input
+                  type="number"
+                  min={1}
+                  defaultValue={item.points_cost}
+                  disabled={busyId === item.id}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v > 0 && v !== item.points_cost) saveField(item.id, { points_cost: v });
+                  }}
+                  className="w-20 px-2 py-1 border border-slate-200 rounded text-sm"
+                />
+                pts
+              </label>
+              <label className="flex items-center gap-1 text-sm text-slate-600">
+                Stock
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="∞"
+                  defaultValue={item.stock_qty ?? ''}
+                  disabled={busyId === item.id}
+                  onBlur={(e) => {
+                    const raw = e.target.value;
+                    const v = raw === '' ? null : Number(raw);
+                    if (v !== item.stock_qty) saveField(item.id, { stock_qty: v });
+                  }}
+                  className="w-20 px-2 py-1 border border-slate-200 rounded text-sm"
+                />
+              </label>
+              <select
+                value={item.role_scope}
+                disabled={busyId === item.id}
+                onChange={(e) => saveField(item.id, { role_scope: e.target.value as CatalogItem['role_scope'] })}
+                className="px-2 py-1 border border-slate-200 rounded text-sm capitalize"
+              >
+                {CATALOG_ROLE_SCOPES.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <button
+                onClick={() => saveField(item.id, { active: !item.active })}
+                disabled={busyId === item.id}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  item.active ? 'bg-green-50 text-green-700 hover:bg-green-100' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                {item.active ? 'Active' : 'Inactive'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RewardRedemptionsTab() {
   const [redemptions, setRedemptions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -860,11 +1231,8 @@ function RewardRedemptionsTab() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-800">Reward Redemptions</h2>
-          <p className="text-sm text-slate-600 mt-1">Points-for-gear requests from customers and riders — helmet, jacket, reflectors, home goods, or an instant ICAN coin conversion.</p>
-        </div>
-        <button onClick={load} className="px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all">
+        <p className="text-sm text-slate-600">Points-for-gear requests from customers and riders — helmet, jacket, reflectors, home goods, or an instant ICAN coin conversion.</p>
+        <button onClick={load} className="px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all whitespace-nowrap">
           Refresh
         </button>
       </div>
@@ -971,7 +1339,7 @@ function DeveloperApplicationThread({ conversationId }: { conversationId: string
               <div key={m.id} className={`flex ${fromDev ? 'justify-end' : 'justify-start'}`}>
                 <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${fromDev ? 'bg-gradient-to-br from-orange-500 to-yellow-500 text-white' : 'bg-slate-100 text-slate-800'}`}>
                   {!fromDev && <p className="mb-0.5 text-[10px] font-semibold uppercase text-slate-500">{m.sender_name || 'Applicant'}</p>}
-                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                  <p className="whitespace-pre-wrap break-words"><Linkify text={m.body} /></p>
                 </div>
               </div>
             );
@@ -1389,7 +1757,7 @@ function MessagesTab() {
                           {m.sender_name || selected.role}
                         </p>
                       )}
-                      <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                      <p className="whitespace-pre-wrap break-words"><Linkify text={m.body} /></p>
                     </div>
                   </div>
                 );
@@ -1630,7 +1998,7 @@ function PublicBoardTab() {
                             )}
                             <span className="text-[10px] text-slate-400">{fmtBoardTime(r.created_at)}</span>
                           </div>
-                          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700">{r.message}</p>
+                          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700"><Linkify text={r.message} /></p>
                           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                             {r.sender_role !== 'dev' && r.user_id && !r.rewarded_at && (
                               <button

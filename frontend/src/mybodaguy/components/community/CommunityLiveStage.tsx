@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Eye, MessageCircle, Mic, MicOff, PhoneOff, Send, ThumbsUp, Video, VideoOff, X } from 'lucide-react';
+import { Linkify } from '../../utils/linkify';
 
 const formatElapsed = (seconds: number) => {
   const m = Math.floor(seconds / 60);
@@ -49,7 +50,7 @@ const LiveChatDrawer = ({ messages, onLike, draft, onDraftChange, onSend, sendin
         {[...messages].reverse().map((m: any) => (
           <div key={m.id} className="rounded-xl bg-white/10 px-2.5 py-1.5 text-sm text-white">
             <p className="text-[10px] font-semibold uppercase tracking-wide text-white/60">{m.name || 'Website visitor'}</p>
-            <p className="whitespace-pre-wrap break-words">{m.message}</p>
+            <p className="whitespace-pre-wrap break-words"><Linkify text={m.message} /></p>
             {onLike && (
               <button
                 onClick={() => onLike(m.id)}

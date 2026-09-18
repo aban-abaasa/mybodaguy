@@ -6,6 +6,7 @@ import {
   replyToThreatReport,
   updateThreatReportStatus,
 } from '../services/threatReportService';
+import { Linkify } from '../mybodaguy/utils/linkify';
 
 type Props = {
   companyId: string;
@@ -255,7 +256,7 @@ export function AdminReportsPanel({ companyId }: Props) {
                         key={reply.id}
                         className="rounded-lg border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-900/20 px-3 py-2"
                       >
-                        <p className="text-sm text-slate-800 dark:text-slate-200">{reply.message}</p>
+                        <p className="text-sm text-slate-800 dark:text-slate-200"><Linkify text={reply.message} /></p>
                         <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
                           {new Date(reply.createdAt).toLocaleString()} · {reply.authorRole}
                         </p>

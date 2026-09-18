@@ -20,6 +20,9 @@ export interface LandingMessage {
   reward_reason?: 'correct_answer' | 'popular' | null;
   likeCount?: number;
   likedByMe?: boolean;
+  attachment_url?: string | null;
+  attachment_type?: string | null;
+  attachment_name?: string | null;
 }
 
 export interface LandingThread extends LandingMessage {
@@ -45,6 +48,7 @@ export const createLandingMessage = async ({
   message,
   authId,
   isPublic,
+  attachment,
 }: {
   name?: string;
   email?: string;
@@ -52,6 +56,7 @@ export const createLandingMessage = async ({
   message: string;
   authId?: string | null;
   isPublic?: boolean;
+  attachment?: { url: string; type: string; name: string } | null;
 }): Promise<LandingMessage> => {
   const { data, error } = await supabase
     .from('landing_messages')
@@ -66,6 +71,9 @@ export const createLandingMessage = async ({
       // and the DB additionally requires an active ICAN wallet for is_public=false.
       is_public: authId ? !!isPublic : true,
       sender_role: authId ? 'user' : 'guest',
+      attachment_url: attachment?.url || null,
+      attachment_type: attachment?.type || null,
+      attachment_name: attachment?.name || null,
     })
     .select()
     .single();
@@ -81,12 +89,14 @@ export const replyToLandingMessage = async ({
   email,
   authId,
   message,
+  attachment,
 }: {
   parentId: string;
   name?: string;
   email?: string;
   authId?: string | null;
   message: string;
+  attachment?: { url: string; type: string; name: string } | null;
 }): Promise<LandingMessage> => {
   const { data, error } = await supabase
     .from('landing_messages')
@@ -99,6 +109,9 @@ export const replyToLandingMessage = async ({
       origin_app: ORIGIN_APP,
       is_public: true,
       sender_role: authId ? 'user' : 'guest',
+      attachment_url: attachment?.url || null,
+      attachment_type: attachment?.type || null,
+      attachment_name: attachment?.name || null,
     })
     .select()
     .single();

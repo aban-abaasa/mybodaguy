@@ -7,6 +7,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { X, Send, MessageCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
+import { Linkify } from '../utils/linkify';
 
 interface RideMessage {
   id: string;
@@ -103,7 +104,7 @@ export default function RideChatModal({ rideId, selfUserId, peerName, isOpen, on
                   <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm ${
                     mine ? 'bg-orange-500 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm'
                   }`}>
-                    {m.message}
+                    <Linkify text={m.message} />
                     <div className={`text-[10px] mt-0.5 ${mine ? 'text-white/70' : 'text-slate-400'}`}>
                       {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </div>

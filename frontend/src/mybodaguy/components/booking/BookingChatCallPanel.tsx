@@ -12,6 +12,7 @@ import { Phone, Video, Send } from 'lucide-react';
 import { fetchMessages, sendMessage, subscribeToMessages } from '../../services/chatService';
 import { useDirectCall } from '../../hooks/useDirectCall';
 import CallDock from '../calls/CallDock';
+import { Linkify } from '../../utils/linkify';
 
 interface BookingChatCallPanelProps {
   bookingId: string;
@@ -92,7 +93,7 @@ export default function BookingChatCallPanel({
         {messages.map((m) => (
           <div key={m.id} className={`flex ${m.sender_role === senderRole ? 'justify-end' : 'justify-start'}`}>
             <div className={`max-w-[80%] rounded-lg px-3 py-1.5 text-sm ${m.sender_role === senderRole ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-800'}`}>
-              {m.body}
+              <Linkify text={m.body} />
             </div>
           </div>
         ))}

@@ -15,6 +15,7 @@ import {
   type LandingMessage,
   type LandingThread,
 } from '../services/landingMessagesService';
+import { Linkify } from '../utils/linkify';
 
 interface Contributor {
   authId: string | null;
@@ -756,7 +757,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
                       </span>
                       <span className="text-[10px] text-[#8B6914] font-sans">{fmtBoardTime(m.created_at)}</span>
                     </div>
-                    <p className="mt-2 text-sm leading-6 text-[#5C4D3A]">{m.message}</p>
+                    <p className="mt-2 text-sm leading-6 text-[#5C4D3A]"><Linkify text={m.message} /></p>
                   </div>
                 ))}
               </div>
@@ -809,7 +810,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
                       </span>
                     )}
                   </div>
-                  <p className="mt-4 text-sm leading-7 text-[#5C4D3A]">{m.message}</p>
+                  <p className="mt-4 text-sm leading-7 text-[#5C4D3A]"><Linkify text={m.message} /></p>
                 </div>
 
                 <button
@@ -845,7 +846,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
                           </div>
                           <span className="text-[10px] text-[#8B6914] font-sans">{fmtBoardTime(r.created_at)}</span>
                         </div>
-                        <p className="mt-1 text-sm leading-6 text-[#5C4D3A]">{r.message}</p>
+                        <p className="mt-1 text-sm leading-6 text-[#5C4D3A]"><Linkify text={r.message} /></p>
                         <button
                           type="button"
                           onClick={() => handleLike(r.id)}

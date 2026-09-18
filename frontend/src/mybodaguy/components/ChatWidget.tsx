@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { MessageCircle, X, Send, Headphones, Globe, ThumbsUp, Phone, Video as VideoIcon, Radio } from 'lucide-react';
+import { MessageCircle, X, Send, Headphones, Globe, ThumbsUp, Phone, Video as VideoIcon, Radio, Image as ImageIcon, Loader2 } from 'lucide-react';
 import {
   resolveChatIdentity,
   getGuestIdentity,
@@ -26,6 +26,8 @@ import {
   type LandingMessage,
 } from '../services/landingMessagesService';
 import { useDirectCall } from '../hooks/useDirectCall';
+import { Linkify } from '../utils/linkify';
+import { uploadChatImage, type ChatAttachment } from '../services/chatAttachmentService';
 import { useCommunityLive } from '../hooks/useCommunityLive';
 import CallDock from './calls/CallDock';
 import CallStage from './calls/CallStage';
@@ -86,6 +88,10 @@ export default function ChatWidget() {
   const [channel, setChannel] = useState<'support' | 'community'>('support');
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState<ChatAttachment | null>(null);
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [attachmentError, setAttachmentError] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [position, setPosition] = useState(() => getSavedPosition());
   const [dragging, setDragging] = useState(false);
 
@@ -311,21 +317,39 @@ export default function ChatWidget() {
     }
   };
 
+  const handlePickImage = () => fileInputRef.current?.click();
+
+  const handleImageSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setAttachmentError('');
+    setAttachmentUploading(true);
+    try {
+      setPendingAttachment(await uploadChatImage(file));
+    } catch (err: any) {
+      setAttachmentError(err?.message || 'Could not upload image');
+    } finally {
+      setAttachmentUploading(false);
+    }
+  };
+
   const handleSend = async () => {
     const body = draft.trim();
-    if (!body || sending) return;
+    if ((!body && !pendingAttachment) || sending || attachmentUploading) return;
 
     const who = ensureIdentity();
     if (!who) return;
 
     setSending(true);
     try {
+      const attachment = pendingAttachment;
       if (channel === 'community') {
         const senderAuthId = who.isGuest ? null : (who as any).authId;
         if (selectedThreadId) {
-          await replyToLandingMessage({ parentId: selectedThreadId, name: who.name, email: who.email, authId: senderAuthId, message: body });
+          await replyToLandingMessage({ parentId: selectedThreadId, name: who.name, email: who.email, authId: senderAuthId, message: body, attachment });
         } else {
-          await createLandingMessage({ name: who.name, email: who.email, authId: senderAuthId, message: body, isPublic: true });
+          await createLandingMessage({ name: who.name, email: who.email, authId: senderAuthId, message: body, isPublic: true, attachment });
         }
         setCommunityThreads(await fetchPublicThreads(50, { authId: senderAuthId, guestKey: guestLikeKey }));
       } else {
@@ -345,10 +369,11 @@ export default function ChatWidget() {
           setSupportConvId(convId);
         }
         const senderRole = who.isGuest ? 'guest' : ((who as any).role || 'guest');
-        const msg = await sendMessage(convId, { senderRole, senderName: who.name, body });
+        const msg = await sendMessage(convId, { senderRole, senderName: who.name, body, attachment });
         setSupportMessages((prev) => dedupe(prev, msg));
       }
       setDraft('');
+      setPendingAttachment(null);
     } catch (err) {
       console.error('[ChatWidget] send failed:', err);
     } finally {
@@ -451,7 +476,10 @@ export default function ChatWidget() {
                     <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">
                       {selectedThread.name || 'Website visitor'}
                     </p>
-                    <p className="whitespace-pre-wrap break-words">{selectedThread.message}</p>
+                    {selectedThread.attachment_url && (
+                      <img src={selectedThread.attachment_url} alt="" className="mb-1.5 max-h-52 rounded-lg object-cover" />
+                    )}
+                    {selectedThread.message && <p className="whitespace-pre-wrap break-words"><Linkify text={selectedThread.message} /></p>}
                     <button
                       onClick={() => handleLike(selectedThread.id)}
                       disabled={selectedThread.likedByMe}
@@ -473,7 +501,10 @@ export default function ChatWidget() {
                         {r.sender_role === 'dev' ? 'BodaGoEra Team' : (r.name || 'Website visitor')}
                         {r.reward_reason && ' · 🪙'}
                       </p>
-                      <p className="whitespace-pre-wrap break-words">{r.message}</p>
+                      {r.attachment_url && (
+                        <img src={r.attachment_url} alt="" className="mb-1.5 max-h-52 rounded-lg object-cover" />
+                      )}
+                      {r.message && <p className="whitespace-pre-wrap break-words"><Linkify text={r.message} /></p>}
                       <button
                         onClick={() => handleLike(r.id)}
                         disabled={r.likedByMe}
@@ -499,7 +530,12 @@ export default function ChatWidget() {
                     className="block w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-left text-sm text-slate-800 transition hover:bg-slate-50"
                   >
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-orange-500">{t.name || 'Website visitor'}</p>
-                    <p className="mt-0.5 line-clamp-2 whitespace-pre-wrap break-words">{t.message}</p>
+                    <div className="mt-0.5 flex items-start gap-2">
+                      {t.attachment_url && (
+                        <img src={t.attachment_url} alt="" className="h-8 w-8 flex-shrink-0 rounded object-cover" />
+                      )}
+                      <p className="line-clamp-2 whitespace-pre-wrap break-words">{t.message || (t.attachment_url ? 'Photo' : '')}</p>
+                    </div>
                     {t.replies.length > 0 && (
                       <p className="mt-1 text-[10px] text-slate-400">{t.replies.length} {t.replies.length === 1 ? 'reply' : 'replies'}</p>
                     )}
@@ -521,7 +557,10 @@ export default function ChatWidget() {
                         }`}
                       >
                         {!isMe && <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-orange-500">Team</p>}
-                        <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                        {m.attachment_url && (
+                          <img src={m.attachment_url} alt="" className="mb-1.5 max-h-52 rounded-lg object-cover" />
+                        )}
+                        {m.body && <p className="whitespace-pre-wrap break-words"><Linkify text={m.body} /></p>}
                       </div>
                     </div>
                   );
@@ -558,7 +597,35 @@ export default function ChatWidget() {
                 <button onClick={() => setSelectedThreadId(null)} className="flex-shrink-0 underline">Cancel</button>
               </div>
             )}
+            {(pendingAttachment || attachmentUploading) && (
+              <div className="mb-2 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+                {attachmentUploading ? (
+                  <>
+                    <Loader2 className="h-8 w-8 flex-shrink-0 animate-spin text-slate-400 p-1.5" />
+                    <span className="text-xs text-slate-500">Uploading…</span>
+                  </>
+                ) : (
+                  <>
+                    <img src={pendingAttachment!.url} alt="" className="h-8 w-8 flex-shrink-0 rounded object-cover" />
+                    <span className="flex-1 truncate text-xs text-slate-500">{pendingAttachment!.name}</span>
+                    <button onClick={() => setPendingAttachment(null)} className="flex-shrink-0 text-slate-400 hover:text-slate-600" title="Remove image">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+            {attachmentError && <p className="mb-1.5 text-[11px] text-red-500">{attachmentError}</p>}
             <div className="flex items-center gap-2">
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImageSelected} className="hidden" />
+              <button
+                onClick={handlePickImage}
+                disabled={attachmentUploading}
+                className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-orange-500 disabled:opacity-40"
+                title="Attach an image"
+              >
+                <ImageIcon className="h-4 w-4" />
+              </button>
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -573,7 +640,7 @@ export default function ChatWidget() {
               />
               <button
                 onClick={handleSend}
-                disabled={sending || !draft.trim()}
+                disabled={sending || attachmentUploading || (!draft.trim() && !pendingAttachment)}
                 className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-yellow-500 text-white shadow-lg transition disabled:opacity-40"
               >
                 <Send className="h-4 w-4" />
