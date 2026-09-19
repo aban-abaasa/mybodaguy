@@ -118,13 +118,13 @@ export default function RewardsHub({ user, role, onGoToWallet }: Props) {
         <div className="grid grid-cols-2 gap-3">
           {role === 'customer' ? (
             <>
-              <EarnTile emoji="₡" label="5 pts per 1 ICAN you spend on a ride or delivery fare" />
-              <EarnTile emoji="🏍️" label="Pay with ICAN Wallet at checkout to earn — cash fares earn no points" />
+              <EarnTile emoji="₡" label="5 pts per 1 ICAN-equivalent of every ride or delivery fare — cash or wallet" />
+              <EarnTile emoji="🏍️" label="Pay with ICAN Wallet at checkout to earn 10% more points than cash" />
             </>
           ) : (
             <>
-              <EarnTile emoji="₡" label="10 pts per 1 ICAN you earn on a ride or delivery" />
-              <EarnTile emoji="🏍️" label="Only wallet-settled rides count — cash rides earn no points" />
+              <EarnTile emoji="₡" label="10 pts per 1 ICAN-equivalent of what you earn — cash or wallet" />
+              <EarnTile emoji="🏍️" label="Wallet-settled rides earn 10% more points than cash" />
             </>
           )}
         </div>
@@ -135,7 +135,7 @@ export default function RewardsHub({ user, role, onGoToWallet }: Props) {
         <h4 className="font-semibold text-slate-800 mb-1 flex items-center gap-2">
           <Coins size={16} className="text-violet-500" /> Convert to ICAN Coins
         </h4>
-        <p className="text-xs text-slate-500 mb-3">{POINTS_PER_ICAN} points = 1 ₡ ICAN (standard 10% tithe applies, same as any ICAN earning)</p>
+        <p className="text-xs text-slate-500 mb-3">{POINTS_PER_ICAN} points = 1 ₡ ICAN — no tithe on point redemptions</p>
         <div className="flex items-center gap-2">
           <input
             type="number"

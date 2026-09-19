@@ -77,4 +77,28 @@ export const ThemeSelector: React.FC<{ className?: string }> = ({ className = ''
   );
 };
 
+/**
+ * ThemeMenuItem Component
+ * A row matching this app's account-dropdown menu items (icon + label,
+ * left-aligned, full width) — drop into any "My Profile" / "Sign Out" style
+ * menu so every dashboard's account menu gets the same dark/light toggle
+ * instead of re-implementing the switch per page.
+ */
+export const ThemeMenuItem: React.FC<{ className?: string; onClick?: () => void }> = ({ className = '', onClick }) => {
+  const { theme, toggleTheme } = useTheme();
+
+  return (
+    <button
+      onClick={() => {
+        toggleTheme();
+        onClick?.();
+      }}
+      className={`w-full px-4 py-2 text-left hover:bg-slate-50 dark:hover:bg-slate-700 flex items-center gap-2 text-slate-700 dark:text-slate-200 ${className}`}
+    >
+      {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+      <span className="text-sm font-medium">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+    </button>
+  );
+};
+
 export default ThemeToggle;

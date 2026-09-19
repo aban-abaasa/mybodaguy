@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings } from 'lucide-react';
-import { chairpersonService, SubordinateChairperson, CommitteeMember } from '../services/chairpersonService';
+import { chairpersonService, SubordinateChairperson, CommitteeMember, CommissionRecord } from '../services/chairpersonService';
 import { riderService, Rider } from '../services/riderService';
 import { supabase } from '../services/supabaseClient';
 import { userService } from '../services/userService';
 import { avatarService } from '../services/avatarService';
 import ProfileModal from '../components/ProfileModal';
 import IcanCoinCard from '../components/IcanCoinCard';
+import { ThemeMenuItem } from '../../components/ThemeToggle';
 import { toast } from 'sonner';
 
 interface ChairpersonDashboardProps {
@@ -25,12 +26,15 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   const [allAssignments, setAllAssignments] = useState<CommitteeMember[]>([]);
   const [subordinates, setSubordinates] = useState<SubordinateChairperson[]>([]);
   const [riders, setRiders] = useState<Rider[]>([]);
+  const [commissions, setCommissions] = useState<CommissionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showAssignRiderModal, setShowAssignRiderModal] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [selectedAssignment, setSelectedAssignment] = useState<CommitteeMember | null>(null);
+  const [selectedSubordinate, setSelectedSubordinate] = useState<SubordinateChairperson | null>(null);
+  const [selectedRider, setSelectedRider] = useState<Rider | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [stats, setStats] = useState({
@@ -102,6 +106,10 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
       }
       setRiders(allRiders);
 
+      // Load this chairperson's own real commission earnings (mbg_commissions)
+      const myCommissions = await chairpersonService.getMyCommissions(user.id);
+      setCommissions(myCommissions);
+
       // Calculate stats
       const activeSubs = allSubordinates.filter(s => s.is_active);
       const activeRiders = allRiders.filter(r => r.status === 'active');
@@ -130,6 +138,22 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   const formatRegionType = (type: string) => {
     return type.charAt(0).toUpperCase() + type.slice(1);
   };
+
+  const formatUGX = (amount: number) => `UGX ${amount.toLocaleString('en-UG', { maximumFractionDigits: 0 })}`;
+
+  // Real earnings derived from mbg_commissions (ADD_CHAIRPERSON_COMMISSION_READ_ACCESS.sql
+  // opened read access to a chairperson's own rows here) — only 'paid' rows count as earned.
+  const paidCommissions = commissions.filter(c => c.status === 'paid');
+  const now = new Date();
+  const monthKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}`;
+  const thisMonthKey = monthKey(now);
+  const lastMonthKey = monthKey(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+  const earnedInMonth = (key: string) => paidCommissions
+    .filter(c => monthKey(new Date(c.paid_at || c.created_at)) === key)
+    .reduce((sum, c) => sum + Number(c.commission_amount), 0);
+  const thisMonthEarned = earnedInMonth(thisMonthKey);
+  const lastMonthEarned = earnedInMonth(lastMonthKey);
+  const totalEarned = paidCommissions.reduce((sum, c) => sum + Number(c.commission_amount), 0);
 
   if (loading) {
     return (
@@ -188,6 +212,8 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                       <User size={14} className="xs:w-4 xs:h-4" />
                       <span className="text-xs xs:text-sm font-medium">My Profile</span>
                     </button>
+
+                    <ThemeMenuItem onClick={() => setShowMobileMenu(false)} />
 
                     {/* Sign Out */}
                     <button
@@ -358,6 +384,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
               <User size={14} className="xs:w-4 xs:h-4" />
               <span className="text-xs xs:text-sm font-medium">My Profile</span>
             </button>
+            <ThemeMenuItem onClick={() => setShowMobileMenu(false)} />
           </div>
         )}
       </div>
@@ -708,9 +735,11 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
             ) : (
               <div className="space-y-2">
                 {subordinates.map((subordinate, index) => (
-                  <div
+                  <button
                     key={subordinate.id}
-                    className="group bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border-2 border-slate-100 hover:border-blue-300"
+                    type="button"
+                    onClick={() => setSelectedSubordinate(subordinate)}
+                    className="group w-full text-left bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border-2 border-slate-100 hover:border-blue-300"
                   >
                     <div className="flex items-center gap-2 p-2">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -757,7 +786,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                         <ChevronRight className="text-slate-300 group-hover:text-blue-500 transition-colors" size={16} />
                       </div>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -858,9 +887,11 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
             ) : (
               <div className="space-y-2">
                 {riders.map((rider) => (
-                  <div
+                  <button
                     key={rider.id}
-                    className="group bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border-2 border-slate-100 hover:border-green-300"
+                    type="button"
+                    onClick={() => setSelectedRider(rider)}
+                    className="group w-full text-left bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border-2 border-slate-100 hover:border-green-300"
                   >
                     <div className="flex items-center gap-2 p-2">
                       <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -905,7 +936,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                         <ChevronRight className="text-slate-300 group-hover:text-green-500 transition-colors" size={16} />
                       </div>
                     </div>
-                  </div>
+                  </button>
                 ))}
               </div>
             )}
@@ -949,7 +980,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                   </div>
                   <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
                     <TrendingUp size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">UGX 0</p>
+                    <p className="text-base sm:text-lg font-bold leading-none">{formatUGX(totalEarned)}</p>
                     <p className="text-[9px] text-white/80">Earned</p>
                   </div>
                 </div>
@@ -978,9 +1009,9 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                       </div>
                       <span className="text-slate-700 font-medium">This Month</span>
                     </div>
-                    <span className="font-bold text-slate-800 text-lg">UGX 0</span>
+                    <span className="font-bold text-slate-800 text-lg">{formatUGX(thisMonthEarned)}</span>
                   </div>
-                  
+
                   <div className="flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl border border-purple-100">
                     <div className="flex items-center gap-3">
                       <div className="bg-purple-500 rounded-lg p-2">
@@ -988,9 +1019,9 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                       </div>
                       <span className="text-slate-700 font-medium">Last Month</span>
                     </div>
-                    <span className="font-bold text-slate-800 text-lg">UGX 0</span>
+                    <span className="font-bold text-slate-800 text-lg">{formatUGX(lastMonthEarned)}</span>
                   </div>
-                  
+
                   <div className="flex justify-between items-center p-4 bg-gradient-to-r from-orange-50 to-yellow-50 rounded-xl border-2 border-orange-200">
                     <div className="flex items-center gap-3">
                       <div className="bg-gradient-to-r from-orange-500 to-yellow-500 rounded-lg p-2">
@@ -999,7 +1030,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                       <span className="text-slate-700 font-bold">Total Earned</span>
                     </div>
                     <span className="font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent text-xl">
-                      UGX 0
+                      {formatUGX(totalEarned)}
                     </span>
                   </div>
                 </div>
@@ -1007,7 +1038,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                 <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
                   <p className="text-sm text-amber-800 flex items-center gap-2">
                     <span>💡</span>
-                    <span className="font-medium">Commission tracking coming soon...</span>
+                    <span className="font-medium">Commission credits automatically when a rider completes a ride or settles cash owed.</span>
                   </p>
                 </div>
               </div>
@@ -1024,22 +1055,42 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                   </div>
                 </div>
 
-                <div className="flex flex-col items-center justify-center py-12">
-                  <div className="bg-slate-100 rounded-full w-16 h-16 flex items-center justify-center mb-4">
-                    <BarChart3 className="text-slate-400" size={32} />
+                {commissions.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12">
+                    <div className="bg-slate-100 rounded-full w-16 h-16 flex items-center justify-center mb-4">
+                      <BarChart3 className="text-slate-400" size={32} />
+                    </div>
+                    <p className="text-slate-600 font-medium mb-2">No activity yet</p>
+                    <p className="text-sm text-slate-500 text-center max-w-xs">
+                      Your commission activity will appear here once rides start generating earnings
+                    </p>
                   </div>
-                  <p className="text-slate-600 font-medium mb-2">No activity yet</p>
-                  <p className="text-sm text-slate-500 text-center max-w-xs">
-                    Your commission activity will appear here once rides start generating earnings
-                  </p>
-                </div>
-
-                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-xl">
-                  <p className="text-sm text-blue-800 flex items-center gap-2">
-                    <span>📊</span>
-                    <span className="font-medium">Activity tracking coming soon...</span>
-                  </p>
-                </div>
+                ) : (
+                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                    {commissions.slice(0, 10).map((c) => (
+                      <div
+                        key={c.id}
+                        className="flex items-center justify-between gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800">
+                            {formatUGX(c.commission_amount)}
+                            <span className="text-xs font-normal text-slate-500"> ({c.commission_percentage}% of {formatUGX(c.ride_fare)})</span>
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {new Date(c.paid_at || c.created_at).toLocaleDateString('en-UG', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </p>
+                        </div>
+                        <span className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-medium capitalize ${
+                          c.status === 'paid' ? 'bg-green-100 text-green-700' :
+                          c.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
+                        }`}>
+                          {c.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1134,6 +1185,30 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
             setShowAssignRiderModal(false);
             loadDashboardData();
             toast.success('Rider assigned successfully!');
+          }}
+        />
+      )}
+
+      {/* Manage Subordinate Chairperson Modal */}
+      {selectedSubordinate && (
+        <ManageSubordinateModal
+          subordinate={selectedSubordinate}
+          onClose={() => setSelectedSubordinate(null)}
+          onSuccess={() => {
+            setSelectedSubordinate(null);
+            loadDashboardData();
+          }}
+        />
+      )}
+
+      {/* Manage Rider Modal */}
+      {selectedRider && (
+        <ManageRiderModal
+          rider={selectedRider}
+          onClose={() => setSelectedRider(null)}
+          onSuccess={() => {
+            setSelectedRider(null);
+            loadDashboardData();
           }}
         />
       )}
@@ -1901,6 +1976,259 @@ function AssignRiderModal({ stageId, stageName, onClose, onSuccess }: AssignRide
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// Manage a specific subordinate chairperson — edit commission rate, activate/deactivate
+interface ManageSubordinateModalProps {
+  subordinate: SubordinateChairperson;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function ManageSubordinateModal({ subordinate, onClose, onSuccess }: ManageSubordinateModalProps) {
+  const [commissionRate, setCommissionRate] = useState(String(subordinate.commission_rate));
+  const [savingRate, setSavingRate] = useState(false);
+  const [togglingStatus, setTogglingStatus] = useState(false);
+
+  const formatRole = (role: string) => role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+  const handleSaveRate = async () => {
+    const rate = parseFloat(commissionRate);
+    if (isNaN(rate) || rate < 0 || rate > 100) {
+      toast.error('Commission rate must be between 0 and 100');
+      return;
+    }
+    setSavingRate(true);
+    const result = await chairpersonService.updateSubordinate(subordinate.id, { commissionRate: rate });
+    setSavingRate(false);
+    if (result.success) {
+      toast.success('Commission rate updated');
+      onSuccess();
+    } else {
+      toast.error(result.error || 'Failed to update commission rate');
+    }
+  };
+
+  const handleToggleStatus = async () => {
+    setTogglingStatus(true);
+    const result = await chairpersonService.updateSubordinate(subordinate.id, { isActive: !subordinate.is_active });
+    setTogglingStatus(false);
+    if (result.success) {
+      toast.success(subordinate.is_active ? 'Chairperson deactivated' : 'Chairperson reactivated');
+      onSuccess();
+    } else {
+      toast.error(result.error || 'Failed to update status');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-slate-800">Manage Chairperson</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X size={24} />
+          </button>
+        </div>
+
+        {/* Profile */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-14 h-14 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-500 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg flex-shrink-0">
+            {subordinate.full_name.charAt(0).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <h4 className="font-bold text-slate-800 truncate">{subordinate.full_name}</h4>
+            <p className="text-sm text-slate-600 truncate">{subordinate.email}</p>
+            {subordinate.phone && <p className="text-xs text-slate-500">{subordinate.phone}</p>}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">Role</p>
+            <p className="font-semibold text-slate-800">{formatRole(subordinate.role)}</p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">Region</p>
+            <p className="font-semibold text-slate-800">{subordinate.region_name || '—'}</p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">Status</p>
+            <p className={`font-semibold ${subordinate.is_active ? 'text-green-600' : 'text-red-600'}`}>
+              {subordinate.is_active ? 'Active' : 'Inactive'}
+            </p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">Appointed</p>
+            <p className="font-semibold text-slate-800">
+              {new Date(subordinate.appointed_at).toLocaleDateString('en-UG', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </p>
+          </div>
+        </div>
+
+        {/* Commission Rate */}
+        <div className="mb-4">
+          <label className="block text-sm font-medium text-slate-700 mb-1">Commission Rate (%)</label>
+          <div className="flex gap-2">
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              value={commissionRate}
+              onChange={(e) => setCommissionRate(e.target.value)}
+              className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+            />
+            <button
+              onClick={handleSaveRate}
+              disabled={savingRate || commissionRate === String(subordinate.commission_rate)}
+              className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors disabled:opacity-50 text-sm font-medium flex-shrink-0"
+            >
+              {savingRate ? 'Saving...' : 'Save'}
+            </button>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex gap-3 pt-2 border-t border-slate-200">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors mt-4"
+          >
+            Close
+          </button>
+          <button
+            onClick={handleToggleStatus}
+            disabled={togglingStatus}
+            className={`flex-1 px-4 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 mt-4 ${
+              subordinate.is_active
+                ? 'bg-red-500 text-white hover:bg-red-600'
+                : 'bg-green-500 text-white hover:bg-green-600'
+            }`}
+          >
+            {togglingStatus ? 'Updating...' : subordinate.is_active ? 'Deactivate' : 'Reactivate'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Manage a specific rider — approve / suspend / reactivate
+interface ManageRiderModalProps {
+  rider: Rider;
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function ManageRiderModal({ rider, onClose, onSuccess }: ManageRiderModalProps) {
+  const [updating, setUpdating] = useState(false);
+
+  const handleSetStatus = async (status: 'active' | 'suspended' | 'inactive') => {
+    setUpdating(true);
+    const result = await riderService.updateRiderStatus(rider.id, status);
+    setUpdating(false);
+    if (result.success) {
+      toast.success(`Rider ${status === 'active' ? 'approved' : status === 'suspended' ? 'suspended' : 'deactivated'}`);
+      onSuccess();
+    } else {
+      toast.error(result.error || 'Failed to update rider status');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-slate-800">Manage Rider</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <X size={24} />
+          </button>
+        </div>
+
+        {/* Profile */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-14 h-14 bg-gradient-to-br from-green-500 via-emerald-500 to-teal-500 rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg flex-shrink-0">
+            {rider.full_name.charAt(0).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <h4 className="font-bold text-slate-800 truncate">{rider.full_name}</h4>
+            <p className="text-sm text-slate-600 truncate">{rider.email}</p>
+            {rider.phone && <p className="text-xs text-slate-500">{rider.phone}</p>}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-4 text-sm">
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">Vehicle</p>
+            <p className="font-semibold text-slate-800 capitalize">{rider.vehicle_type}</p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">Plate Number</p>
+            <p className="font-semibold text-slate-800 uppercase">{rider.plate_number}</p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">License</p>
+            <p className="font-semibold text-slate-800">{rider.license_number}</p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">Status</p>
+            <p className={`font-semibold capitalize ${
+              rider.status === 'active' ? 'text-green-600' :
+              rider.status === 'pending' ? 'text-yellow-600' : 'text-red-600'
+            }`}>
+              {rider.status}
+            </p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">Rating</p>
+            <p className="font-semibold text-slate-800">⭐ {rider.rating.toFixed(1)}</p>
+          </div>
+          <div className="bg-slate-50 rounded-lg p-2.5">
+            <p className="text-[10px] text-slate-500 font-medium">Completed Rides</p>
+            <p className="font-semibold text-slate-800">{rider.completed_rides}</p>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col gap-2 pt-2 border-t border-slate-200 mt-2">
+          {rider.status === 'pending' && (
+            <button
+              onClick={() => handleSetStatus('active')}
+              disabled={updating}
+              className="w-full mt-4 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 font-medium"
+            >
+              {updating ? 'Updating...' : 'Approve Rider'}
+            </button>
+          )}
+          {rider.status === 'active' && (
+            <button
+              onClick={() => handleSetStatus('suspended')}
+              disabled={updating}
+              className="w-full mt-4 px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors disabled:opacity-50 font-medium"
+            >
+              {updating ? 'Updating...' : 'Suspend Rider'}
+            </button>
+          )}
+          {(rider.status === 'suspended' || rider.status === 'inactive') && (
+            <button
+              onClick={() => handleSetStatus('active')}
+              disabled={updating}
+              className="w-full mt-4 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50 font-medium"
+            >
+              {updating ? 'Updating...' : 'Reactivate Rider'}
+            </button>
+          )}
+          <button
+            onClick={onClose}
+            className="w-full px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors"
+          >
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );

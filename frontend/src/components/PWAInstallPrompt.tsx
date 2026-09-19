@@ -104,16 +104,7 @@ export default function PWAInstallPrompt() {
   };
 
   if (dismissed && !showInstructions) {
-    return (
-      <button
-        onClick={() => setShowInstructions(true)}
-        className="fixed right-0 top-1/2 z-[100] -translate-y-1/2 rounded-l-xl bg-orange-500 px-2 py-4 text-xs font-bold text-white shadow-lg [writing-mode:vertical-rl] hover:bg-orange-600"
-        aria-label={`Install ${appName}`}
-      >
-        <img src={appIcon} alt="" className="mb-2 h-5 w-5 rounded object-cover" />
-        Install {appName}
-      </button>
-    );
+    return null;
   }
 
   return (

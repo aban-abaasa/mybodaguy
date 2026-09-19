@@ -20,6 +20,7 @@ import JourneyTracker from '../components/JourneyTracker';
 import RefundableDeliveries from '../components/RefundableDeliveries';
 import { computeOrderInsights, shortenLocation } from '../utils/orderInsights';
 import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
+import { ThemeToggle } from '../../components/ThemeToggle';
 
 interface CustomerDashboardProps {
   user: any;
@@ -386,6 +387,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                   <span className="hidden sm:block text-xs opacity-85 bg-white/20 px-2 py-1 rounded-full truncate max-w-[160px]">
                     {user?.email}
                   </span>
+                  <ThemeToggle />
                   <button onClick={onSignOut}
                     className="flex items-center gap-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition-colors">
                     <LogOut size={14} />

@@ -29,6 +29,8 @@ import {
   subscribeToAllConversations,
   subscribeToMessages as subscribeToChatMessages,
 } from '../services/chatService';
+import { adjustRewardPoints, getRewardSummary, getRewardTransactions, type RewardSummary, type RewardTransaction } from '../services/rewardsService';
+import { ThemeToggle } from '../../components/ThemeToggle';
 
 interface DeveloperDashboardProps {
   user: any;
@@ -236,6 +238,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
                   <Shield size={16} />
                   <span className="text-sm font-medium">Developer</span>
                 </div>
+                <ThemeToggle />
                 <button
                   onClick={onSignOut}
                   className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg transition-colors"
@@ -283,7 +286,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
           {activeTab === 'commissions' && <CommissionsTab />}
           {activeTab === 'supermarkets' && <SupermarketsTab />}
           {activeTab === 'transport' && <TransportOrdersTab orders={transportOrders} loading={transportLoading} onRefresh={loadTransportOrders} />}
-          {activeTab === 'rewards' && <RewardsTab />}
+          {activeTab === 'rewards' && <RewardsTab users={users} />}
           {activeTab === 'public-board' && <PublicBoardTab />}
           {activeTab === 'messages' && <MessagesTab />}
           {activeTab === 'settings' && <SettingsTab />}
@@ -1207,13 +1210,125 @@ function ApplicationsTab() {
 
       <h3 className="font-semibold text-slate-700 mb-3">Reviewed</h3>
       {reviewed.length === 0 ? (
-        <p className="text-sm text-slate-400">No reviewed applications yet.</p>
+        <p className="text-sm text-slate-400 mb-8">No reviewed applications yet.</p>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2 mb-8">
           {reviewed.map((app) => (
             <div key={app.id} className="bg-slate-50 border border-slate-100 rounded-lg p-3 flex items-center justify-between text-sm">
               <span className="capitalize">{app.vehicle_type} — {app.plate_number} ({app.applicant?.full_name || app.user_id})</span>
               <span className={`font-semibold ${app.status === 'approved' ? 'text-green-600' : 'text-red-600'}`}>{app.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <StoreDriversPanel />
+    </div>
+  );
+}
+
+// A business admin can add anyone as a driver under their own
+// business_profile_id (mbg_business_add_driver) — that's self-attestation,
+// not an independent check. This is the platform-side confirmation: a
+// developer verifies the driver genuinely works for that store, which then
+// shows customers "Verified <Store> driver" instead of a generic rider
+// profile (mbg_find_available_riders.is_admin_verified_store_driver, see
+// ADD_ADMIN_VERIFIED_STORE_DRIVERS.sql).
+function StoreDriversPanel() {
+  const [drivers, setDrivers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    const { data, error } = await supabase.rpc('mbg_admin_list_business_drivers');
+    if (error) {
+      toast.error(error.message || 'Failed to load store drivers');
+    } else {
+      setDrivers(data || []);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const setVerified = async (riderId: string, verified: boolean) => {
+    setBusyId(riderId);
+    try {
+      const { data, error } = await supabase.rpc('mbg_admin_verify_business_driver', {
+        p_rider_id: riderId,
+        p_verified: verified,
+      });
+      if (error) throw error;
+      if (!data?.success) throw new Error(data?.error || 'Failed to update');
+      toast.success(verified ? 'Driver verified — customers will now see the trust badge' : 'Verification revoked');
+      await load();
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update verification');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="text-center py-8">
+        <div className="w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full animate-spin mx-auto" />
+      </div>
+    );
+  }
+
+  const pending = drivers.filter((d) => !d.admin_verified_at);
+  const verified = drivers.filter((d) => d.admin_verified_at);
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h3 className="font-semibold text-slate-700">Store Drivers</h3>
+          <p className="text-xs text-slate-500 mt-0.5">Businesses add their own drivers self-service — confirm they genuinely work for that store before customers see a trust badge.</p>
+        </div>
+        <button onClick={load} className="p-2 text-slate-500 hover:text-slate-700">
+          <RefreshCw size={16} />
+        </button>
+      </div>
+
+      {drivers.length === 0 ? (
+        <p className="text-sm text-slate-400">No business-linked drivers yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {[...pending, ...verified].map((d) => (
+            <div key={d.rider_id} className="bg-white border border-slate-200 rounded-lg p-3 flex items-center justify-between gap-4">
+              <div className="min-w-0">
+                <div className="font-semibold text-slate-800 truncate">
+                  {d.full_name} <span className="text-slate-400 font-normal capitalize">· {d.vehicle_type}{d.plate_number ? ` · ${d.plate_number}` : ''}</span>
+                </div>
+                <div className="text-sm text-slate-500 truncate">{d.business_name || 'Unknown business'} · {d.email}</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {d.admin_verified_at ? (
+                  <>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-100 text-blue-700 rounded-full text-xs font-semibold">
+                      <Shield size={12} /> Verified
+                    </span>
+                    <button
+                      disabled={busyId === d.rider_id}
+                      onClick={() => setVerified(d.rider_id, false)}
+                      className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-semibold flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <XCircle size={13} /> Revoke
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    disabled={busyId === d.rider_id}
+                    onClick={() => setVerified(d.rider_id, true)}
+                    className="px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-semibold flex items-center gap-1 disabled:opacity-50"
+                  >
+                    <CheckCircle size={13} /> Verify
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -1249,11 +1364,12 @@ type CatalogItem = {
 // (Overview), what's redeemable and at what price (Catalog — the live
 // mbg_reward_catalog table, editable here instead of by hand-written SQL),
 // and the existing offline fulfilment queue (Redemptions).
-function RewardsTab() {
-  const [subTab, setSubTab] = useState<'overview' | 'catalog' | 'redemptions'>('overview');
+function RewardsTab({ users }: { users: any[] }) {
+  const [subTab, setSubTab] = useState<'overview' | 'catalog' | 'members' | 'redemptions'>('overview');
   const subTabs = [
     { id: 'overview' as const, label: 'Overview' },
     { id: 'catalog' as const, label: 'Catalog' },
+    { id: 'members' as const, label: 'Adjust Points' },
     { id: 'redemptions' as const, label: 'Redemptions' },
   ];
 
@@ -1280,6 +1396,7 @@ function RewardsTab() {
 
       {subTab === 'overview' && <RewardsOverviewTab />}
       {subTab === 'catalog' && <RewardsCatalogTab />}
+      {subTab === 'members' && <RewardsMembersTab users={users} />}
       {subTab === 'redemptions' && <RewardRedemptionsTab />}
     </div>
   );
@@ -1591,6 +1708,198 @@ function RewardsCatalogTab() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Manual per-member point grants/deductions — the one balance change nothing
+// else in this file covers (everything else is automatic: the ride-complete
+// trigger, or a member's own redemption). Reuses the already-loaded `users`
+// list from the parent (same rows UsersTab searches) instead of re-querying,
+// so picking a member here needs no extra round trip. Backed by
+// mbg_admin_adjust_reward_points, which itself re-checks the developer role
+// server-side — this UI being reachable isn't what makes the write safe.
+function RewardsMembersTab({ users }: { users: any[] }) {
+  const [query, setQuery] = useState('');
+  const [selected, setSelected] = useState<any | null>(null);
+  const [summary, setSummary] = useState<RewardSummary | null>(null);
+  const [history, setHistory] = useState<RewardTransaction[]>([]);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [amount, setAmount] = useState('');
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const q = query.trim().toLowerCase();
+  const matches = q.length < 2 ? [] : users.filter((u) => {
+    const fullName = u.mbg_user_profiles?.[0]?.full_name ?? '';
+    return u.email?.toLowerCase().includes(q) || fullName.toLowerCase().includes(q);
+  }).slice(0, 8);
+
+  const selectMember = async (u: any) => {
+    setSelected(u);
+    setQuery('');
+    setAmount('');
+    setNote('');
+    setLoadingSummary(true);
+    try {
+      const [s, tx] = await Promise.all([
+        getRewardSummary(u.id),
+        getRewardTransactions(u.id, 10),
+      ]);
+      setSummary(s);
+      setHistory(tx.filter((t) => t.source === 'admin_adjustment'));
+    } catch (err: any) {
+      toast.error(err.message || 'Could not load this member\'s points');
+    } finally {
+      setLoadingSummary(false);
+    }
+  };
+
+  const apply = async (sign: 1 | -1) => {
+    if (!selected) return;
+    const raw = Number(amount);
+    if (!raw || raw <= 0) {
+      toast.error('Enter a positive amount to grant or deduct');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await adjustRewardPoints(selected.id, raw * sign, note.trim() || undefined);
+      toast.success(sign > 0 ? `Granted ${raw} points` : `Deducted ${raw} points`);
+      setAmount('');
+      setNote('');
+      setSummary((prev) => prev ? { ...prev, points_balance: result.points_balance } : prev);
+      const tx = await getRewardTransactions(selected.id, 10);
+      setHistory(tx.filter((t) => t.source === 'admin_adjustment'));
+    } catch (err: any) {
+      toast.error(err.message || 'Adjustment failed');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div>
+      <p className="text-sm text-slate-500 max-w-xl mb-4">
+        Grant a goodwill bonus or correct a mistaken/abused balance for one member. Grants count toward their lifetime total and tier, same as points earned from a ride; deductions only reduce their spendable balance.
+      </p>
+
+      <div className="relative max-w-md mb-6">
+        <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+        <input
+          placeholder="Search member by name or email..."
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm"
+        />
+        {matches.length > 0 && (
+          <div className="absolute z-10 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+            {matches.map((u) => (
+              <button
+                key={u.id}
+                onClick={() => selectMember(u)}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-b-0"
+              >
+                <div className="font-medium text-slate-800">{u.mbg_user_profiles?.[0]?.full_name || 'Unnamed'}</div>
+                <div className="text-xs text-slate-400">{u.email}</div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!selected ? (
+        <p className="text-sm text-slate-400">Search for a member above to view or adjust their points.</p>
+      ) : (
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 max-w-xl">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="font-semibold text-slate-800">{selected.mbg_user_profiles?.[0]?.full_name || selected.email}</div>
+              <div className="text-xs text-slate-400">{selected.email}</div>
+            </div>
+            <button onClick={() => { setSelected(null); setSummary(null); setHistory([]); }} className="text-xs text-slate-400 hover:text-slate-600">
+              Clear
+            </button>
+          </div>
+
+          {loadingSummary ? (
+            <p className="text-sm text-slate-500">Loading...</p>
+          ) : summary && (
+            <div className="flex flex-wrap gap-3 mb-4">
+              <div className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                <span className="text-slate-500">Balance</span>
+                <span className="ml-2 font-semibold text-slate-800">{summary.points_balance.toLocaleString()} pts</span>
+              </div>
+              <div className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm">
+                <span className="text-slate-500">Lifetime</span>
+                <span className="ml-2 font-semibold text-slate-800">{summary.lifetime_points.toLocaleString()} pts</span>
+              </div>
+              <div className="px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm capitalize">
+                <span className="text-slate-500">Tier</span>
+                <span className="ml-2 font-semibold text-slate-800">{summary.tier}</span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-end gap-3 mb-2">
+            <label className="flex flex-col text-sm text-slate-600">
+              Amount
+              <input
+                type="number"
+                min={1}
+                placeholder="e.g. 200"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className="w-32 px-3 py-2 border border-slate-200 rounded-lg text-sm mt-1"
+              />
+            </label>
+            <label className="flex flex-col text-sm text-slate-600 flex-1 min-w-[180px]">
+              Reason (optional)
+              <input
+                placeholder="e.g. Compensation for support delay"
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm mt-1"
+              />
+            </label>
+          </div>
+
+          <div className="flex gap-3 mb-6">
+            <button
+              onClick={() => apply(1)}
+              disabled={submitting}
+              className="flex-1 px-4 py-2 bg-green-600 text-white font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-all"
+            >
+              {submitting ? 'Working...' : '+ Grant points'}
+            </button>
+            <button
+              onClick={() => apply(-1)}
+              disabled={submitting}
+              className="flex-1 px-4 py-2 bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 transition-all"
+            >
+              {submitting ? 'Working...' : '- Deduct points'}
+            </button>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-slate-700 mb-2">Recent manual adjustments</h4>
+            {history.length === 0 ? (
+              <p className="text-xs text-slate-400">None yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {history.map((t) => (
+                  <div key={t.id} className="text-xs bg-white border border-slate-200 rounded-lg px-3 py-2 flex justify-between gap-3">
+                    <span className="text-slate-600">{t.note || (t.direction === 'earn' ? 'Grant' : 'Deduction')}</span>
+                    <span className={`font-semibold whitespace-nowrap ${t.direction === 'earn' ? 'text-green-600' : 'text-red-600'}`}>
+                      {t.direction === 'earn' ? '+' : '-'}{t.points} pts
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

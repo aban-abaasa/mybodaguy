@@ -9,6 +9,7 @@ import DeveloperDashboard from './DeveloperDashboard';
 import CustomerDashboard from './CustomerDashboard';
 import ICANWalletPage from './ICANWalletPage';
 import ProfileModal from '../components/ProfileModal';
+import { ThemeToggle } from '../../components/ThemeToggle';
 import { toast } from 'sonner';
 
 interface UnifiedDashboardProps {
@@ -200,21 +201,23 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
               </div>
             </div>
 
-            {/* Right: Profile Avatar Menu */}
-            <div className="relative" ref={accountMenuRef}>
-              <button
-                onClick={() => setShowAccountMenu((prev) => !prev)}
-                className="flex items-center justify-center w-8 h-8 xs:w-9 xs:h-9 rounded-full bg-white/90 text-slate-800 font-bold text-xs xs:text-sm hover:bg-white transition-colors flex-shrink-0 overflow-hidden"
-                title={user.email}
-              >
-                {avatarUrl ? (
-                  <img src={avatarUrl} alt="Profile" className="w-full h-full object-cover" />
-                ) : (
-                  (user.email || '?').charAt(0).toUpperCase()
-                )}
-              </button>
+            {/* Right: Theme toggle + Profile Avatar Menu */}
+            <div className="flex items-center gap-1.5 xs:gap-2">
+              <ThemeToggle className="!bg-white/20 hover:!bg-white/30 !text-white w-8 h-8 xs:w-9 xs:h-9" />
+              <div className="relative" ref={accountMenuRef}>
+                <button
+                  onClick={() => setShowAccountMenu((prev) => !prev)}
+                  className="flex items-center justify-center w-8 h-8 xs:w-9 xs:h-9 rounded-full bg-white/90 text-slate-800 font-bold text-xs xs:text-sm hover:bg-white transition-colors flex-shrink-0 overflow-hidden"
+                  title={user.email}
+                >
+                  {avatarUrl ? (
+                    <img src={avatarUrl} alt="Profile" className="w-full h-full object-cover" />
+                  ) : (
+                    (user.email || '?').charAt(0).toUpperCase()
+                  )}
+                </button>
 
-              {showAccountMenu && (
+                {showAccountMenu && (
                 <div className="absolute right-0 top-full mt-2 bg-white rounded-lg shadow-xl py-2 min-w-[220px] z-50 text-slate-800">
                   <div className="px-4 py-2 border-b border-slate-200">
                     <p className="text-xs text-slate-500">Signed in as</p>
@@ -241,7 +244,8 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
                     <span className="text-sm font-medium">Sign Out</span>
                   </button>
                 </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
 

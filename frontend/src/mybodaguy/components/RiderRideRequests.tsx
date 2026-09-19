@@ -1,10 +1,18 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt } from 'lucide-react';
+import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt, Map } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import RideCommsBar from './RideCommsBar';
 import DeliveryReceiptCard from './DeliveryReceiptCard';
+import RouteMap from './RouteMap';
+import LiveTrackingMap from './LiveTrackingMap';
+import type { Location } from '../data/mockLocations';
 import { startJobRingLoop, stopJobRingLoop } from '../services/notificationSound';
+
+function toLocation(name: string, lat: number | null, lng: number | null): Location | null {
+  if (lat == null || lng == null) return null;
+  return { id: name, name, area: '', fullAddress: name, coordinates: { lat, lng } };
+}
 
 interface RideRow {
   id: string;
@@ -13,6 +21,10 @@ interface RideRow {
   delivery_mode: 'supermarket' | 'normal' | null;
   pickup_location: string;
   dropoff_location: string;
+  pickup_lat: number | null;
+  pickup_lng: number | null;
+  dropoff_lat: number | null;
+  dropoff_lng: number | null;
   status: string;
   fare: number;
   rider_earning: number | null;
@@ -357,7 +369,10 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
                 </span>
               </div>
 
-              <RideSummary ride={active} />
+              <RideSummary
+                ride={active}
+                live={riderRowId ? { riderId: riderRowId, phase: active.status === 'accepted' ? 'to_pickup' : 'to_dropoff' } : undefined}
+              />
 
               {activeCustomer && (
                 <RideCommsBar
@@ -451,7 +466,16 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
   );
 }
 
-function RideSummary({ ride }: { ride: RideRow }) {
+function RideSummary({ ride, live }: { ride: RideRow; live?: { riderId: string; phase: 'to_pickup' | 'to_dropoff' } }) {
+  // Auto-expanded for the active ride (the one case `live` is passed) —
+  // the live map is the whole point once a trip is underway, so it
+  // shouldn't need an extra tap to appear. Still collapsed by default for
+  // the still-pending request preview, where there's no journey yet to show.
+  const [showMap, setShowMap] = useState(!!live);
+  const hasCoords = ride.pickup_lat != null && ride.pickup_lng != null && ride.dropoff_lat != null && ride.dropoff_lng != null;
+  const pickupLoc = hasCoords ? toLocation(ride.pickup_location, ride.pickup_lat, ride.pickup_lng) : null;
+  const dropoffLoc = hasCoords ? toLocation(ride.dropoff_location, ride.dropoff_lat, ride.dropoff_lng) : null;
+
   return (
     <div className="bg-white rounded-lg p-4 space-y-2">
       <div className="flex items-start gap-2">
@@ -468,6 +492,30 @@ function RideSummary({ ride }: { ride: RideRow }) {
           <p className="text-sm font-medium text-slate-700">{ride.dropoff_location}</p>
         </div>
       </div>
+      {hasCoords && (
+        <button
+          type="button"
+          onClick={() => setShowMap((v) => !v)}
+          className="flex items-center gap-1.5 text-xs font-semibold text-orange-600 hover:text-orange-700"
+        >
+          <Map size={14} /> {showMap ? 'Hide map' : live ? 'Show live map' : 'Show map'}
+        </button>
+      )}
+      {showMap && hasCoords && (
+        live && pickupLoc && dropoffLoc ? (
+          <LiveTrackingMap
+            riderId={live.riderId}
+            pickup={pickupLoc}
+            dropoff={dropoffLoc}
+            phase={live.phase}
+          />
+        ) : (
+          <RouteMap
+            pickup={{ lat: ride.pickup_lat as number, lng: ride.pickup_lng as number }}
+            dropoff={{ lat: ride.dropoff_lat as number, lng: ride.dropoff_lng as number }}
+          />
+        )
+      )}
       <div className="flex items-center gap-3 flex-wrap pt-1">
         {ride.distance_km != null && (
           <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full font-medium">

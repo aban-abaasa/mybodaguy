@@ -1,28 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
 import { Locate, Navigation, Search, Loader2 } from 'lucide-react';
 import type { Location } from '../data/mockLocations';
 import { geocodeAddress, reverseGeocode } from '../services/geocodeService';
+import { getRoute } from '../services/routingService';
 
 // Kampala city center — used only as a fallback when GPS is denied/unavailable.
 const DEFAULT_CENTER: [number, number] = [0.3157, 32.5756];
+const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 // Self-contained colored pin (no external icon assets to fetch/bundle).
-function pinIcon(color: string) {
-  return L.divIcon({
-    html: `<svg width="30" height="42" viewBox="0 0 30 42" xmlns="http://www.w3.org/2000/svg">
-      <path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 27 15 27s15-16.5 15-27C30 6.7 23.3 0 15 0z" fill="${color}"/>
-      <circle cx="15" cy="15" r="6" fill="white"/>
-    </svg>`,
-    className: '',
-    iconSize: [30, 42],
-    iconAnchor: [15, 42],
-    popupAnchor: [0, -40],
-  });
+function pinIcon(color: string): L.DivIcon {
+  const svg = `<svg width="30" height="42" viewBox="0 0 30 42" xmlns="http://www.w3.org/2000/svg">
+    <path d="M15 0C6.7 0 0 6.7 0 15c0 10.5 15 27 15 27s15-16.5 15-27C30 6.7 23.3 0 15 0z" fill="${color}"/>
+    <circle cx="15" cy="15" r="6" fill="white"/>
+  </svg>`;
+  return L.divIcon({ html: svg, className: '', iconSize: [30, 42], iconAnchor: [15, 42] });
 }
-const PICKUP_ICON = pinIcon('#22c55e');
-const DROPOFF_ICON = pinIcon('#ef4444');
 
 async function toLocation(idPrefix: string, name: string, lat: number, lng: number): Promise<Location> {
   const address = (await reverseGeocode(lat, lng)) || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
@@ -72,6 +67,7 @@ export default function LocationPickerMap({
   const pickupMarkerRef = useRef<L.Marker | null>(null);
   const dropoffMarkerRef = useRef<L.Marker | null>(null);
   const routeLineRef = useRef<L.Polyline | null>(null);
+  const [mapReady, setMapReady] = useState(false);
   const [locating, setLocating] = useState(false);
   const [routeSummary, setRouteSummary] = useState<{ distanceKm: number; durationMin: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -81,25 +77,31 @@ export default function LocationPickerMap({
   // Init the map once.
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const map = L.map(containerRef.current).setView(DEFAULT_CENTER, 13);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      attribution: '© OpenStreetMap, © CartoDB',
-      subdomains: 'abcd',
-      maxZoom: 20,
-    }).addTo(map);
-
-    map.on('click', async (e: L.LeafletMouseEvent) => {
-      const loc = await toLocation('dropoff', 'Drop-off point', e.latlng.lat, e.latlng.lng);
-      (selectionMode === 'pickup' ? onPickupChange : onDropoffChange)(loc);
-    });
-
+    const map = L.map(containerRef.current, { zoomControl: true }).setView(DEFAULT_CENTER, 13);
+    L.tileLayer(TILE_URL, { attribution: TILE_ATTRIBUTION, maxZoom: 19 }).addTo(map);
     mapRef.current = map;
+    setMapReady(true);
     return () => {
       map.remove();
       mapRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Map click sets whichever field selectionMode targets.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const handler = async (e: L.LeafletMouseEvent) => {
+      const loc = await toLocation('dropoff', 'Drop-off point', e.latlng.lat, e.latlng.lng);
+      (selectionMode === 'pickup' ? onPickupChange : onDropoffChange)(loc);
+    };
+    map.on('click', handler);
+    return () => {
+      map.off('click', handler);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, selectionMode]);
 
   // Auto-detect the customer's live GPS position as the initial pin for
   // whichever field GPS targets (pickup for a normal ride; drop-off for a
@@ -123,90 +125,67 @@ export default function LocationPickerMap({
       { enableHighAccuracy: true, timeout: 10000 }
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [mapReady]);
 
   // Keep the pickup marker in sync with whatever the parent currently has
   // selected — from GPS, a typed suggestion, a supermarket auto-fill, or a
   // drag on this same map.
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !pickup) return;
-    const latlng: [number, number] = [pickup.coordinates.lat, pickup.coordinates.lng];
+    if (!map || !mapReady || !pickup) return;
+    const position: [number, number] = [pickup.coordinates.lat, pickup.coordinates.lng];
     if (!pickupMarkerRef.current) {
-      pickupMarkerRef.current = L.marker(latlng, { icon: PICKUP_ICON, draggable: !pickupLocked })
-        .addTo(map)
-        .bindPopup(`<b>Pickup</b><br>${pickup.fullAddress}`);
-      pickupMarkerRef.current.on('dragend', async () => {
-        const pos = pickupMarkerRef.current!.getLatLng();
+      const marker = L.marker(position, { icon: pinIcon('#22c55e'), draggable: !pickupLocked, title: 'Pickup' }).addTo(map);
+      marker.on('dragend', async () => {
+        const pos = marker.getLatLng();
         const loc = await toLocation('pickup', 'Pickup point', pos.lat, pos.lng);
         onPickupChange(loc);
       });
+      pickupMarkerRef.current = marker;
     } else {
-      pickupMarkerRef.current.setLatLng(latlng);
-      pickupMarkerRef.current.setPopupContent(`<b>Pickup</b><br>${pickup.fullAddress}`);
+      pickupMarkerRef.current.setLatLng(position);
       pickupMarkerRef.current.dragging?.[pickupLocked ? 'disable' : 'enable']();
     }
-    // animate: false — an animated setView schedules a requestAnimationFrame
-    // callback that runs after this effect returns; if the map has since
-    // been torn down (component unmounted, map.remove() already ran), that
-    // deferred callback reads a pane that no longer exists and throws
-    // ("Cannot read properties of undefined (reading '_leaflet_pos')").
-    if (!dropoff) map.setView(latlng, 14, { animate: false });
+    if (!dropoff) map.setView(position);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pickup?.coordinates.lat, pickup?.coordinates.lng, pickupLocked]);
+  }, [mapReady, pickup?.coordinates.lat, pickup?.coordinates.lng, pickupLocked]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !dropoff) return;
-    const latlng: [number, number] = [dropoff.coordinates.lat, dropoff.coordinates.lng];
+    if (!map || !mapReady || !dropoff) return;
+    const position: [number, number] = [dropoff.coordinates.lat, dropoff.coordinates.lng];
     if (!dropoffMarkerRef.current) {
-      dropoffMarkerRef.current = L.marker(latlng, { icon: DROPOFF_ICON, draggable: true }).addTo(map);
-      dropoffMarkerRef.current.on('dragend', async () => {
-        const pos = dropoffMarkerRef.current!.getLatLng();
+      const marker = L.marker(position, { icon: pinIcon('#ef4444'), draggable: true, title: 'Drop-off' }).addTo(map);
+      marker.on('dragend', async () => {
+        const pos = marker.getLatLng();
         const loc = await toLocation('dropoff', 'Drop-off point', pos.lat, pos.lng);
         onDropoffChange(loc);
       });
+      dropoffMarkerRef.current = marker;
     } else {
-      dropoffMarkerRef.current.setLatLng(latlng);
+      dropoffMarkerRef.current.setLatLng(position);
     }
-    dropoffMarkerRef.current.setPopupContent(`<b>Drop-off</b><br>${dropoff.fullAddress}`);
-    if (!pickup) map.setView(latlng, 14, { animate: false });
+    if (!pickup) map.setView(position);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dropoff?.coordinates.lat, dropoff?.coordinates.lng]);
+  }, [mapReady, dropoff?.coordinates.lat, dropoff?.coordinates.lng]);
 
-  // Real road route (OSRM's public demo server — fine for low volume, not
-  // production-scale; self-host OSRM or use a paid routing API at scale).
+  // Real road route via OSRM.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !pickup || !dropoff) return;
 
     let cancelled = false;
-    (async () => {
-      try {
-        const url = `https://router.project-osrm.org/route/v1/driving/${pickup.coordinates.lng},${pickup.coordinates.lat};${dropoff.coordinates.lng},${dropoff.coordinates.lat}?overview=full&geometries=geojson`;
-        const res = await fetch(url);
-        const data = await res.json();
-        if (cancelled || data.code !== 'Ok') return;
-
-        const route = data.routes[0];
-        const distanceKm = route.distance / 1000;
-        const durationMin = route.duration / 60;
-        setRouteSummary({ distanceKm, durationMin });
-        onRouteInfo?.(distanceKm, durationMin);
-
-        const coords = route.geometry.coordinates.map((c: [number, number]) => [c[1], c[0]] as [number, number]);
-        if (routeLineRef.current) map.removeLayer(routeLineRef.current);
-        routeLineRef.current = L.polyline(coords, { color: '#f97316', weight: 5, opacity: 0.8 }).addTo(map);
-        map.fitBounds(routeLineRef.current.getBounds(), { padding: [30, 30] });
-      } catch {
-        // Routing is a nice-to-have on top of the pins — pickup/dropoff
-        // selection still works fine without it.
-      }
-    })();
+    getRoute(pickup.coordinates, dropoff.coordinates).then((route) => {
+      if (cancelled || !route) return;
+      routeLineRef.current?.remove();
+      routeLineRef.current = L.polyline(route.path, { color: '#f97316', weight: 5, opacity: 0.8 }).addTo(map);
+      setRouteSummary({ distanceKm: route.distanceKm, durationMin: route.durationMin });
+      onRouteInfo?.(route.distanceKm, route.durationMin);
+    });
     return () => {
       cancelled = true;
     };
-  }, [pickup?.coordinates.lat, pickup?.coordinates.lng, dropoff?.coordinates.lat, dropoff?.coordinates.lng, onRouteInfo]);
+  }, [mapReady, pickup?.coordinates.lat, pickup?.coordinates.lng, dropoff?.coordinates.lat, dropoff?.coordinates.lng, onRouteInfo]);
 
   const useMyLocation = () => {
     if (!navigator.geolocation || (gpsTarget === 'pickup' && pickupLocked)) {
@@ -241,7 +220,7 @@ export default function LocationPickerMap({
       }
       const loc = await toLocation(selectionMode, 'Selected location', result.lat, result.lng);
       (selectionMode === 'pickup' ? onPickupChange : onDropoffChange)(loc);
-      mapRef.current?.setView([result.lat, result.lng], 16, { animate: false });
+      mapRef.current?.setView([result.lat, result.lng], 16);
     } catch {
       setLocationError('Location search failed. Check your connection and try again.');
     } finally {
@@ -266,7 +245,14 @@ export default function LocationPickerMap({
           {searching ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
         </button>
       </div>
-      <div ref={containerRef} className="rounded-lg border-2 border-slate-200" style={{ height: 420, width: '100%' }} />
+      <div className="relative rounded-lg border-2 border-slate-200" style={{ height: 420, width: '100%' }}>
+        <div ref={containerRef} className="h-full w-full rounded-lg" />
+        {!mapReady && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-slate-50 text-slate-400 text-sm gap-2">
+            <Loader2 className="animate-spin" size={18} /> Loading map…
+          </div>
+        )}
+      </div>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         {autoLocateGPS && (
           <button

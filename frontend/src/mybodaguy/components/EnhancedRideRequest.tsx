@@ -39,6 +39,8 @@ interface MatchedRider {
   fare: number;
   distance_km: number;
   time_multiplier: number;
+  verified_business_name?: string | null;
+  is_admin_verified_store_driver?: boolean;
 }
 
 interface SecurityCompany {
@@ -138,6 +140,15 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [selectedRider, setSelectedRider] = useState<MatchedRider | null>(null);
   const [rideStatus, setRideStatus] = useState<RideStatus | null>(null);
   const [waitingTimer, setWaitingTimer] = useState(30);
+  // "Just Send" — customer skips picking a specific rider; the server
+  // (mbg_sweep_auto_dispatch_cascade, pg_cron every 10s) offers it to the
+  // best-matched rider and, if they don't respond within 10s, silently
+  // reassigns to the next-best candidate and repeats until one accepts or
+  // riders are exhausted. The client-side 30s per-rider countdown below is
+  // for the "pick a specific rider" flow only — it's disabled in this mode
+  // since the server owns the whole timeout/cascade lifecycle instead.
+  const [isAutoDispatch, setIsAutoDispatch] = useState(false);
+  const [autoDispatching, setAutoDispatching] = useState(false);
   const [rideId, setRideId] = useState<string | null>(null);
   const [riderUserId, setRiderUserId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState('Customer');
@@ -705,15 +716,20 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Timer for waiting acceptance — real timeout withdraws the live offer
+  // Timer for waiting acceptance — real timeout withdraws the live offer.
+  // Skipped entirely in auto-dispatch mode: the server-side cascade
+  // (10s per rider) owns that timeout there instead, so this 30s
+  // single-rider countdown would otherwise race it and kill the request
+  // out from under an in-progress reassignment.
   useEffect(() => {
+    if (isAutoDispatch) return;
     if (rideStatus === 'waiting_acceptance' && waitingTimer > 0) {
       const timer = setTimeout(() => setWaitingTimer(prev => prev - 1), 1000);
       return () => clearTimeout(timer);
     } else if (rideStatus === 'waiting_acceptance' && waitingTimer === 0) {
       handleTimeout();
     }
-  }, [rideStatus, waitingTimer]);
+  }, [rideStatus, waitingTimer, isAutoDispatch]);
 
   // Poll the real ride row for status changes made by the rider
   useEffect(() => {
@@ -727,17 +743,27 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       if (rideStatus === 'waiting_acceptance') {
         if (data.status === 'accepted') {
           setRideStatus('accepted');
-          toast.success(`🎉 ${selectedRider?.full_name} accepted your ride!`, {
+          toast.success(isAutoDispatch ? '🎉 A rider accepted your ride!' : `🎉 ${selectedRider?.full_name} accepted your ride!`, {
             description: 'Rider is on the way',
             duration: 4000
           });
-        } else if (data.rider_id === null) {
+        } else if (data.status === 'cancelled') {
+          // Auto-dispatch cascade ran out of candidates (mbg_sweep_auto_dispatch_cascade).
+          setRideStatus('declined');
+          toast.error('No riders were available to accept this request', {
+            description: 'Please try again in a moment',
+            duration: 4000
+          });
+        } else if (!isAutoDispatch && data.rider_id === null) {
           setRideStatus('declined');
           toast.error(`${selectedRider?.full_name} declined your ride`, {
             description: 'Try requesting from another rider',
             duration: 4000
           });
         }
+        // In auto-dispatch mode a still-'pending' row with a *different*
+        // non-null rider_id just means the cascade quietly moved on to the
+        // next candidate — nothing to show the customer, still waiting.
       } else if (rideStatus === 'accepted' && data.status === 'in_progress') {
         setRideStatus('journey_started');
       } else if (rideStatus === 'journey_started' && data.status === 'completed') {
@@ -747,7 +773,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
     const interval = setInterval(poll, 3000);
     return () => clearInterval(interval);
-  }, [rideId, rideStatus, selectedRider]);
+  }, [rideId, rideStatus, selectedRider, isAutoDispatch]);
 
   // Resolve the rider's real auth user id (MatchedRider.rider_id is the
   // mbg_riders row id, not the auth id) so RideCommsBar can address them.
@@ -965,7 +991,58 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     }
   };
 
-  const handleRequestRide = async (rider: MatchedRider) => {
+  // "Just Send" — reuses the exact same matching call as "Find Available
+  // Riders" (mbg_find_available_riders already ranks best-first), just
+  // skips showing the list and requests its top result directly, then flags
+  // the ride for the server-side auto-dispatch cascade instead of the
+  // single-rider 30s wait.
+  const handleJustSend = async () => {
+    if (!selectedPickup || !selectedDropoff) {
+      toast.error('Please select both pickup and drop-off locations from suggestions');
+      return;
+    }
+    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && !selectedSupermarketId) {
+      toast.error('Please choose a supermarket for this delivery');
+      return;
+    }
+    if (needsCrossBorderPath) {
+      toast.error('Cross-border deliveries need a specific courier — please pick one from the list below');
+      return;
+    }
+
+    setAutoDispatching(true);
+    try {
+      const { data, error } = await supabase.rpc('mbg_find_available_riders', {
+        p_pickup_lat: selectedPickup.coordinates.lat,
+        p_pickup_lng: selectedPickup.coordinates.lng,
+        p_dropoff_lat: selectedDropoff.coordinates.lat,
+        p_dropoff_lng: selectedDropoff.coordinates.lng,
+        p_dropoff_area: selectedDropoff.area,
+        p_power_type: powerFilter === 'any' ? null : powerFilter,
+        p_require_umbrella: umbrellaRequired,
+        p_exclude_rider_ids: [],
+        p_limit: 5,
+        p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
+        p_business_profile_id: riderProviderFilter === 'company' ? (selectedRideCompanyId || null) : null,
+      });
+      if (error) throw error;
+      const riders = (data || []) as MatchedRider[];
+      setMatchedRiders(riders);
+
+      if (riders.length === 0) {
+        toast.error('No available riders match right now — try again shortly');
+        return;
+      }
+
+      await handleRequestRide(riders[0], { auto: true });
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to send this request');
+    } finally {
+      setAutoDispatching(false);
+    }
+  };
+
+  const handleRequestRide = async (rider: MatchedRider, opts?: { auto?: boolean }) => {
     if (serviceType === 'delivery' && deliveryMode === 'supermarket' && deliveryCart.length === 0) {
       toast.error('Add at least one item from the store before requesting a delivery');
       return;
@@ -1007,6 +1084,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setSelectedRider(rider);
     setRideStatus('waiting_acceptance');
     setWaitingTimer(30);
+    setIsAutoDispatch(!!opts?.auto);
 
     try {
       const orderNotes = deliveryCart.length > 0
@@ -1066,6 +1144,17 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       if (!data?.success) throw new Error(data?.error || 'Could not create the request');
 
       setRideId(data.ride_id);
+
+      // Flips this ride into the server-owned cascade (mbg_sweep_auto_dispatch_cascade,
+      // pg_cron every 10s) instead of the plain single-rider offer just created above.
+      if (opts?.auto) {
+        supabase.rpc('mbg_mark_ride_auto_dispatch', {
+          p_ride_id: data.ride_id,
+          p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
+        }).then(({ error: markError }) => {
+          if (markError) console.error('[EnhancedRideRequest] mbg_mark_ride_auto_dispatch failed:', markError);
+        });
+      }
 
       if (escortRequested) {
         supabase.rpc('mbg_request_ride_escort', {
@@ -1203,13 +1292,22 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const handleBackToSearch = async () => {
     if (rideId && rideStatus === 'waiting_acceptance') {
       try {
-        await supabase.rpc('mbg_withdraw_ride_offer', { p_ride_id: rideId });
+        // Auto-dispatch rides must be actually cancelled (terminal status) —
+        // mbg_withdraw_ride_offer only clears rider_id and leaves the row
+        // 'pending', which the cascade sweep would just pick back up and
+        // reassign to yet another rider on its next 10s tick.
+        if (isAutoDispatch) {
+          await supabase.rpc('mbg_cancel_ride', { p_ride_id: rideId, p_reason: 'Cancelled by customer' });
+        } else {
+          await supabase.rpc('mbg_withdraw_ride_offer', { p_ride_id: rideId });
+        }
       } catch (_) {}
     }
     setMatchedRiders(prev => prev.filter(r => r.rider_id !== selectedRider?.rider_id));
     setRideStatus(null);
     setSelectedRider(null);
     setRideId(null);
+    setIsAutoDispatch(false);
   };
 
   const handleStartNewRide = () => {
@@ -1221,6 +1319,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setSelectedRider(null);
     setRideStatus(null);
     setRideId(null);
+    setIsAutoDispatch(false);
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
@@ -1251,6 +1350,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setSelectedRider(null);
     setRideStatus(null);
     setRideId(null);
+    setIsAutoDispatch(false);
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
@@ -1321,11 +1421,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
   // Render different UI based on ride status
   if (rideStatus === 'waiting_acceptance' && selectedRider) {
-    return <WaitingForAcceptance rider={selectedRider} timer={waitingTimer} onCancel={handleBackToSearch} />;
+    return <WaitingForAcceptance rider={selectedRider} timer={waitingTimer} isAutoDispatch={isAutoDispatch} onCancel={handleBackToSearch} />;
   }
 
   if (rideStatus === 'declined' && selectedRider) {
-    return <RideDeclined rider={selectedRider} onBackToRiders={handleBackToSearch} onStartNew={handleStartNewRide} />;
+    return <RideDeclined rider={selectedRider} isAutoDispatch={isAutoDispatch} onBackToRiders={handleBackToSearch} onStartNew={handleStartNewRide} />;
   }
 
   if (rideStatus === 'accepted' && selectedRider) {
@@ -2111,7 +2211,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
           <button
             onClick={handleSearchRiders}
-            disabled={searching || !selectedPickup || !selectedDropoff}
+            disabled={searching || autoDispatching || !selectedPickup || !selectedDropoff}
             className="w-full py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold text-lg rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
             {searching ? (
@@ -2122,10 +2222,33 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             ) : (
               <>
                 <Search size={20} />
-                Find Available Riders
+                Find Available Riders — Choose One
               </>
             )}
           </button>
+
+          {!needsCrossBorderPath && (
+            <button
+              onClick={handleJustSend}
+              disabled={searching || autoDispatching || !selectedPickup || !selectedDropoff}
+              className="w-full py-3.5 bg-white border-2 border-orange-400 text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {autoDispatching ? (
+                <>
+                  <div className="animate-spin w-5 h-5 border-3 border-orange-400 border-t-transparent rounded-full" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Zap size={20} />
+                  Just Send — Any Available Rider
+                </>
+              )}
+            </button>
+          )}
+          <p className="text-[11px] text-slate-400 text-center -mt-3">
+            We'll offer it to the nearest rider first — if they don't respond in 10s, it moves to the next one automatically.
+          </p>
 
           {/* No vehicle of your own — skip picking a rider entirely and let
               the system decide whether the escort transports you directly
@@ -2384,7 +2507,11 @@ function RiderCard({
           <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-lg sm:text-xl shadow-lg">
             {rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
           </div>
-          {rider.knows_destination && (
+          {rider.is_admin_verified_store_driver ? (
+            <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-blue-600 rounded-full border-2 border-white flex items-center justify-center">
+              <ShieldCheck size={12} className="text-white" />
+            </div>
+          ) : rider.knows_destination && (
             <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
               <Navigation size={12} className="text-white" />
             </div>
@@ -2413,6 +2540,12 @@ function RiderCard({
 
           {/* Rider Highlights */}
           <div className="flex flex-wrap gap-1.5 sm:gap-2 mb-3">
+            {rider.is_admin_verified_store_driver && rider.verified_business_name && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-blue-100 text-blue-700 text-xs font-semibold rounded-full">
+                <ShieldCheck size={12} />
+                Verified {rider.verified_business_name} driver
+              </span>
+            )}
             {rider.knows_destination && (
               <span className="inline-flex items-center gap-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
                 <Navigation size={12} />
@@ -2486,13 +2619,17 @@ function RiderCard({
 }
 
 // Waiting for Acceptance Component
-function WaitingForAcceptance({ rider, timer, onCancel }: { rider: MatchedRider; timer: number; onCancel: () => void }) {
+function WaitingForAcceptance({ rider, timer, isAutoDispatch, onCancel }: { rider: MatchedRider; timer: number; isAutoDispatch?: boolean; onCancel: () => void }) {
   return (
     <div className="min-h-[500px] bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl shadow-xl p-8 flex flex-col items-center justify-center">
       {/* Animated Loading */}
       <div className="relative mb-8">
-        <div className="w-32 h-32 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-4xl shadow-2xl animate-pulse">
-          {rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+        <div className="w-32 h-32 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white shadow-2xl animate-pulse">
+          {isAutoDispatch ? (
+            <Zap size={44} />
+          ) : (
+            <span className="font-bold text-4xl">{rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}</span>
+          )}
         </div>
         <div className="absolute -top-2 -right-2 w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center animate-bounce">
           <Clock className="text-white" size={24} />
@@ -2501,40 +2638,57 @@ function WaitingForAcceptance({ rider, timer, onCancel }: { rider: MatchedRider;
 
       {/* Status */}
       <h2 className="text-3xl font-bold text-slate-800 mb-2 text-center">
-        Waiting for {rider.full_name.split(' ')[0]}
+        {isAutoDispatch ? 'Matching you with a rider' : `Waiting for ${rider.full_name.split(' ')[0]}`}
       </h2>
       <p className="text-slate-600 mb-6 text-center">
-        Your ride request has been sent. The rider will respond shortly.
+        {isAutoDispatch
+          ? "We're offering it to nearby riders one at a time — this switches automatically if one doesn't respond."
+          : 'Your ride request has been sent. The rider will respond shortly.'}
       </p>
 
-      {/* Timer */}
-      <div className="bg-white rounded-xl p-6 mb-8 shadow-lg">
-        <div className="flex items-center gap-4">
-          <div className="text-center">
-            <div className="text-5xl font-bold text-orange-500">{timer}</div>
-            <div className="text-sm text-slate-600 mt-1">seconds</div>
+      {/* Timer — a live countdown for a specific rider, or an indeterminate
+          "still searching" indicator once it's the server's own cascade. */}
+      {isAutoDispatch ? (
+        <div className="bg-white rounded-xl p-6 mb-8 shadow-lg w-full max-w-md">
+          <div className="flex items-center gap-3 justify-center text-slate-600">
+            <div className="w-3 h-3 rounded-full bg-orange-500 animate-ping" />
+            <span className="font-medium">Searching for the next available rider…</span>
           </div>
-          <div className="border-l-2 border-slate-200 h-16"></div>
-          <div className="flex-1">
-            <div className="flex items-center gap-2 mb-2">
-              <Star className="text-yellow-500 fill-yellow-500" size={20} />
-              <span className="font-semibold text-slate-800">{rider.rating} rating</span>
+        </div>
+      ) : (
+        <div className="bg-white rounded-xl p-6 mb-8 shadow-lg">
+          <div className="flex items-center gap-4">
+            <div className="text-center">
+              <div className="text-5xl font-bold text-orange-500">{timer}</div>
+              <div className="text-sm text-slate-600 mt-1">seconds</div>
             </div>
-            <div className="flex items-center gap-2 text-sm text-slate-600">
-              <Navigation size={16} />
-              <span>{rider.distance_to_pickup_km != null ? `${rider.distance_to_pickup_km.toFixed(1)} km away` : 'Distance unknown'}</span>
+            <div className="border-l-2 border-slate-200 h-16"></div>
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-2">
+                <Star className="text-yellow-500 fill-yellow-500" size={20} />
+                <span className="font-semibold text-slate-800">{rider.rating} rating</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-slate-600">
+                <Navigation size={16} />
+                <span>{rider.distance_to_pickup_km != null ? `${rider.distance_to_pickup_km.toFixed(1)} km away` : 'Distance unknown'}</span>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* Loading Bar */}
+      {/* Loading Bar — indeterminate sweep in auto mode (no fixed countdown
+          to size it against), a real 0-30s fill otherwise. */}
       <div className="w-full max-w-md mb-8">
         <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-gradient-to-r from-orange-500 to-yellow-500 transition-all duration-1000"
-            style={{ width: `${((30 - timer) / 30) * 100}%` }}
-          />
+          {isAutoDispatch ? (
+            <div className="h-full w-1/3 bg-gradient-to-r from-orange-500 to-yellow-500 rounded-full animate-[loading-sweep_1.2s_ease-in-out_infinite]" />
+          ) : (
+            <div
+              className="h-full bg-gradient-to-r from-orange-500 to-yellow-500 transition-all duration-1000"
+              style={{ width: `${((30 - timer) / 30) * 100}%` }}
+            />
+          )}
         </div>
       </div>
 
@@ -2550,7 +2704,7 @@ function WaitingForAcceptance({ rider, timer, onCancel }: { rider: MatchedRider;
 }
 
 // Ride Declined Component
-function RideDeclined({ rider, onBackToRiders, onStartNew }: { rider: MatchedRider; onBackToRiders: () => void; onStartNew: () => void }) {
+function RideDeclined({ rider, isAutoDispatch, onBackToRiders, onStartNew }: { rider: MatchedRider; isAutoDispatch?: boolean; onBackToRiders: () => void; onStartNew: () => void }) {
   return (
     <div className="min-h-[500px] bg-gradient-to-br from-red-50 to-orange-50 rounded-xl shadow-xl p-8 flex flex-col items-center justify-center">
       {/* Declined Icon */}
@@ -2565,10 +2719,12 @@ function RideDeclined({ rider, onBackToRiders, onStartNew }: { rider: MatchedRid
         Ride Not Available
       </h2>
       <p className="text-lg text-slate-700 mb-2 text-center">
-        {rider.full_name} couldn't accept your ride
+        {isAutoDispatch ? 'No nearby riders were able to accept right now' : `${rider.full_name} couldn't accept your ride`}
       </p>
       <p className="text-slate-600 text-center mb-8 max-w-md">
-        Don't worry! There are other available riders nearby. Try requesting from another rider or start a new search.
+        {isAutoDispatch
+          ? "We tried the nearest available riders one after another and none responded in time. Try again in a moment, or pick a specific rider yourself."
+          : "Don't worry! There are other available riders nearby. Try requesting from another rider or start a new search."}
       </p>
 
       {/* Action Buttons */}
@@ -2578,7 +2734,7 @@ function RideDeclined({ rider, onBackToRiders, onStartNew }: { rider: MatchedRid
           className="px-8 py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg flex items-center gap-2"
         >
           <ArrowLeft size={20} />
-          Try Another Rider
+          {isAutoDispatch ? 'Back to Riders' : 'Try Another Rider'}
         </button>
         <button
           onClick={onStartNew}

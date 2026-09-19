@@ -314,6 +314,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const [paymentReceipt, setPaymentReceipt] = useState<any>(null);
   const [balanceHidden, setBalanceHidden] = useState(false);
   const [needsPin, setNeedsPin] = useState(false);
+  const [txHistoryExpanded, setTxHistoryExpanded] = useState(true);
 
   const loadData = useCallback(async () => {
     if (!user?.id) return;
@@ -516,7 +517,16 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
       {/* Transaction history */}
       <div id="tx-list">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-bold text-slate-800">Transaction History</h2>
+          <button
+            type="button"
+            onClick={() => setTxHistoryExpanded(v => !v)}
+            className="flex items-center gap-1.5"
+          >
+            <ChevronRight
+              className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-300 ease-in-out ${txHistoryExpanded ? 'rotate-90' : ''}`}
+            />
+            <h2 className="font-bold text-slate-800">Transaction History</h2>
+          </button>
           <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
             {(['all', 'in', 'out', 'tithe'] as const).map(tab => (
               <button key={tab} onClick={() => setActiveTab(tab)}
@@ -527,36 +537,44 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
           </div>
         </div>
 
-        {filteredTx.length === 0 ? (
-          <div className="bg-slate-50 rounded-2xl p-10 text-center">
-            <Bike className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-            <p className="text-slate-400 text-sm">No transactions yet. Complete a delivery to earn your first ICAN.</p>
+        <div
+          className={`grid transition-all duration-300 ease-in-out ${
+            txHistoryExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+          }`}
+        >
+          <div className="overflow-hidden">
+            {filteredTx.length === 0 ? (
+              <div className="bg-slate-50 rounded-2xl p-10 text-center">
+                <Bike className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-slate-400 text-sm">No transactions yet. Complete a delivery to earn your first ICAN.</p>
+              </div>
+            ) : (
+              <div className="space-y-0.5">
+                {filteredTx.map(tx => {
+                  const isIn = tx.direction === 'in';
+                  const isTithe = tx.transaction_type === 'tithe';
+                  return (
+                    <button
+                      key={tx.id}
+                      type="button"
+                      onClick={() => setSelectedTx(tx)}
+                      className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg text-left hover:bg-slate-100 transition-colors"
+                    >
+                      <p className="text-slate-700 text-xs truncate pr-2">
+                        {TX_LABELS[tx.transaction_type] ?? tx.transaction_type}
+                      </p>
+                      <p className={`text-xs font-semibold shrink-0 ${
+                        isTithe ? 'text-amber-500' : isIn ? 'text-emerald-600' : 'text-rose-500'
+                      }`}>
+                        {isIn ? '+' : '-'}{formatICAN(tx.ican_amount)} ICAN
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        ) : (
-          <div className="space-y-0.5">
-            {filteredTx.map(tx => {
-              const isIn = tx.direction === 'in';
-              const isTithe = tx.transaction_type === 'tithe';
-              return (
-                <button
-                  key={tx.id}
-                  type="button"
-                  onClick={() => setSelectedTx(tx)}
-                  className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg text-left hover:bg-slate-100 transition-colors"
-                >
-                  <p className="text-slate-700 text-xs truncate pr-2">
-                    {TX_LABELS[tx.transaction_type] ?? tx.transaction_type}
-                  </p>
-                  <p className={`text-xs font-semibold shrink-0 ${
-                    isTithe ? 'text-amber-500' : isIn ? 'text-emerald-600' : 'text-rose-500'
-                  }`}>
-                    {isIn ? '+' : '-'}{formatICAN(tx.ican_amount)} ICAN
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Transaction detail modal */}

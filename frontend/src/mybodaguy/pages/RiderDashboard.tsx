@@ -392,6 +392,30 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
     return slides;
   }, [totalJobsCount, demandInsights]);
 
+  const MODE_CYCLE = ['normal', 'vip', 'discount', 'return'] as const;
+  const [cyclingMode, setCyclingMode] = useState(false);
+
+  const cycleMode = async () => {
+    if (cyclingMode || !activeVehicleType || !user?.id) return;
+    const current = riderStats?.mode || 'normal';
+    const nextMode = MODE_CYCLE[(MODE_CYCLE.indexOf(current as any) + 1) % MODE_CYCLE.length];
+    setCyclingMode(true);
+    try {
+      const { error } = await supabase
+        .from('mbg_riders')
+        .update({ mode: nextMode, updated_at: new Date().toISOString() })
+        .eq('user_id', user.id)
+        .eq('vehicle_type', activeVehicleType);
+      if (error) throw error;
+      toast.success(`Switched to ${nextMode.replace(/^\w/, c => c.toUpperCase())} mode`);
+      await reloadRiderStats();
+    } catch (e: any) {
+      toast.error(e.message || 'Failed to change mode');
+    } finally {
+      setCyclingMode(false);
+    }
+  };
+
   const switchVehicle = async (vehicleType: string) => {
     if (vehicleType === activeVehicleType || switchingVehicle) return;
     setSwitchingVehicle(true);
@@ -683,9 +707,10 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
               />
               <StatCard
                 title="Mode"
-                value={riderStatsLoading ? '…' : (riderStats?.mode || 'normal').replace(/^\w/, c => c.toUpperCase())}
+                value={riderStatsLoading || cyclingMode ? '…' : (riderStats?.mode || 'normal').replace(/^\w/, c => c.toUpperCase())}
                 icon={<Settings size={20} className="sm:w-6 sm:h-6" />}
                 color="purple"
+                onClick={cycleMode}
               />
               <RewardsPointsCard userId={user?.id} onOpen={() => setActiveTab('rewards')} />
             </div>
@@ -782,9 +807,12 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
           <SupermarketPartnership riderId={user.id} vehicleType={activeVehicleType} />
         )}
 
-        {activeTab === 'deliveries' && (
-          <SupermarketDeliveryPool user={user} />
-        )}
+        {/* Same always-mounted pattern as the ride/escort feeds above —
+            polling + the realtime subscription for the pool and this
+            rider's active deliveries keep running on every tab, so the
+            pending/active counts are never stale by the time the rider
+            taps into Deliveries. */}
+        <SupermarketDeliveryPool user={user} collapsed={activeTab !== 'deliveries'} />
 
         {activeTab === 'rewards' && (
           <RewardsHub user={user} role="rider" />
@@ -834,19 +862,26 @@ function TabButton({
   );
 }
 
-function StatCard({ 
-  title, 
-  value, 
-  icon, 
-  color 
-}: { 
-  title: string; 
-  value: string; 
-  icon: React.ReactNode; 
-  color: string; 
+function StatCard({
+  title,
+  value,
+  icon,
+  color,
+  onClick,
+}: {
+  title: string;
+  value: string;
+  icon: React.ReactNode;
+  color: string;
+  onClick?: () => void;
 }) {
+  const Wrapper = onClick ? 'button' : 'div';
   return (
-    <div className="bg-white rounded-lg xs:rounded-xl shadow-md p-2.5 xs:p-3 sm:p-6">
+    <Wrapper
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`bg-white rounded-lg xs:rounded-xl shadow-md p-2.5 xs:p-3 sm:p-6 text-left w-full ${onClick ? 'hover:shadow-lg hover:brightness-95 active:scale-[0.98] transition-all cursor-pointer' : ''}`}
+    >
       <div className="flex items-center justify-between mb-1.5 xs:mb-2 sm:mb-3">
         <div className={`w-7 h-7 xs:w-8 xs:h-8 sm:w-12 sm:h-12 rounded-full bg-${color}-100 flex items-center justify-center text-${color}-600`}>
           {icon}
@@ -854,6 +889,6 @@ function StatCard({
       </div>
       <h4 className="text-[9px] xs:text-[10px] sm:text-sm text-slate-600 mb-0.5 truncate leading-tight">{title}</h4>
       <p className="text-base xs:text-lg sm:text-2xl font-bold text-slate-800 truncate">{value}</p>
-    </div>
+    </Wrapper>
   );
 }

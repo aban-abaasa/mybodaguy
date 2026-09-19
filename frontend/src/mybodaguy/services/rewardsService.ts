@@ -140,6 +140,28 @@ export async function redeemPointsForItem({
   return data as RedeemItemResult;
 }
 
+export interface AdjustPointsResult {
+  success: boolean;
+  points_balance: number;
+  [key: string]: any;
+}
+
+// Developer-only manual grant/deduction — see mbg_admin_adjust_reward_points
+// in ADD_REWARD_POINTS_ADMIN_ADJUSTMENT.sql. Positive delta grants (and counts
+// toward lifetime_points/tier like any other earn); negative delta deducts
+// from the balance only. The RPC itself checks for the developer role and
+// rejects everyone else — this just surfaces its jsonb error as a thrown one.
+export async function adjustRewardPoints(userId: string, pointsDelta: number, note?: string): Promise<AdjustPointsResult> {
+  const { data, error } = await supabase.rpc('mbg_admin_adjust_reward_points', {
+    p_user_id: userId,
+    p_points_delta: pointsDelta,
+    p_note: note || null,
+  });
+  if (error) throw error;
+  if (!data?.success) throw new Error(data?.error ?? 'Adjustment failed');
+  return data as AdjustPointsResult;
+}
+
 export function pointsToICAN(points: number): number {
   return Math.floor((points / POINTS_PER_ICAN) * 1e8) / 1e8;
 }

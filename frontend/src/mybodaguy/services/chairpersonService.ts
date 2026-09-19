@@ -37,6 +37,19 @@ export interface CommitteeMemberDetails {
   bio: string | null;
 }
 
+export interface CommissionRecord {
+  id: string;
+  ride_id: string;
+  ride_fare: number;
+  commission_percentage: number;
+  commission_amount: number;
+  status: 'pending' | 'paid' | 'failed';
+  region_type: RegionType;
+  region_id: string;
+  paid_at: string | null;
+  created_at: string;
+}
+
 export interface SubordinateChairperson {
   id: string;
   user_id: string;
@@ -330,19 +343,36 @@ export const chairpersonService = {
     }
   },
 
-  // Update subordinate chairperson status
-  async updateSubordinateStatus(committeeId: string, isActive: boolean): Promise<boolean> {
-    const { error } = await supabase
-      .from('mbg_committee_members')
-      .update({ is_active: isActive, updated_at: new Date().toISOString() })
-      .eq('id', committeeId);
+  // Update a direct-report subordinate's commission rate and/or active status.
+  // Goes through mbg_update_subordinate_chairperson (SECURITY DEFINER) rather
+  // than a direct table update — see ADD_MANAGE_SPECIFIC_SUBORDINATE_CHAIRPERSON.sql.
+  async updateSubordinate(
+    committeeId: string,
+    updates: { commissionRate?: number; isActive?: boolean; notes?: string }
+  ): Promise<{ success: boolean; error?: string }> {
+    const { data, error } = await supabase.rpc('mbg_update_subordinate_chairperson', {
+      p_committee_id: committeeId,
+      p_commission_rate: updates.commissionRate ?? null,
+      p_is_active: updates.isActive ?? null,
+      p_notes: updates.notes ?? null,
+    });
 
     if (error) {
-      console.error('[ChairpersonService] Error updating status:', error);
-      return false;
+      console.error('[ChairpersonService] Error updating subordinate:', error);
+      return { success: false, error: error.message };
     }
 
-    return true;
+    if (!data?.success) {
+      return { success: false, error: data?.error || 'Failed to update chairperson' };
+    }
+
+    return { success: true };
+  },
+
+  // Update subordinate chairperson status (kept for backward compatibility)
+  async updateSubordinateStatus(committeeId: string, isActive: boolean): Promise<boolean> {
+    const result = await this.updateSubordinate(committeeId, { isActive });
+    return result.success;
   },
 
   // Get regions available for assignment based on current user's level
@@ -445,6 +475,24 @@ export const chairpersonService = {
     }
 
     return data;
+  },
+
+  // Get this chairperson's own paid/pending commission records (most recent first).
+  // Requires the mbg_commissions_read_own RLS policy (ADD_CHAIRPERSON_COMMISSION_READ_ACCESS.sql).
+  async getMyCommissions(userId: string): Promise<CommissionRecord[]> {
+    const { data, error } = await supabase
+      .from('mbg_commissions')
+      .select('id, ride_id, ride_fare, commission_percentage, commission_amount, status, region_type, region_id, paid_at, created_at')
+      .eq('recipient_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (error) {
+      console.error('[ChairpersonService] Error fetching commissions:', error);
+      return [];
+    }
+
+    return data || [];
   },
 
   // Get committee hierarchy view

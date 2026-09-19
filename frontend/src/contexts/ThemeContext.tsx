@@ -13,22 +13,22 @@ const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<Theme>(() => {
     // Check localStorage first
-    const stored = localStorage.getItem('cyberlearn-theme');
+    const stored = localStorage.getItem('bodagoera-theme');
     if (stored === 'light' || stored === 'dark') {
       return stored;
     }
-    
+
     // Check system preference
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
       return 'dark';
     }
-    
-    return 'dark'; // Default to dark
+
+    return 'light'; // BodaGoEra's brand is a bright orange/yellow theme — default light
   });
 
   useEffect(() => {
     // Save to localStorage
-    localStorage.setItem('cyberlearn-theme', theme);
+    localStorage.setItem('bodagoera-theme', theme);
     
     // Apply to document
     document.documentElement.setAttribute('data-theme', theme);
@@ -49,7 +49,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
     const handleChange = (e: MediaQueryListEvent) => {
-      const stored = localStorage.getItem('cyberlearn-theme');
+      const stored = localStorage.getItem('bodagoera-theme');
       if (!stored) {
         setThemeState(e.matches ? 'dark' : 'light');
       }
