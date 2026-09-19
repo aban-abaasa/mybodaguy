@@ -16,6 +16,7 @@ import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import { ICE_SERVERS } from '../lib/webrtc/iceServers';
+import { startCallRingLoop, stopCallRingLoop } from '../services/notificationSound';
 
 type CallMode = 'voice' | 'video';
 type CallPhase = 'idle' | 'outgoing' | 'incoming' | 'active';
@@ -35,17 +36,35 @@ interface CallControllerProps {
 
 function useRingtone() {
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const intervalRef = useRef<number | null>(null);
+  const outgoingIntervalRef = useRef<number | null>(null);
+  const activePatternRef = useRef<'incoming' | 'outgoing' | null>(null);
 
   const stop = useCallback(() => {
-    if (intervalRef.current) {
-      window.clearInterval(intervalRef.current);
-      intervalRef.current = null;
+    if (outgoingIntervalRef.current) {
+      window.clearInterval(outgoingIntervalRef.current);
+      outgoingIntervalRef.current = null;
     }
+    if (activePatternRef.current === 'incoming') {
+      stopCallRingLoop();
+    }
+    activePatternRef.current = null;
   }, []);
 
   const start = useCallback((pattern: 'incoming' | 'outgoing') => {
     stop();
+    activePatternRef.current = pattern;
+
+    if (pattern === 'incoming') {
+      // Whichever ringtone the person picked in their profile (a preset or
+      // their own uploaded song) — same picker as the new-job ringtone, see
+      // notificationSound.ts.
+      startCallRingLoop();
+      return;
+    }
+
+    // Outgoing ringback tone stays a plain, fixed beep — this is what the
+    // caller hears while waiting for the other side to pick up, not
+    // something either party would personalize.
     const AudioCtxCls = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtxCls) return;
     if (!audioCtxRef.current) audioCtxRef.current = new AudioCtxCls();
@@ -55,7 +74,7 @@ function useRingtone() {
       if (ctx.state === 'suspended') ctx.resume().catch(() => {});
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.frequency.value = pattern === 'incoming' ? 880 : 660;
+      osc.frequency.value = 660;
       gain.gain.setValueAtTime(0.0001, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.15, ctx.currentTime + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.35);
@@ -65,7 +84,7 @@ function useRingtone() {
     };
 
     beep();
-    intervalRef.current = window.setInterval(beep, pattern === 'incoming' ? 1200 : 2000);
+    outgoingIntervalRef.current = window.setInterval(beep, 2000);
   }, [stop]);
 
   useEffect(() => stop, [stop]);
