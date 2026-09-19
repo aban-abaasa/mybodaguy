@@ -1,44 +1,28 @@
 -- ============================================================================
--- Fix: mbg_find_available_riders 400 (Bad Request) from the frontend.
+-- Fix: mbg_find_available_riders "structure of query does not match
+-- function result type" (still a 400 from the frontend after
+-- FIX_MBG_FIND_AVAILABLE_RIDERS_DUPLICATE_OVERLOAD.sql resolved the earlier
+-- duplicate-overload 400).
 -- ============================================================================
--- mbg_find_available_riders has been redefined across four migration files
--- as its signature grew (CREATE_REAL_RIDE_MATCHING_ENGINE.sql: 9 args ->
--- ADD_VEHICLE_TYPE_FILTER_TO_RIDE_MATCHING.sql: +p_vehicle_types ->
--- ADD_COMPANY_CHOICE_TO_RIDE_AND_ESCORT_REQUESTS.sql: +p_business_profile_id
--- -> ADD_ADMIN_VERIFIED_STORE_DRIVERS.sql: same 11 args, 2 more OUTPUT
--- columns). Postgres identifies a function by name + argument TYPE LIST, so
--- every one of those had to DROP every prior overload before recreating —
--- the first two migrations do that with a dynamic pg_proc loop (drops
--- whatever currently exists, no matter its shape). The last one instead
--- hardcodes DROP FUNCTION IF EXISTS ...(NUMERIC, NUMERIC, ..., TEXT[], UUID)
--- — if what was actually live at the time didn't exactly match that literal
--- 11-argument list (e.g. an earlier migration in this chain never got run
--- against this database), that DROP IF EXISTS silently no-ops and
--- CREATE OR REPLACE adds a SECOND overload instead of replacing the first.
--- With two overloads alive, PostgREST can no longer uniquely resolve a
--- named-parameter RPC call and returns exactly this kind of 400.
+-- Diagnosed by comparing information_schema.columns for every table this
+-- function selects from against its RETURNS TABLE list: every column
+-- matched except one — business_profiles.business_name is
+-- `character varying`, not `text`. It flows into the function uncast:
+--   CASE WHEN r.admin_verified_at IS NOT NULL THEN bp.business_name ELSE NULL END
+-- Since the ELSE branch is untyped NULL, Postgres resolves the CASE
+-- expression's type from the THEN branch alone: character varying. The
+-- declared OUT column is verified_business_name TEXT. PL/pgSQL's
+-- RETURN QUERY does a strict type check against RETURNS TABLE — varchar
+-- isn't silently coerced to text there even though the two types are
+-- binary-compatible — hence the error at call time (the function body
+-- itself compiles fine, so this only surfaces when the query actually
+-- runs).
 --
--- Fix: same dynamic drop-everything-then-recreate-one pattern the earlier
--- two migrations already established, applied here so this is self-healing
--- regardless of which overload(s) actually exist right now. Recreates the
--- single canonical (and most current) 11-arg version from
--- ADD_ADMIN_VERIFIED_STORE_DRIVERS.sql verbatim — no behavior change, just
--- guarantees there's exactly one function left afterward.
+-- Fix: cast bp.business_name::TEXT. Signature (args + RETURNS TABLE) is
+-- unchanged, so CREATE OR REPLACE alone is sufficient here — no need to
+-- drop first the way FIX_MBG_FIND_AVAILABLE_RIDERS_DUPLICATE_OVERLOAD.sql
+-- had to for its return-type change.
 -- ============================================================================
-
-DO $$
-DECLARE
-  fn RECORD;
-BEGIN
-  FOR fn IN
-    SELECT pg_get_function_identity_arguments(p.oid) AS args
-    FROM pg_proc p
-    JOIN pg_namespace n ON n.oid = p.pronamespace
-    WHERE n.nspname = 'public' AND p.proname = 'mbg_find_available_riders'
-  LOOP
-    EXECUTE format('DROP FUNCTION IF EXISTS public.mbg_find_available_riders(%s)', fn.args);
-  END LOOP;
-END $$;
 
 CREATE OR REPLACE FUNCTION public.mbg_find_available_riders(
   p_pickup_lat NUMERIC, p_pickup_lng NUMERIC,
@@ -151,17 +135,6 @@ GRANT EXECUTE ON FUNCTION public.mbg_find_available_riders(
 NOTIFY pgrst, 'reload schema';
 
 DO $$
-DECLARE
-  v_count INT;
 BEGIN
-  SELECT count(*) INTO v_count
-  FROM pg_proc p
-  JOIN pg_namespace n ON n.oid = p.pronamespace
-  WHERE n.nspname = 'public' AND p.proname = 'mbg_find_available_riders';
-
-  IF v_count = 1 THEN
-    RAISE NOTICE '✅ mbg_find_available_riders: exactly one overload now exists — the duplicate-overload 400 should be gone.';
-  ELSE
-    RAISE WARNING '⚠️ mbg_find_available_riders: % overloads still exist after this fix — something else is redefining it. Check for other migration files calling CREATE FUNCTION on this name without dropping first.', v_count;
-  END IF;
+  RAISE NOTICE '✅ mbg_find_available_riders: business_name cast to TEXT — the "structure of query does not match function result type" error should be gone.';
 END $$;

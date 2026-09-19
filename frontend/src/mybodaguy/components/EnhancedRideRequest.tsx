@@ -149,6 +149,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // since the server owns the whole timeout/cascade lifecycle instead.
   const [isAutoDispatch, setIsAutoDispatch] = useState(false);
   const [autoDispatching, setAutoDispatching] = useState(false);
+  // Which candidate mbg_sweep_auto_dispatch_cascade currently has the offer
+  // out to (mbg_rides.rider_id) — used only to light up the right avatar in
+  // WaitingForAcceptance's orbit; matched against matchedRiders by rider_id.
+  const [autoCandidateId, setAutoCandidateId] = useState<string | null>(null);
   const [rideId, setRideId] = useState<string | null>(null);
   const [riderUserId, setRiderUserId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState('Customer');
@@ -760,10 +764,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             description: 'Try requesting from another rider',
             duration: 4000
           });
+        } else if (isAutoDispatch && data.rider_id && data.rider_id !== autoCandidateId) {
+          // The cascade quietly moved on to the next candidate — nothing
+          // changes for rideStatus, just which avatar glows in the orbit.
+          setAutoCandidateId(data.rider_id);
         }
-        // In auto-dispatch mode a still-'pending' row with a *different*
-        // non-null rider_id just means the cascade quietly moved on to the
-        // next candidate — nothing to show the customer, still waiting.
       } else if (rideStatus === 'accepted' && data.status === 'in_progress') {
         setRideStatus('journey_started');
       } else if (rideStatus === 'journey_started' && data.status === 'completed') {
@@ -773,7 +778,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
     const interval = setInterval(poll, 3000);
     return () => clearInterval(interval);
-  }, [rideId, rideStatus, selectedRider, isAutoDispatch]);
+  }, [rideId, rideStatus, selectedRider, isAutoDispatch, autoCandidateId]);
 
   // Resolve the rider's real auth user id (MatchedRider.rider_id is the
   // mbg_riders row id, not the auth id) so RideCommsBar can address them.
@@ -1085,6 +1090,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setRideStatus('waiting_acceptance');
     setWaitingTimer(30);
     setIsAutoDispatch(!!opts?.auto);
+    setAutoCandidateId(opts?.auto ? rider.rider_id : null);
 
     try {
       const orderNotes = deliveryCart.length > 0
@@ -1308,6 +1314,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setSelectedRider(null);
     setRideId(null);
     setIsAutoDispatch(false);
+    setAutoCandidateId(null);
   };
 
   const handleStartNewRide = () => {
@@ -1320,6 +1327,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setRideStatus(null);
     setRideId(null);
     setIsAutoDispatch(false);
+    setAutoCandidateId(null);
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
@@ -1351,6 +1359,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setRideStatus(null);
     setRideId(null);
     setIsAutoDispatch(false);
+    setAutoCandidateId(null);
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
@@ -1421,7 +1430,16 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
   // Render different UI based on ride status
   if (rideStatus === 'waiting_acceptance' && selectedRider) {
-    return <WaitingForAcceptance rider={selectedRider} timer={waitingTimer} isAutoDispatch={isAutoDispatch} onCancel={handleBackToSearch} />;
+    return (
+      <WaitingForAcceptance
+        rider={selectedRider}
+        timer={waitingTimer}
+        isAutoDispatch={isAutoDispatch}
+        candidates={matchedRiders}
+        activeRiderId={autoCandidateId}
+        onCancel={handleBackToSearch}
+      />
+    );
   }
 
   if (rideStatus === 'declined' && selectedRider) {
@@ -2619,20 +2637,86 @@ function RiderCard({
 }
 
 // Waiting for Acceptance Component
-function WaitingForAcceptance({ rider, timer, isAutoDispatch, onCancel }: { rider: MatchedRider; timer: number; isAutoDispatch?: boolean; onCancel: () => void }) {
+function WaitingForAcceptance({
+  rider,
+  timer,
+  isAutoDispatch,
+  candidates = [],
+  activeRiderId,
+  onCancel,
+}: {
+  rider: MatchedRider;
+  timer: number;
+  isAutoDispatch?: boolean;
+  // The real nearby-rider pool mbg_sweep_auto_dispatch_cascade is cycling
+  // through (ADD_AUTO_DISPATCH_CASCADE.sql) — matchedRiders from the search
+  // that led here, not a decorative placeholder list.
+  candidates?: MatchedRider[];
+  // mbg_rides.rider_id as last seen by polling — whichever of `candidates`
+  // currently has the live offer, so the orbit can light up the real one.
+  activeRiderId?: string | null;
+  onCancel: () => void;
+}) {
+  const orbit = isAutoDispatch ? candidates.slice(0, 6) : [];
+  const activeId = activeRiderId ?? rider.rider_id;
+  const activeCandidate = orbit.find(c => c.rider_id === activeId) || orbit[0] || null;
+
   return (
-    <div className="min-h-[500px] bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl shadow-xl p-8 flex flex-col items-center justify-center">
-      {/* Animated Loading */}
-      <div className="relative mb-8">
-        <div className="w-32 h-32 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white shadow-2xl animate-pulse">
-          {isAutoDispatch ? (
-            <Zap size={44} />
-          ) : (
-            <span className="font-bold text-4xl">{rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}</span>
-          )}
-        </div>
-        <div className="absolute -top-2 -right-2 w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center animate-bounce">
-          <Clock className="text-white" size={24} />
+    <div className="min-h-[500px] bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl shadow-xl p-6 sm:p-8 flex flex-col items-center justify-center overflow-hidden">
+      {/* Animated Loading / Radar */}
+      <div className="relative mb-8" style={{ width: 260, height: 260, maxWidth: '100%' }}>
+        {/* Expanding radar rings — auto-dispatch only, suggests an active nearby search */}
+        {isAutoDispatch && [0, 0.7, 1.4].map((delay) => (
+          <div
+            key={delay}
+            className="absolute inset-0 m-auto w-32 h-32 rounded-full border-2 border-orange-400 animate-radar-ring"
+            style={{ animationDelay: `${delay}s` }}
+          />
+        ))}
+
+        {/* Orbiting candidate riders — the real pool being offered this ride */}
+        {orbit.map((c, i) => {
+          const angle = -Math.PI / 2 + (i * (2 * Math.PI)) / orbit.length;
+          const radius = 98;
+          const x = Math.cos(angle) * radius;
+          const y = Math.sin(angle) * radius;
+          const isActive = c.rider_id === activeId;
+          return (
+            <div
+              key={c.rider_id}
+              className="absolute top-1/2 left-1/2 flex flex-col items-center transition-all duration-500 ease-out"
+              style={{ transform: `translate(${x - 22}px, ${y - 22}px)` }}
+            >
+              <div
+                className={`w-11 h-11 rounded-full flex items-center justify-center text-white text-xs font-bold shadow-md border-2 border-white transition-all duration-500 ${
+                  isActive
+                    ? 'bg-gradient-to-br from-orange-500 to-yellow-500 scale-110 animate-candidate-glow'
+                    : 'bg-slate-300 opacity-70 grayscale'
+                }`}
+              >
+                {c.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+              </div>
+              {isActive && (
+                <span className="mt-1 text-[10px] font-semibold text-orange-600 bg-white/90 px-1.5 py-0.5 rounded-full shadow-sm whitespace-nowrap">
+                  {c.full_name.split(' ')[0]}
+                </span>
+              )}
+            </div>
+          );
+        })}
+
+        {/* Center hub */}
+        <div className="absolute inset-0 m-auto w-32 h-32">
+          <div className="w-32 h-32 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white shadow-2xl animate-pulse">
+            {isAutoDispatch ? (
+              <Zap size={44} />
+            ) : (
+              <span className="font-bold text-4xl">{rider.full_name.split(' ').map(n => n[0]).join('').slice(0, 2)}</span>
+            )}
+          </div>
+          <div className="absolute -top-2 -right-2 w-12 h-12 bg-orange-500 rounded-full flex items-center justify-center animate-bounce">
+            <Clock className="text-white" size={24} />
+          </div>
         </div>
       </div>
 
@@ -2640,20 +2724,51 @@ function WaitingForAcceptance({ rider, timer, isAutoDispatch, onCancel }: { ride
       <h2 className="text-3xl font-bold text-slate-800 mb-2 text-center">
         {isAutoDispatch ? 'Matching you with a rider' : `Waiting for ${rider.full_name.split(' ')[0]}`}
       </h2>
-      <p className="text-slate-600 mb-6 text-center">
+      <p className="text-slate-600 mb-6 text-center max-w-md">
         {isAutoDispatch
-          ? "We're offering it to nearby riders one at a time — this switches automatically if one doesn't respond."
+          ? activeCandidate
+            ? `We're currently asking ${activeCandidate.full_name.split(' ')[0]} nearby — this switches automatically if they don't respond.`
+            : "We're offering it to nearby riders one at a time — this switches automatically if one doesn't respond."
           : 'Your ride request has been sent. The rider will respond shortly.'}
       </p>
 
-      {/* Timer — a live countdown for a specific rider, or an indeterminate
-          "still searching" indicator once it's the server's own cascade. */}
+      {/* Timer — a live countdown for a specific rider, or the real current
+          candidate (with a queue count) once it's the server's own cascade. */}
       {isAutoDispatch ? (
-        <div className="bg-white rounded-xl p-6 mb-8 shadow-lg w-full max-w-md">
-          <div className="flex items-center gap-3 justify-center text-slate-600">
-            <div className="w-3 h-3 rounded-full bg-orange-500 animate-ping" />
-            <span className="font-medium">Searching for the next available rider…</span>
-          </div>
+        <div className="bg-white rounded-xl p-5 mb-8 shadow-lg w-full max-w-md">
+          {activeCandidate ? (
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-500 to-yellow-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                {activeCandidate.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0 text-left">
+                <p className="font-semibold text-slate-800 truncate">Asking {activeCandidate.full_name.split(' ')[0]}…</p>
+                <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                  <span className="flex items-center gap-1">
+                    <Star size={12} className="text-yellow-500 fill-yellow-500" />
+                    {activeCandidate.rating}
+                  </span>
+                  {activeCandidate.distance_to_pickup_km != null && (
+                    <span className="flex items-center gap-1">
+                      <Navigation size={12} />
+                      {activeCandidate.distance_to_pickup_km.toFixed(1)} km away
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="w-2.5 h-2.5 rounded-full bg-orange-500 animate-ping flex-shrink-0" />
+            </div>
+          ) : (
+            <div className="flex items-center gap-3 justify-center text-slate-600">
+              <div className="w-3 h-3 rounded-full bg-orange-500 animate-ping" />
+              <span className="font-medium">Searching for the next available rider…</span>
+            </div>
+          )}
+          {orbit.length > 1 && (
+            <p className="text-xs text-slate-400 text-center mt-3 pt-3 border-t border-slate-100">
+              {orbit.length} nearby riders in the queue
+            </p>
+          )}
         </div>
       ) : (
         <div className="bg-white rounded-xl p-6 mb-8 shadow-lg">
