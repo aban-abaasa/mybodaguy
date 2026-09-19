@@ -36,6 +36,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   const [selectedSubordinate, setSelectedSubordinate] = useState<SubordinateChairperson | null>(null);
   const [selectedRider, setSelectedRider] = useState<Rider | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  const [openCommissionSection, setOpenCommissionSection] = useState<'summary' | 'activity' | 'rates' | null>('summary');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalSubordinates: 0,
@@ -157,10 +158,10 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex items-center justify-center">
         <div className="text-center">
           <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500"></div>
-          <p className="mt-4 text-slate-600">Loading dashboard...</p>
+          <p className="mt-4 text-slate-600 dark:text-slate-400">Loading dashboard...</p>
         </div>
       </div>
     );
@@ -168,7 +169,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
 
   if (!myCommitteeInfo) {
     return (
-      <div className="min-h-screen bg-slate-50">
+      <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
         <header className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg sticky top-0 z-50">
           <div className="container mx-auto px-2 xs:px-3 sm:px-4">
             <div className="flex items-center justify-between h-12 xs:h-14 sm:h-16">
@@ -195,10 +196,10 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
 
                 {/* Account Dropdown Menu */}
                 {showMobileMenu && (
-                  <div className="absolute right-0 top-full mt-2 bg-white rounded-lg shadow-xl py-2 min-w-[200px] z-50">
-                    <div className="px-3 xs:px-4 py-2 border-b border-slate-200">
-                      <p className="text-[9px] xs:text-xs text-slate-500">Logged in as</p>
-                      <p className="text-xs xs:text-sm font-medium text-slate-800 truncate">{user.email}</p>
+                  <div className="absolute right-0 top-full mt-2 bg-white dark:bg-slate-800 rounded-lg shadow-xl py-2 min-w-[200px] z-50">
+                    <div className="px-3 xs:px-4 py-2 border-b border-slate-200 dark:border-slate-700">
+                      <p className="text-[9px] xs:text-xs text-slate-500 dark:text-slate-400">Logged in as</p>
+                      <p className="text-xs xs:text-sm font-medium text-slate-800 dark:text-slate-100 truncate">{user.email}</p>
                     </div>
 
                     {/* Profile */}
@@ -207,7 +208,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                         setShowMobileMenu(false);
                         setShowProfileModal(true);
                       }}
-                      className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                      className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700 flex items-center gap-2"
                     >
                       <User size={14} className="xs:w-4 xs:h-4" />
                       <span className="text-xs xs:text-sm font-medium">My Profile</span>
@@ -221,7 +222,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                         setShowMobileMenu(false);
                         onSignOut();
                       }}
-                      className="w-full px-3 xs:px-4 py-2 text-left text-red-600 hover:bg-red-50 flex items-center gap-2"
+                      className="w-full px-3 xs:px-4 py-2 text-left text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/30 flex items-center gap-2"
                     >
                       <LogOut size={14} className="xs:w-4 xs:h-4" />
                       <span className="text-xs xs:text-sm font-medium">Sign Out</span>
@@ -234,11 +235,11 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
         </header>
 
         <div className="container mx-auto px-4 py-8">
-          <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-lg p-8 text-center">
             <Users className="w-16 h-16 text-orange-500 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-slate-800 mb-2">No Chairperson Assignment</h2>
-            <p className="text-slate-600">You haven't been assigned as a chairperson yet.</p>
-            <p className="text-sm text-slate-500 mt-2">Contact your administrator for assistance.</p>
+            <h2 className="text-2xl font-bold text-slate-800 dark:text-slate-100 mb-2">No Chairperson Assignment</h2>
+            <p className="text-slate-600 dark:text-slate-400">You haven't been assigned as a chairperson yet.</p>
+            <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Contact your administrator for assistance.</p>
           </div>
         </div>
 
@@ -258,11 +259,11 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
       {/* Content without header - header is in UnifiedDashboard */}
-      
+
       {/* Navigation Tabs - Desktop Only */}
-      <div className="hidden md:block bg-white border-b border-slate-200 sticky top-12 xs:top-14 sm:top-16 z-40">
+      <div className="hidden md:block bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-12 xs:top-14 sm:top-16 z-40">
         <div className="container mx-auto px-1 xs:px-2 sm:px-4">
           <div className="flex gap-0.5 overflow-x-auto scrollbar-hide">
             <TabButton
@@ -301,33 +302,33 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
           at the top of the no-committee fallback screen is the exception,
           untouched here), so this trigger is a plain chevron rather than a
           second avatar-look button. */}
-      <div className="md:hidden bg-white border-b border-slate-200 sticky top-12 xs:top-14 z-40">
+      <div className="md:hidden bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-12 xs:top-14 z-40">
         <button
           type="button"
           onClick={() => setShowMobileMenu(!showMobileMenu)}
           className="w-full container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between"
         >
           <div className="flex items-center gap-2">
-            {activeTab === 'overview' && <><TrendingUp size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Overview</span></>}
-            {activeTab === 'subordinates' && <><Users size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Chairpersons</span></>}
-            {activeTab === 'riders' && <><Bike size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Riders</span></>}
-            {activeTab === 'commission' && <><DollarSign size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Commission</span></>}
+            {activeTab === 'overview' && <><TrendingUp size={16} className="text-orange-500 dark:text-orange-400" /><span className="text-sm font-medium text-slate-800 dark:text-slate-100">Overview</span></>}
+            {activeTab === 'subordinates' && <><Users size={16} className="text-orange-500 dark:text-orange-400" /><span className="text-sm font-medium text-slate-800 dark:text-slate-100">Chairpersons</span></>}
+            {activeTab === 'riders' && <><Bike size={16} className="text-orange-500 dark:text-orange-400" /><span className="text-sm font-medium text-slate-800 dark:text-slate-100">Riders</span></>}
+            {activeTab === 'commission' && <><DollarSign size={16} className="text-orange-500 dark:text-orange-400" /><span className="text-sm font-medium text-slate-800 dark:text-slate-100">Commission</span></>}
           </div>
-          <ChevronDown size={16} className={`text-orange-500 transition-transform flex-shrink-0 ${showMobileMenu ? 'rotate-180' : ''}`} />
+          <ChevronDown size={16} className={`text-orange-500 dark:text-orange-400 transition-transform flex-shrink-0 ${showMobileMenu ? 'rotate-180' : ''}`} />
         </button>
 
         {/* Mobile Dropdown Menu */}
         {showMobileMenu && (
-          <div className="absolute right-2 xs:right-3 top-14 bg-white rounded-lg shadow-xl py-2 min-w-[180px] xs:min-w-[200px] z-50">
+          <div className="absolute right-2 xs:right-3 top-14 bg-white dark:bg-slate-800 rounded-lg shadow-xl py-2 min-w-[180px] xs:min-w-[200px] z-50">
             {/* Navigation Items */}
-            <div className="py-1 border-b border-slate-200">
+            <div className="py-1 border-b border-slate-200 dark:border-slate-700">
               <button
                 onClick={() => {
                   setActiveTab('overview');
                   setShowMobileMenu(false);
                 }}
                 className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'overview' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                  activeTab === 'overview' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700'
                 }`}
               >
                 <TrendingUp size={14} className="xs:w-4 xs:h-4" />
@@ -339,7 +340,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                   setShowMobileMenu(false);
                 }}
                 className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'subordinates' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                  activeTab === 'subordinates' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700'
                 }`}
               >
                 <Users size={14} className="xs:w-4 xs:h-4" />
@@ -352,7 +353,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                     setShowMobileMenu(false);
                   }}
                   className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                    activeTab === 'riders' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                    activeTab === 'riders' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
                   <Bike size={14} className="xs:w-4 xs:h-4" />
@@ -365,7 +366,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                   setShowMobileMenu(false);
                 }}
                 className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'commission' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
+                  activeTab === 'commission' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700'
                 }`}
               >
                 <DollarSign size={14} className="xs:w-4 xs:h-4" />
@@ -379,7 +380,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                 setShowMobileMenu(false);
                 setShowProfileModal(true);
               }}
-              className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+              className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700 flex items-center gap-2"
             >
               <User size={14} className="xs:w-4 xs:h-4" />
               <span className="text-xs xs:text-sm font-medium">My Profile</span>
@@ -946,12 +947,12 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
         {activeTab === 'commission' && (
           <>
             {/* Enhanced Header with Purple Gradient */}
-            <div className="bg-gradient-to-br from-purple-500 via-purple-400 to-pink-500 rounded-xl shadow-xl p-3 mb-3 text-white relative overflow-hidden">
+            <div className="bg-gradient-to-br from-purple-500 via-purple-400 to-pink-500 dark:from-purple-700 dark:via-purple-600 dark:to-pink-700 rounded-xl shadow-xl p-3 mb-3 text-white relative overflow-hidden">
               {/* Decorative Background */}
               <div className="absolute top-0 right-0 opacity-10">
                 <DollarSign size={120} className="transform rotate-12" />
               </div>
-              
+
               <div className="relative z-10">
                 <div className="flex items-center justify-between gap-3 mb-3">
                   <div className="flex items-center gap-2">
@@ -987,164 +988,200 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
               </div>
             </div>
 
-            {/* Commission Cards Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            {/* Commission Cards — collapsible on mobile (tap header to open), always expanded side-by-side from lg up */}
+            <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:gap-6 mb-4 lg:mb-6">
               {/* Commission Summary Card */}
-              <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-slate-100">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="bg-gradient-to-br from-purple-100 to-pink-100 p-3 rounded-xl">
-                    <BarChart3 className="text-purple-600" size={28} />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-slate-800">Commission Summary</h3>
-                    <p className="text-sm text-slate-600">Your earnings breakdown</p>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-xl border border-blue-100">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-blue-500 rounded-lg p-2">
-                        <Calendar className="text-white" size={20} />
-                      </div>
-                      <span className="text-slate-700 font-medium">This Month</span>
+              <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border-2 border-slate-100 dark:border-slate-700 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setOpenCommissionSection(openCommissionSection === 'summary' ? null : 'summary')}
+                  className="w-full flex items-center justify-between gap-3 p-4 sm:p-6 text-left lg:cursor-default"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-900/40 dark:to-pink-900/40 p-3 rounded-xl flex-shrink-0">
+                      <BarChart3 className="text-purple-600 dark:text-purple-400" size={28} />
                     </div>
-                    <span className="font-bold text-slate-800 text-lg">{formatUGX(thisMonthEarned)}</span>
-                  </div>
-
-                  <div className="flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-pink-50 rounded-xl border border-purple-100">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-purple-500 rounded-lg p-2">
-                        <Calendar className="text-white" size={20} />
-                      </div>
-                      <span className="text-slate-700 font-medium">Last Month</span>
+                    <div>
+                      <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Commission Summary</h3>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">Your earnings breakdown</p>
                     </div>
-                    <span className="font-bold text-slate-800 text-lg">{formatUGX(lastMonthEarned)}</span>
                   </div>
+                  <ChevronDown
+                    size={20}
+                    className={`text-slate-400 dark:text-slate-500 transition-transform flex-shrink-0 lg:hidden ${openCommissionSection === 'summary' ? 'rotate-180' : ''}`}
+                  />
+                </button>
 
-                  <div className="flex justify-between items-center p-4 bg-gradient-to-r from-orange-50 to-yellow-50 rounded-xl border-2 border-orange-200">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-gradient-to-r from-orange-500 to-yellow-500 rounded-lg p-2">
-                        <DollarSign className="text-white" size={20} />
+                <div className={`${openCommissionSection === 'summary' ? 'block' : 'hidden'} lg:block px-4 sm:px-6 pb-4 sm:pb-6`}>
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-100 dark:border-blue-800/50">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-blue-500 rounded-lg p-2">
+                          <Calendar className="text-white" size={20} />
+                        </div>
+                        <span className="text-slate-700 dark:text-slate-200 font-medium">This Month</span>
                       </div>
-                      <span className="text-slate-700 font-bold">Total Earned</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-100 text-lg">{formatUGX(thisMonthEarned)}</span>
                     </div>
-                    <span className="font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent text-xl">
-                      {formatUGX(totalEarned)}
-                    </span>
-                  </div>
-                </div>
 
-                <div className="mt-6 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                  <p className="text-sm text-amber-800 flex items-center gap-2">
-                    <span>💡</span>
-                    <span className="font-medium">Commission credits automatically when a rider completes a ride or settles cash owed.</span>
-                  </p>
+                    <div className="flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 rounded-xl border border-purple-100 dark:border-purple-800/50">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-purple-500 rounded-lg p-2">
+                          <Calendar className="text-white" size={20} />
+                        </div>
+                        <span className="text-slate-700 dark:text-slate-200 font-medium">Last Month</span>
+                      </div>
+                      <span className="font-bold text-slate-800 dark:text-slate-100 text-lg">{formatUGX(lastMonthEarned)}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center p-4 bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/20 dark:to-yellow-900/20 rounded-xl border-2 border-orange-200 dark:border-orange-800/50">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-gradient-to-r from-orange-500 to-yellow-500 rounded-lg p-2">
+                          <DollarSign className="text-white" size={20} />
+                        </div>
+                        <span className="text-slate-700 dark:text-slate-200 font-bold">Total Earned</span>
+                      </div>
+                      <span className="font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent text-xl">
+                        {formatUGX(totalEarned)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-xl">
+                    <p className="text-sm text-amber-800 dark:text-amber-300 flex items-center gap-2">
+                      <span>💡</span>
+                      <span className="font-medium">Commission credits automatically when a rider completes a ride or settles cash owed.</span>
+                    </p>
+                  </div>
                 </div>
               </div>
 
               {/* Recent Activity Card */}
-              <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-slate-100">
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="bg-gradient-to-br from-green-100 to-emerald-100 p-3 rounded-xl">
-                    <TrendingUp className="text-green-600" size={28} />
+              <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border-2 border-slate-100 dark:border-slate-700 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setOpenCommissionSection(openCommissionSection === 'activity' ? null : 'activity')}
+                  className="w-full flex items-center justify-between gap-3 p-4 sm:p-6 text-left lg:cursor-default"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="bg-gradient-to-br from-green-100 to-emerald-100 dark:from-green-900/40 dark:to-emerald-900/40 p-3 rounded-xl flex-shrink-0">
+                      <TrendingUp className="text-green-600 dark:text-green-400" size={28} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Recent Activity</h3>
+                      <p className="text-sm text-slate-600 dark:text-slate-400">Latest transactions</p>
+                    </div>
+                  </div>
+                  <ChevronDown
+                    size={20}
+                    className={`text-slate-400 dark:text-slate-500 transition-transform flex-shrink-0 lg:hidden ${openCommissionSection === 'activity' ? 'rotate-180' : ''}`}
+                  />
+                </button>
+
+                <div className={`${openCommissionSection === 'activity' ? 'block' : 'hidden'} lg:block px-4 sm:px-6 pb-4 sm:pb-6`}>
+                  {commissions.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12">
+                      <div className="bg-slate-100 dark:bg-slate-700 rounded-full w-16 h-16 flex items-center justify-center mb-4">
+                        <BarChart3 className="text-slate-400 dark:text-slate-500" size={32} />
+                      </div>
+                      <p className="text-slate-600 dark:text-slate-300 font-medium mb-2">No activity yet</p>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 text-center max-w-xs">
+                        Your commission activity will appear here once rides start generating earnings
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
+                      {commissions.slice(0, 10).map((c) => (
+                        <div
+                          key={c.id}
+                          className="flex items-center justify-between gap-2 p-3 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-100 dark:border-slate-700"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                              {formatUGX(c.commission_amount)}
+                              <span className="text-xs font-normal text-slate-500 dark:text-slate-400"> ({c.commission_percentage}% of {formatUGX(c.ride_fare)})</span>
+                            </p>
+                            <p className="text-xs text-slate-500 dark:text-slate-400">
+                              {new Date(c.paid_at || c.created_at).toLocaleDateString('en-UG', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </p>
+                          </div>
+                          <span className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-medium capitalize ${
+                            c.status === 'paid' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                            c.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                          }`}>
+                            {c.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Commission Rates by Assignment */}
+            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border-2 border-slate-100 dark:border-slate-700 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setOpenCommissionSection(openCommissionSection === 'rates' ? null : 'rates')}
+                className="w-full flex items-center justify-between gap-3 p-4 sm:p-6 text-left lg:cursor-default"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="bg-gradient-to-br from-orange-100 to-yellow-100 dark:from-orange-900/40 dark:to-yellow-900/40 p-3 rounded-xl flex-shrink-0">
+                    <MapPin className="text-orange-600 dark:text-orange-400" size={28} />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-slate-800">Recent Activity</h3>
-                    <p className="text-sm text-slate-600">Latest transactions</p>
+                    <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Commission Rates by Role</h3>
+                    <p className="text-sm text-slate-600 dark:text-slate-400">Your rates across different assignments</p>
                   </div>
                 </div>
+                <ChevronDown
+                  size={20}
+                  className={`text-slate-400 dark:text-slate-500 transition-transform flex-shrink-0 lg:hidden ${openCommissionSection === 'rates' ? 'rotate-180' : ''}`}
+                />
+              </button>
 
-                {commissions.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center py-12">
-                    <div className="bg-slate-100 rounded-full w-16 h-16 flex items-center justify-center mb-4">
-                      <BarChart3 className="text-slate-400" size={32} />
-                    </div>
-                    <p className="text-slate-600 font-medium mb-2">No activity yet</p>
-                    <p className="text-sm text-slate-500 text-center max-w-xs">
-                      Your commission activity will appear here once rides start generating earnings
-                    </p>
+              <div className={`${openCommissionSection === 'rates' ? 'block' : 'hidden'} lg:block px-4 sm:px-6 pb-4 sm:pb-6`}>
+                {allAssignments.length === 0 ? (
+                  <div className="text-center py-8">
+                    <p className="text-slate-500 dark:text-slate-400">No assignments found</p>
                   </div>
                 ) : (
-                  <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                    {commissions.slice(0, 10).map((c) => (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {allAssignments.map((assignment, index) => (
                       <div
-                        key={c.id}
-                        className="flex items-center justify-between gap-2 p-3 bg-slate-50 rounded-lg border border-slate-100"
+                        key={assignment.id}
+                        className="group bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700/60 dark:to-slate-800 rounded-xl p-5 border-2 border-slate-200 dark:border-slate-600 hover:border-orange-300 dark:hover:border-orange-500 hover:shadow-lg transition-all"
                       >
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-slate-800">
-                            {formatUGX(c.commission_amount)}
-                            <span className="text-xs font-normal text-slate-500"> ({c.commission_percentage}% of {formatUGX(c.ride_fare)})</span>
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {new Date(c.paid_at || c.created_at).toLocaleDateString('en-UG', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </p>
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="bg-white dark:bg-slate-800 rounded-lg p-2 shadow-sm">
+                            <MapPin className="text-orange-500 dark:text-orange-400" size={20} />
+                          </div>
+                          <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+                            index === 0
+                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
+                              : 'bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-200'
+                          }`}>
+                            {index === 0 ? '⭐ Primary' : 'Secondary'}
+                          </span>
                         </div>
-                        <span className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-medium capitalize ${
-                          c.status === 'paid' ? 'bg-green-100 text-green-700' :
-                          c.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-700'
-                        }`}>
-                          {c.status}
-                        </span>
+                        <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-1 capitalize">
+                          {formatRole(assignment.role)}
+                        </h4>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-3 capitalize">
+                          {formatRegionType(assignment.region_type)}
+                        </p>
+                        <div className="flex items-center justify-between pt-3 border-t border-slate-300 dark:border-slate-600">
+                          <span className="text-sm text-slate-600 dark:text-slate-400 font-medium">Commission</span>
+                          <span className="text-2xl font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
+                            {assignment.commission_rate}%
+                          </span>
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-            </div>
-
-            {/* Commission Rates by Assignment */}
-            <div className="bg-white rounded-2xl shadow-lg p-6 border-2 border-slate-100">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="bg-gradient-to-br from-orange-100 to-yellow-100 p-3 rounded-xl">
-                  <MapPin className="text-orange-600" size={28} />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-slate-800">Commission Rates by Role</h3>
-                  <p className="text-sm text-slate-600">Your rates across different assignments</p>
-                </div>
-              </div>
-
-              {allAssignments.length === 0 ? (
-                <div className="text-center py-8">
-                  <p className="text-slate-500">No assignments found</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {allAssignments.map((assignment, index) => (
-                    <div
-                      key={assignment.id}
-                      className="group bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl p-5 border-2 border-slate-200 hover:border-orange-300 hover:shadow-lg transition-all"
-                    >
-                      <div className="flex items-start justify-between mb-3">
-                        <div className="bg-white rounded-lg p-2 shadow-sm">
-                          <MapPin className="text-orange-500" size={20} />
-                        </div>
-                        <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                          index === 0 
-                            ? 'bg-orange-100 text-orange-700' 
-                            : 'bg-slate-200 text-slate-700'
-                        }`}>
-                          {index === 0 ? '⭐ Primary' : 'Secondary'}
-                        </span>
-                      </div>
-                      <h4 className="font-bold text-slate-800 mb-1 capitalize">
-                        {formatRole(assignment.role)}
-                      </h4>
-                      <p className="text-sm text-slate-600 mb-3 capitalize">
-                        {formatRegionType(assignment.region_type)}
-                      </p>
-                      <div className="flex items-center justify-between pt-3 border-t border-slate-300">
-                        <span className="text-sm text-slate-600 font-medium">Commission</span>
-                        <span className="text-2xl font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
-                          {assignment.commission_rate}%
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </>
         )}
@@ -1233,8 +1270,8 @@ function TabButton({
       onClick={onClick}
       className={`flex items-center gap-1 sm:gap-2 px-2 xs:px-2.5 sm:px-4 py-1.5 xs:py-2 sm:py-3 font-medium transition-all relative whitespace-nowrap text-[10px] xs:text-xs sm:text-sm ${
         active
-          ? 'text-orange-500'
-          : 'text-slate-600 hover:text-slate-800'
+          ? 'text-orange-500 dark:text-orange-400'
+          : 'text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
       }`}
     >
       {icon}
