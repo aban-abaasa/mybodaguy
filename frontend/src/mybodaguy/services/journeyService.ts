@@ -24,6 +24,18 @@ export interface FlightOffer {
   // Duffel-assigned passenger ids from the offer — order creation must
   // reference these exactly, one per passenger booked on this offer.
   passengers: Array<{ id: string; type: string }>;
+  // Sent by newer versions of the search API; the flight picker falls back to
+  // the segment data in `slices` when they're absent.
+  carrierIata?: string | null;
+  carrierLogoUrl?: string | null;
+  /** Whether the fare can be refunded before departure (null = airline didn't say). */
+  refundable?: boolean | null;
+  // The fare in ICAN at its live value, and in the signed-in customer's own
+  // currency (from the country they chose). Null/absent when the price engine
+  // has no price for the airline's currency — the airline's own price shows.
+  priceIcan?: number | null;
+  priceLocal?: number | null;
+  localCurrency?: string | null;
 }
 
 export interface JourneyPickup {
@@ -45,13 +57,35 @@ export interface JourneyDestination {
   lng?: number | null;
 }
 
+/** The quote's amounts in the customer's own currency, at the live ICAN price in that currency. */
+export interface QuoteLocalView {
+  currency: string;
+  countryCode: string;
+  /** Live price of 1 ICAN in `currency`. */
+  pricePerIcan: number;
+  pickup: number;
+  flight: number;
+  cargo: number;
+  dropoff: number;
+  total: number;
+}
+
 export interface JourneyQuote {
   pickupFareUgx: number;
   flightFareUgx: number;
   cargoFareUgx: number;
   dropoffFareUgx: number;
   totalUgx: number;
+  // Priced in ICAN first (at its live value) — the amount actually charged.
   totalIcan: number;
+  pickupIcan?: number;
+  flightIcan?: number;
+  cargoIcan?: number;
+  dropoffIcan?: number;
+  /** Live UGX price of 1 ICAN used for this quote. */
+  icanPriceUgx?: number;
+  /** Same amounts in the customer's currency; null when it couldn't be worked out. */
+  local?: QuoteLocalView | null;
   pickup: JourneyPickup;
   destination: JourneyDestination;
   offer: FlightOffer;
@@ -67,9 +101,13 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     headers,
     body: JSON.stringify(body),
   });
-  const data = await res.json();
+  // A timeout or gateway error comes back as an HTML page, not JSON.
+  const data = await res.json().catch(() => ({} as any));
   if (!res.ok || data.success === false) {
-    throw new Error(data.error || `Request to ${path} failed`);
+    if (!data.error && (res.status === 502 || res.status === 504)) {
+      throw new Error('The server took too long to respond — please try again.');
+    }
+    throw new Error(data.error || `Request to ${path} failed (${res.status})`);
   }
   return data as T;
 }
@@ -79,6 +117,7 @@ export async function searchFlights(params: {
   destinationIata: string;
   departureDate: string;
   passengerCount?: number;
+  cabinClass?: 'economy' | 'premium_economy' | 'business' | 'first';
 }): Promise<{ offerRequestId: string; offers: FlightOffer[] }> {
   return postJson('/api/journeys/flights/search', params);
 }

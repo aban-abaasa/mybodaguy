@@ -18,10 +18,14 @@ async function duffelRequest(path, options = {}) {
       ...options.headers
     }
   });
-  const data = await res.json();
+  // A gateway/HTML error page isn't JSON — don't let the parse failure hide
+  // the real HTTP status.
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.errors?.[0]?.message || `Duffel request failed: ${res.status}`);
     err.duffelResponse = data;
+    err.status = res.status;
+    err.duffelCode = data.errors?.[0]?.code;
     throw err;
   }
   return data;
@@ -48,6 +52,10 @@ export async function searchOffers({ originIata, destinationIata, departureDate,
     offers: (data.data.offers || []).map((offer) => ({
       offerId: offer.id,
       carrier: offer.owner?.name,
+      carrierIata: offer.owner?.iata_code ?? null,
+      carrierLogoUrl: offer.owner?.logo_symbol_url ?? null,
+      // null when the airline doesn't publish refund conditions for this fare.
+      refundable: offer.conditions?.refund_before_departure ? !!offer.conditions.refund_before_departure.allowed : null,
       totalAmount: offer.total_amount,
       totalCurrency: offer.total_currency,
       slices: offer.slices,

@@ -1,8 +1,7 @@
 import { supabaseAdmin } from '../_lib/supabaseAdmin.js';
 import { applyCors } from '../_lib/cors.js';
 import { requireUser, requireMatchingUser } from '../_lib/auth.js';
-
-const ICAN_TO_UGX = 5000; // must match ICAN's floor price (see ICAN_CROSS_APP_WALLET_MIGRATION.sql)
+import { priceJourney, UnsupportedCurrencyError, PriceUnavailableError } from '../_lib/pricing.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -29,12 +28,6 @@ export default async function handler(req, res) {
     const { data: pickupEstimate } = await supabaseAdmin.rpc('mbg_get_setting_numeric', { p_key: 'ride.minimum_fare', p_default: 2000 });
     const pickupFareUgx = Number(pickupEstimate) || 2000;
 
-    // Flight fare converted at a platform FX setting (fallback: a fixed
-    // illustrative rate — replace with a live FX feed in Phase 2).
-    const { data: fxSetting } = await supabaseAdmin.from('mbg_platform_settings').select('value').eq('key', 'fx.usd_ugx_rate').single();
-    const fxRate = Number(fxSetting?.value) || 3800;
-    const flightFareUgx = Math.round(Number(offer.totalAmount) * fxRate);
-
     // Local dropoff: Phase 1 flat estimate (real per-country fare models are
     // Phase 2 — see the approved plan's roadmap).
     const dropoffFareUgx = 20000;
@@ -51,14 +44,30 @@ export default async function handler(req, res) {
     const chargeableKg = Math.max(0, weightKg - freeAllowanceKg);
     const cargoFareUgx = Math.round(chargeableKg * perKgRate);
 
-    const totalUgx = pickupFareUgx + flightFareUgx + cargoFareUgx + dropoffFareUgx;
-    const totalIcan = Number((totalUgx / ICAN_TO_UGX).toFixed(8));
+    // Everything is priced in ICAN at its live value (the airline's fare from
+    // its own currency), then shown in the customer's own currency — see
+    // _lib/pricing.js. Fares in a currency the price engine doesn't know are
+    // refused, and so is any quote while the live price is unreachable.
+    const priced = await priceJourney(supabaseAdmin, { pickupFareUgx, dropoffFareUgx, cargoFareUgx, offer, userId: customerUserId });
 
     res.status(200).json({
       success: true,
-      quote: { pickupFareUgx, flightFareUgx, cargoFareUgx, dropoffFareUgx, totalUgx, totalIcan, pickup, destination, offer, cargoWeightKg: weightKg }
+      quote: {
+        pickupFareUgx, flightFareUgx: priced.flightFareUgx, cargoFareUgx, dropoffFareUgx, totalUgx: priced.totalUgx,
+        pickupIcan: priced.pickupIcan, flightIcan: priced.flightIcan, cargoIcan: priced.cargoIcan, dropoffIcan: priced.dropoffIcan,
+        totalIcan: priced.totalIcan,
+        icanPriceUgx: priced.icanPriceUgx,
+        local: priced.local,
+        pickup, destination, offer, cargoWeightKg: weightKg
+      }
     });
   } catch (error) {
+    if (error instanceof UnsupportedCurrencyError) {
+      return res.status(422).json({ success: false, error: `${error.message} — please choose a different flight.`, code: 'unsupported_currency' });
+    }
+    if (error instanceof PriceUnavailableError) {
+      return res.status(503).json({ success: false, error: error.message, code: 'price_unavailable' });
+    }
     console.error('Journey quote error:', error);
     res.status(500).json({ success: false, error: 'Failed to build journey quote' });
   }

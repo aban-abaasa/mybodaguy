@@ -17,6 +17,15 @@ export async function requireUser(req, res) {
   return data.user;
 }
 
+/** Like requireUser, but for endpoints that work without a login — returns null instead of a 401. */
+export async function optionalUser(req) {
+  const header = req.headers.authorization || '';
+  const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+  if (!token) return null;
+  const { data, error } = await supabaseAdmin.auth.getUser(token);
+  return error || !data?.user ? null : data.user;
+}
+
 export function requireMatchingUser(user, requestedUserId, res) {
   if (!requestedUserId || user.id !== requestedUserId) {
     res.status(403).json({ success: false, error: 'User identity does not match the journey request' });

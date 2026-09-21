@@ -266,6 +266,242 @@ textarea:-webkit-autofill:active {
     0 18px 40px rgba(44, 36, 22, 0.08);
 }
 
+/* BodaGoEra classic customer dashboard — same ivory / ink / gold palette as
+   the landing page, expressed as a few reusable surfaces so the dashboard
+   doesn't repeat long arbitrary-value class strings. Dark variants live next
+   to each rule because the global `.dark .bg-white` overrides further down
+   only match exact Tailwind class names, not custom backgrounds. */
+.classic-page {
+  background: linear-gradient(180deg, #faf8f3 0%, #f7f0e1 60%, #f3e9d2 100%);
+}
+.dark .classic-page { background: #0f172a; }
+
+.classic-card {
+  background: #ffffff;
+  border: 1px solid rgba(196, 160, 82, 0.26);
+  border-radius: 20px;
+  box-shadow:
+    0 1px 2px rgba(44, 36, 22, 0.05),
+    0 12px 28px -16px rgba(44, 36, 22, 0.22);
+}
+.dark .classic-card {
+  background: #1e293b;
+  border-color: #334155;
+  box-shadow: 0 12px 28px -16px rgba(0, 0, 0, 0.6);
+}
+
+.classic-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #a17c28;
+}
+.dark .classic-eyebrow { color: #e6c980; }
+
+/* "Book a full journey" — the same ivory / ink / gold language applied to
+   forms, choice tiles and the itinerary. Inputs stay on a light surface in
+   dark mode too: the global input rules above force that (with !important)
+   so typed text is always legible. */
+.classic-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #8a6a1f;
+}
+.dark .classic-label { color: #e6c980; }
+
+.classic-input {
+  display: block;
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(196, 160, 82, 0.5);
+  border-radius: 12px;
+  background: #fffdf8;
+  color: #1e293b;
+  padding: 11px 14px;
+  font-size: 15px;
+  line-height: 1.25;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.classic-input::placeholder { color: #94a3b8; }
+.classic-input:hover:not(:disabled) { border-color: #c4a052; }
+.classic-input:focus {
+  outline: none;
+  border-color: #c4a052;
+  box-shadow: 0 0 0 3px rgba(196, 160, 82, 0.3);
+}
+.classic-input:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.classic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  border-radius: 14px;
+  padding: 12px 18px;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  transition: transform 0.12s, box-shadow 0.15s, background 0.15s, border-color 0.15s;
+}
+.classic-btn:active:not(:disabled) { transform: scale(0.985); }
+.classic-btn:focus-visible { outline: 2px solid #c4a052; outline-offset: 2px; }
+.classic-btn:disabled { cursor: not-allowed; }
+
+.classic-btn-primary {
+  color: #fff;
+  background: linear-gradient(135deg, #f97316, #f59e0b);
+  box-shadow: 0 10px 22px -12px rgba(234, 88, 12, 0.75), inset 0 0 0 1px rgba(255, 255, 255, 0.2);
+}
+.classic-btn-primary:hover:not(:disabled) {
+  box-shadow: 0 14px 26px -12px rgba(234, 88, 12, 0.85), inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+}
+.classic-btn-primary:disabled { background: #e2e8f0; color: #94a3b8; box-shadow: none; }
+.dark .classic-btn-primary:disabled { background: #334155; color: #64748b; }
+
+.classic-btn-ink {
+  color: #f6e7bd;
+  background: linear-gradient(135deg, #231b12, #3d2e18);
+  box-shadow: inset 0 0 0 1px rgba(196, 160, 82, 0.55), 0 10px 22px -14px rgba(0, 0, 0, 0.7);
+}
+.classic-btn-ink:disabled { background: #e2e8f0; color: #94a3b8; box-shadow: none; }
+.dark .classic-btn-ink:disabled { background: #334155; color: #64748b; }
+
+.classic-btn-outline {
+  color: #7a5a12;
+  background: transparent;
+  border: 1px solid rgba(196, 160, 82, 0.65);
+}
+.classic-btn-outline:hover:not(:disabled) { background: rgba(196, 160, 82, 0.1); }
+.classic-btn-outline:disabled { opacity: 0.5; }
+.dark .classic-btn-outline { color: #e6c980; }
+
+.classic-btn-ghost {
+  width: auto;
+  min-height: 36px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #64748b;
+}
+.classic-btn-ghost:hover:not(:disabled) { color: #7a5a12; background: rgba(196, 160, 82, 0.1); }
+
+.classic-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid rgba(196, 160, 82, 0.35);
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  padding: 6px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.classic-chip:hover:not(:disabled) { border-color: #c4a052; }
+.classic-chip:focus-visible { outline: 2px solid #c4a052; outline-offset: 2px; }
+.classic-chip:disabled { opacity: 0.55; cursor: not-allowed; }
+.classic-chip.is-active {
+  border-color: #c4a052;
+  background: #fbf3dc;
+  color: #7a5a12;
+  box-shadow: inset 0 0 0 1px #c4a052;
+}
+.dark .classic-chip { background: #1e293b; color: #cbd5e1; border-color: #475569; }
+.dark .classic-chip.is-active { background: rgba(196, 160, 82, 0.18); color: #f0d68f; border-color: #c4a052; }
+
+/* A selectable card — vehicle choice, flight offer. */
+.classic-tile {
+  width: 100%;
+  border: 1px solid rgba(196, 160, 82, 0.32);
+  border-radius: 16px;
+  background: #fff;
+  color: #1e293b;
+  text-align: left;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s, transform 0.12s;
+}
+.classic-tile:hover { border-color: #c4a052; box-shadow: 0 10px 24px -16px rgba(44, 36, 22, 0.35); }
+.classic-tile:focus-visible { outline: 2px solid #c4a052; outline-offset: 2px; }
+.classic-tile:active { transform: scale(0.995); }
+.classic-tile.is-active {
+  border-color: #c4a052;
+  background: #fdf8ea;
+  box-shadow: inset 0 0 0 1px #c4a052, 0 12px 26px -16px rgba(161, 124, 40, 0.55);
+}
+.dark .classic-tile { background: #1e293b; border-color: #334155; color: #f1f5f9; }
+.dark .classic-tile.is-active { background: rgba(196, 160, 82, 0.14); border-color: #c4a052; }
+
+/* Perforated edge between the flight and the price on a flight "ticket". */
+.classic-perforation { border-left: 1.5px dashed rgba(196, 160, 82, 0.6); }
+.dark .classic-perforation { border-left-color: #64748b; }
+
+/* Receipt line: label ········ amount */
+.classic-leader {
+  flex: 1;
+  min-width: 12px;
+  margin: 0 8px;
+  border-bottom: 1.5px dotted rgba(196, 160, 82, 0.7);
+  transform: translateY(-3px);
+}
+
+.classic-step-dot {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1.5px solid rgba(196, 160, 82, 0.5);
+  background: #fffdf8;
+  color: #a17c28;
+  transition: all 0.2s;
+}
+.classic-step-dot.is-done { background: #c4a052; border-color: #c4a052; color: #fff; }
+.classic-step-dot.is-current {
+  background: linear-gradient(135deg, #f97316, #f59e0b);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.16);
+}
+.dark .classic-step-dot { background: #1e293b; }
+
+@keyframes step-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-step-in { animation: step-in 0.28s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-step-in { animation: none; }
+}
+
+.safe-top { padding-top: env(safe-area-inset-top, 0px); }
+.safe-bottom { padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px)); }
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+@keyframes fade-soft {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-sheet-up { animation: sheet-up 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.animate-fade-soft { animation: fade-soft 0.2s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-sheet-up, .animate-fade-soft { animation: none; }
+}
+
 .landing-mobile-safe {
   padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0px));
 }
