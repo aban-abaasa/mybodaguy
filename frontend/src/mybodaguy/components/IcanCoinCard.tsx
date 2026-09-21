@@ -1,12 +1,16 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../../services/supabaseClient';
+import PremiumStatCard from './PremiumStatCard';
 
 interface Props {
   userId: string;
   onGoToWallet?: () => void;
+  // 'premium' is the customer Overview's larger engraved-card face; the
+  // default compact tile is what the developer/chairperson stat grids expect.
+  variant?: 'compact' | 'premium';
 }
 
-export default function IcanCoinCard({ userId, onGoToWallet }: Props) {
+export default function IcanCoinCard({ userId, onGoToWallet, variant = 'compact' }: Props) {
   const [balance, setBalance] = useState<number | null>(null);
 
   useEffect(() => {
@@ -18,6 +22,21 @@ export default function IcanCoinCard({ userId, onGoToWallet }: Props) {
       .maybeSingle()
       .then(({ data }) => setBalance(data?.ican_balance ?? 0));
   }, [userId]);
+
+  if (variant === 'premium') {
+    return (
+      <PremiumStatCard
+        gradient="from-violet-600 via-purple-700 to-indigo-900"
+        glow="rgba(91,33,182,0.55)"
+        emblem="₡"
+        label="ICAN Coins"
+        value={balance === null ? '…' : balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        caption="coins available"
+        cta="Open wallet"
+        onClick={onGoToWallet}
+      />
+    );
+  }
 
   return (
     <div

@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { COUNTRY_NAMES as COUNTRIES } from '../data/countries';
 import CanweFields from '../components/security/CanweFields';
 import { checkCanweFields } from '../utils/canweGuard';
+import ReferralCodeField from '../components/ReferralCodeField';
 
 interface SignInPageProps {
   onBack: () => void;
@@ -294,6 +295,9 @@ export default function SignInPage({ onBack }: SignInPageProps) {
                 </div>
               )}
             </div>
+
+            {/* Optional referral code — saved before submit AND before "Continue with Google" */}
+            <ReferralCodeField />
 
             <button
               type="submit"

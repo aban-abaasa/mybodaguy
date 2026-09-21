@@ -76,6 +76,7 @@ export interface SellResult {
   tx_id: string;
   ican_sold: number;
   ugx_payout: number;
+  wallet_balance: number;
 }
 
 // ─── Wallet ───────────────────────────────────────────────────────────────────
@@ -261,7 +262,9 @@ export async function buyICAN({
 }
 
 /**
- * Sell ICAN coins — ICAN is debited, UGX payout is handled offline by cashier/admin.
+ * Sell ICAN coins into the app's own ICANera Wallet balance (wallet_accounts)
+ * — instant, fee only. For an external cash-out to mobile money/bank instead,
+ * use requestIcanPayout().
  */
 export async function sellICAN({
   userId,
@@ -272,7 +275,7 @@ export async function sellICAN({
   icanAmount: number;
   reference?: string | null;
 }): Promise<SellResult> {
-  const { data, error } = await supabase.rpc('sell_ican_coins', {
+  const { data, error } = await supabase.rpc('sell_ican_coins_to_wallet', {
     p_user_id: userId,
     p_ican_amount: icanAmount,
     p_source_app: SOURCE_APP,

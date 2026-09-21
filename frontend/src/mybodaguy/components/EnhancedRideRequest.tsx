@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import * as React from 'react';
-import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package, Tag, Car, Truck, Plane, ShieldCheck } from 'lucide-react';
+import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package, Tag, Car, Truck, Plane, ShieldCheck, Sparkles, ArrowRight, ArrowUpDown, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { searchLocations, Location } from '../data/mockLocations';
 import { supabase } from '../services/supabaseClient';
@@ -115,14 +115,36 @@ interface EnhancedRideRequestProps {
   showJourneyOption?: boolean;
 }
 
-// Wallet payments carry the same convenience surcharge the backend applies
-// when it actually debits the wallet (commission.wallet_customer_surcharge_percentage,
+// Wallet payments carry the same platform fee the backend applies when it
+// actually debits the wallet (commission.icanera_platform_fee_percentage,
 // mbg_respond_to_ride / mbg_complete_ride) — folded into the one number shown
 // here so the customer always sees a single all-in payable amount, matching
-// what leaves their wallet, with no separate fee breakdown on screen.
-const WALLET_SURCHARGE_PCT = 7;
-function payableFare(fare: number, paymentMethod: 'wallet' | 'cash' | 'company'): number {
-  return paymentMethod === 'wallet' ? Math.round(fare * (1 + WALLET_SURCHARGE_PCT / 100)) : fare;
+// what leaves their wallet, with no separate fee breakdown on screen. The rate
+// is read live from the public setting (developer-editable); this default only
+// covers the moment before it loads.
+const DEFAULT_WALLET_SURCHARGE_PCT = 8;
+let cachedWalletSurchargePct: number | null = null;
+function useWalletSurchargePct(): number {
+  const [pct, setPct] = useState(cachedWalletSurchargePct ?? DEFAULT_WALLET_SURCHARGE_PCT);
+  useEffect(() => {
+    if (cachedWalletSurchargePct !== null) return;
+    supabase
+      .from('mbg_platform_settings')
+      .select('value')
+      .eq('key', 'commission.icanera_platform_fee_percentage')
+      .maybeSingle()
+      .then(({ data }) => {
+        const fee = Number(data?.value);
+        if (Number.isFinite(fee) && fee >= 0) {
+          cachedWalletSurchargePct = fee;
+          setPct(fee);
+        }
+      });
+  }, []);
+  return pct;
+}
+function payableFare(fare: number, paymentMethod: 'wallet' | 'cash' | 'company', surchargePct: number): number {
+  return paymentMethod === 'wallet' ? Math.round(fare * (1 + surchargePct / 100)) : fare;
 }
 
 export default function EnhancedRideRequest({ customerId, fixedServiceType, showJourneyOption }: EnhancedRideRequestProps) {
@@ -227,10 +249,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [selectedSecurityCompanyId, setSelectedSecurityCompanyId] = useState('');
   const [securityPassengerCount, setSecurityPassengerCount] = useState(1);
   const [modePreference, setModePreference] = useState<ModePreference>('all');
-  // Wallet = charged automatically (fare + 7% convenience surcharge) the
-  // instant the trip completes. Cash = pay the rider directly in person —
-  // no surcharge, but the rider owes the commission out of pocket and must
-  // confirm receipt before taking new jobs (see mbg_confirm_cash_received).
+  // Wallet = charged automatically (fare + the platform fee, folded into one
+  // total) the instant the trip completes. Cash = pay the rider directly in
+  // person — no surcharge, but the rider owes the commission out of pocket and
+  // must confirm receipt before taking new jobs (see mbg_confirm_cash_received).
   const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'cash' | 'company'>('wallet');
   const [companyTransport, setCompanyTransport] = useState<{ eligible: boolean; business_name?: string; billing_mode?: string }>({ eligible: false });
 
@@ -1367,6 +1389,35 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setRouteInfo(null);
   };
 
+  // "More options" (driver source + security escort) starts collapsed so the
+  // form leads with the two things everyone needs: where to, and what ride.
+  const [extrasOpen, setExtrasOpen] = useState(false);
+
+  // Rider results render below a long form — bring them into view as soon as
+  // a search returns instead of leaving the customer to scroll for them.
+  const resultsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (matchedRiders.length > 0) {
+      resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [matchedRiders.length]);
+
+  // Swap pickup and drop-off (return trips). Only offered once both are set,
+  // and never for a store delivery where the pickup is the locked store.
+  const handleSwapLocations = () => {
+    if (!selectedPickup || !selectedDropoff || pickupIsAutoFromSupermarket) return;
+    setPickup(dropoff);
+    setDropoff(pickup);
+    setSelectedPickup(selectedDropoff);
+    setSelectedDropoff(selectedPickup);
+    setPickupSuggestions([]);
+    setDropoffSuggestions([]);
+    setShowPickupSuggestions(false);
+    setShowDropoffSuggestions(false);
+    setMatchedRiders([]);
+    setRouteInfo(null);
+  };
+
   // Journey mode takes over the whole screen — it's a completely different
   // multi-leg flow (flight + boda + destination driver, or road->sea->road
   // cargo), not a variant of the single-hop ride form below. Reachable
@@ -1409,7 +1460,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // fulfil (the Uganda-\>Antigua case this was built for).
   if (needsJourneyPath && selectedPickup && selectedDropoff) {
     return (
-      <div className="bg-white rounded-xl shadow-lg p-6 sm:p-8 text-center space-y-4">
+      <div className="classic-card p-6 sm:p-8 text-center space-y-4">
         <div className="w-16 h-16 mx-auto rounded-full bg-violet-100 flex items-center justify-center text-violet-600">
           <Plane size={28} />
         </div>
@@ -1491,46 +1542,73 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     );
   }
 
-  return (
-    <div className="space-y-6">
-      {/* Search Form */}
-      <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
-        {showJourneyOption && (
-          <button
-            onClick={() => setBookingMode('journey')}
-            className="w-full mb-4 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold border-2 border-dashed border-orange-300 text-orange-700 hover:bg-orange-50 transition-all"
-          >
-            <Plane size={16} />
-            {serviceType === 'delivery' ? 'Sending it overseas? Book a full journey instead' : 'Flying somewhere? Book a full journey instead'}
-          </button>
-        )}
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg sm:text-xl font-bold text-slate-800">
-            {serviceType === 'ride'
-              ? 'Book a Ride'
-              : deliveryMode === 'supermarket'
-              ? 'Delivery From a Supermarket'
-              : 'Normal Delivery'}
-          </h3>
-          {(pickup || dropoff) && (
-            <button
-              onClick={handleClearSearch}
-              className="text-sm text-slate-600 hover:text-orange-600 flex items-center gap-1"
-            >
-              <X size={16} />
-              Clear
-            </button>
-          )}
-        </div>
+  const routeReady = !!selectedPickup && !!selectedDropoff;
+  const isDelivery = serviceType === 'delivery';
+  // Delivery gets its own "details" step first, so the numbering shifts by one.
+  const stepBase = isDelivery ? 1 : 0;
+  const formTitle = serviceType === 'ride'
+    ? 'Book a Ride'
+    : deliveryMode === 'supermarket'
+    ? 'Delivery From a Supermarket'
+    : 'Normal Delivery';
+  const selectedCompanyName = rideCompanies.find(c => c.business_profile_id === selectedRideCompanyId)?.business_name;
+  const extrasSummary = [
+    riderProviderFilter === 'company' && selectedCompanyName ? selectedCompanyName : 'Nearest available driver',
+    escortRequested ? 'Security escort' : null,
+  ].filter(Boolean).join(' · ');
 
-        {/* Service type — hidden when the parent tab already fixes it, so
-            "Book a Ride" and "Delivery" stay separate instead of one
-            screen that toggles between both */}
-        {!fixedServiceType && (
-        <div className="grid grid-cols-2 gap-2 mb-4">
+  return (
+    <div className="space-y-5">
+      {/* Hero — same ink-and-gold treatment as the Overview's Book a Ride tile */}
+      <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-4 min-[360px]:p-5 text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40">
+        <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full border border-[#c4a052]/25" />
+        <span aria-hidden className="pointer-events-none absolute -right-5 -top-5 h-28 w-28 rounded-full border border-[#c4a052]/20" />
+        <span aria-hidden className="pointer-events-none absolute -bottom-14 -left-10 h-40 w-40 rounded-full bg-orange-500/20 blur-2xl" />
+        <div className="relative flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]">{isDelivery ? 'Send anything' : 'Get moving'}</p>
+            <h2 className="mt-1 font-classic-display text-[24px] font-bold leading-tight">{formTitle}</h2>
+            <p className="mt-1 text-[13px] text-white/70">
+              {isDelivery ? 'The nearest available rider collects and delivers it' : 'Boda, car, van or truck — nearest driver first'}
+            </p>
+          </div>
+          <span className="grid h-14 w-14 flex-shrink-0 place-items-center rounded-full bg-white/5 ring-1 ring-[#c4a052]/50 min-[360px]:h-16 min-[360px]:w-16">
+            {isDelivery
+              ? <Package size={30} strokeWidth={1.4} className="text-[#e6c980]" />
+              : <Bike size={32} strokeWidth={1.4} className="text-[#e6c980]" />}
+          </span>
+        </div>
+      </div>
+
+      {showJourneyOption && (
+        <button
+          type="button"
+          onClick={() => setBookingMode('journey')}
+          className="classic-card flex w-full items-center gap-3 p-3.5 text-left transition-all active:scale-[0.99] hover:border-violet-300"
+        >
+          <span className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-2xl bg-violet-50 text-violet-600 ring-1 ring-inset ring-black/5">
+            <Plane size={20} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-semibold leading-tight text-slate-800">
+              {isDelivery ? 'Sending it overseas?' : 'Flying somewhere?'}
+            </span>
+            <span className="mt-0.5 block text-xs text-slate-500">
+              {isDelivery ? 'Book a full journey to ship cargo across borders' : 'Book a full journey — flight plus a ride at each end'}
+            </span>
+          </span>
+          <ArrowRight size={16} className="flex-shrink-0 text-slate-400" />
+        </button>
+      )}
+
+      {/* Service type — hidden when the parent tab already fixes it, so
+          "Book a Ride" and "Delivery" stay separate instead of one
+          screen that toggles between both */}
+      {!fixedServiceType && (
+        <div className="classic-card grid grid-cols-2 gap-2 p-3">
           <button
             onClick={() => setServiceType('ride')}
-            className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
+            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all ${
               serviceType === 'ride' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
             }`}
           >
@@ -1538,288 +1616,490 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           </button>
           <button
             onClick={() => setServiceType('delivery')}
-            className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
+            className={`flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all ${
               serviceType === 'delivery' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
             }`}
           >
             <Package size={16} /> Delivery
           </button>
         </div>
-        )}
+      )}
 
-        {/* Delivery mode + supermarket picker */}
-        {serviceType === 'delivery' && (
-          <div className="mb-4 space-y-3">
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={() => setDeliveryMode('supermarket')}
-                className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-                  deliveryMode === 'supermarket' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
-                }`}
-              >
-                🏬 From a Store
-              </button>
-              <button
-                onClick={() => setDeliveryMode('normal')}
-                className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-                  deliveryMode === 'normal' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
-                }`}
-              >
-                📦 Normal Delivery
-              </button>
-            </div>
-
-            {/* Personal vs Business — applies to the WHOLE order (goods +
-                fare for a store delivery, just the fare for a normal one),
-                so it shows up as one consistent side of the ICANera Wallet
-                Personal/Business split instead of being silently divided.
-                A customer who belongs to more than one real business (owner
-                of one, team member of another, co-owner of a third — see
-                mbg_my_business_memberships) gets to say which one this
-                delivery is filed under, same as the ICAN Wallet's own
-                PayMoneyModal already lets them do for a direct payment. */}
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">This delivery is for</label>
+      {/* Delivery details — store picker, personal/business, delivery window */}
+      {isDelivery && (
+        <div className="classic-card p-4 sm:p-5 space-y-4">
+          <StepHeading n={1}>Delivery details</StepHeading>
+          {/* Delivery mode + supermarket picker */}
+          {serviceType === 'delivery' && (
+            <div className="space-y-3">
               <div className="grid grid-cols-2 gap-2">
                 <button
-                  onClick={() => setDeliveryExpenseType('personal_expense')}
+                  onClick={() => setDeliveryMode('supermarket')}
                   className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-                    deliveryExpenseType === 'personal_expense' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
+                    deliveryMode === 'supermarket' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
                   }`}
                 >
-                  👤 Personal
+                  🏬 From a Store
                 </button>
                 <button
-                  onClick={() => setDeliveryExpenseType('business_expense')}
-                  className={`py-2 px-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all truncate ${
-                    deliveryExpenseType === 'business_expense' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
+                  onClick={() => setDeliveryMode('normal')}
+                  className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                    deliveryMode === 'normal' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
                   }`}
-                  title={myBusinesses.length === 1 ? myBusinesses[0].business_name : undefined}
                 >
-                  🏢 {myBusinesses.length === 1 ? myBusinesses[0].business_name : 'Business'}
+                  📦 Normal Delivery
                 </button>
               </div>
 
-              {deliveryExpenseType === 'business_expense' && (
-                loadingMyBusinesses ? (
-                  <p className="text-[11px] text-slate-400 mt-1">Loading your businesses…</p>
-                ) : myBusinesses.length > 1 ? (
-                  <div className="mt-1.5">
-                    <p className="text-[11px] text-slate-500 mb-1">Which business is this for?</p>
-                    <select
-                      value={selectedBusinessId}
-                      onChange={(e) => setSelectedBusinessId(e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-400 outline-none"
-                    >
-                      <option value="">Select a business…</option>
-                      {myBusinesses.map(b => (
-                        <option key={b.id} value={b.id}>{b.business_name}</option>
-                      ))}
-                    </select>
+              {/* Personal vs Business — applies to the WHOLE order (goods +
+                  fare for a store delivery, just the fare for a normal one),
+                  so it shows up as one consistent side of the ICANera Wallet
+                  Personal/Business split instead of being silently divided.
+                  A customer who belongs to more than one real business (owner
+                  of one, team member of another, co-owner of a third — see
+                  mbg_my_business_memberships) gets to say which one this
+                  delivery is filed under, same as the ICAN Wallet's own
+                  PayMoneyModal already lets them do for a direct payment. */}
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">This delivery is for</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => setDeliveryExpenseType('personal_expense')}
+                    className={`py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
+                      deliveryExpenseType === 'personal_expense' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
+                    }`}
+                  >
+                    👤 Personal
+                  </button>
+                  <button
+                    onClick={() => setDeliveryExpenseType('business_expense')}
+                    className={`py-2 px-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all truncate ${
+                      deliveryExpenseType === 'business_expense' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
+                    }`}
+                    title={myBusinesses.length === 1 ? myBusinesses[0].business_name : undefined}
+                  >
+                    🏢 {myBusinesses.length === 1 ? myBusinesses[0].business_name : 'Business'}
+                  </button>
+                </div>
+
+                {deliveryExpenseType === 'business_expense' && (
+                  loadingMyBusinesses ? (
+                    <p className="text-[11px] text-slate-400 mt-1">Loading your businesses…</p>
+                  ) : myBusinesses.length > 1 ? (
+                    <div className="mt-1.5">
+                      <p className="text-[11px] text-slate-500 mb-1">Which business is this for?</p>
+                      <select
+                        value={selectedBusinessId}
+                        onChange={(e) => setSelectedBusinessId(e.target.value)}
+                        className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-400 outline-none"
+                      >
+                        <option value="">Select a business…</option>
+                        {myBusinesses.map(b => (
+                          <option key={b.id} value={b.id}>{b.business_name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : myBusinesses.length === 0 ? (
+                    <p className="text-[11px] text-amber-600 mt-1">
+                      No business profile found on your account — this will still be recorded as a business expense.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-purple-600 mt-1">
+                      Filed as a business expense under {myBusinesses[0].business_name}.
+                    </p>
+                  )
+                )}
+              </div>
+
+              {/* Normal Delivery's own smart on-ramp: real products auto-loaded
+                  from the closest few stores, no store picked yet. Purely a
+                  shortcut — tapping anything here commits to that one store
+                  via jumpToStoreProduct, same as manually choosing it in
+                  "From a Store" would. */}
+              {deliveryMode === 'normal' && (() => {
+                const previewCandidates = nearestAnyStores.slice(0, 8);
+                const storesWithProducts = previewCandidates.filter(sm => (nearbyStoreProducts[sm.id]?.length ?? 0) > 0).slice(0, 3);
+                const stillLoading = loadingNearbyProducts && storesWithProducts.length === 0 && previewCandidates.some(sm => !(sm.id in nearbyStoreProducts));
+                return (
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-1.5">🛒 Or shop from a nearby store</p>
+                    {!customerGpsLocation && (
+                      <p className="text-[11px] text-slate-400 mb-1.5">📍 Turn on location to see which store is actually nearest.</p>
+                    )}
+                    {supermarkets.length === 0 ? (
+                      <p className="text-[11px] text-slate-400">No stores registered yet.</p>
+                    ) : stillLoading && storesWithProducts.length === 0 ? (
+                      <p className="text-xs text-slate-400 py-3 text-center">Loading nearby stores…</p>
+                    ) : storesWithProducts.length === 0 ? (
+                      <p className="text-[11px] text-slate-400">Stores near you haven't listed products yet — describe what you need below instead.</p>
+                    ) : (
+                      <div className="space-y-3">
+                        {storesWithProducts.map(sm => {
+                          const products = nearbyStoreProducts[sm.id] || [];
+                          return (
+                            <div key={sm.id} className="border border-slate-200 rounded-lg p-2.5">
+                              <button type="button" onClick={() => jumpToStoreProduct(sm.id)} className="w-full flex items-center justify-between gap-2 mb-2 text-left">
+                                <span className="min-w-0 truncate text-xs font-semibold text-slate-700">
+                                  {typeEmoji(sm.business_type)} {sm.name}
+                                  {sm.distanceKm != null && (
+                                    <span className="ml-1.5 text-[10px] font-normal text-slate-400">
+                                      {sm.distanceKm < 1 ? `${Math.round(sm.distanceKm * 1000)}m away` : `${sm.distanceKm.toFixed(1)}km away`}
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="flex-shrink-0 text-[11px] text-blue-600 font-medium">Shop here →</span>
+                              </button>
+                              <div className="flex gap-2 overflow-x-auto pb-0.5">
+                                {products.map(p => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => jumpToStoreProduct(sm.id)}
+                                    className="flex-shrink-0 w-20 text-left"
+                                  >
+                                    <div className="w-20 h-20 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
+                                      {p.image_url ? (
+                                        <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
+                                      ) : (
+                                        <Package size={18} className="text-slate-300" />
+                                      )}
+                                    </div>
+                                    <p className="text-[10px] text-slate-700 truncate mt-1">{p.name}</p>
+                                    <p className="text-[10px] text-orange-600 font-semibold">
+                                      UGX {Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100)).toLocaleString()}
+                                    </p>
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                ) : myBusinesses.length === 0 ? (
-                  <p className="text-[11px] text-amber-600 mt-1">
-                    No business profile found on your account — this will still be recorded as a business expense.
-                  </p>
-                ) : (
-                  <p className="text-[11px] text-purple-600 mt-1">
-                    Filed as a business expense under {myBusinesses[0].business_name}.
-                  </p>
-                )
+                );
+              })()}
+
+              {deliveryMode === 'supermarket' && (
+                <>
+                  <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+                    {BUSINESS_TYPE_FILTERS.map(f => (
+                      <button
+                        key={f.value}
+                        onClick={() => setStoreTypeFilter(f.value)}
+                        className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+                          storeTypeFilter === f.value ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        <span>{f.emoji}</span> {f.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Always searchable, and ranked nearest-first once the
+                      customer's GPS position resolves — see the
+                      customerGpsLocation effect and filteredStores sort
+                      above. */}
+                  <div className="relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                    <input
+                      value={storeSearchQuery}
+                      onChange={(e) => setStoreSearchQuery(e.target.value)}
+                      placeholder="Search stores by name or area…"
+                      className="w-full pl-8 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                    />
+                  </div>
+                  {!customerGpsLocation && (
+                    <p className="text-[11px] text-slate-400 -mt-1">
+                      📍 Turn on location to see which store is nearest.
+                    </p>
+                  )}
+
+                  <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
+                    {visibleStores.map(sm => (
+                      <button
+                        key={sm.id}
+                        type="button"
+                        onClick={() => setSelectedSupermarketId(sm.id)}
+                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                          selectedSupermarketId === sm.id ? 'bg-orange-50 text-orange-700' : 'hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        <span className="min-w-0 truncate flex items-center gap-1.5">
+                          {typeEmoji(sm.business_type)} {sm.name} — {sm.location}
+                          {sm.id === nearestStoreId && (
+                            <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-semibold">Nearest</span>
+                          )}
+                        </span>
+                        {sm.distanceKm != null && (
+                          <span className="flex-shrink-0 text-xs text-slate-400">
+                            {sm.distanceKm < 1 ? `${Math.round(sm.distanceKm * 1000)}m` : `${sm.distanceKm.toFixed(1)}km`}
+                          </span>
+                        )}
+                      </button>
+                    ))}
+                    {visibleStores.length === 0 && (
+                      <p className="px-3 py-3 text-xs text-slate-400 text-center">
+                        {storeSearchQuery ? 'No stores match your search.' : 'No stores of this type yet.'}
+                      </p>
+                    )}
+                  </div>
+
+                  {selectedSupermarketId && (
+                    <ProductPicker supermarketId={selectedSupermarketId} onCartChange={setDeliveryCart} />
+                  )}
+
+                  {selectedSupermarketId && deliveryCart.length > 0 && (
+                    <div className="p-3 rounded-lg border-2 border-slate-200 bg-slate-50">
+                      <label className="block text-sm font-medium text-slate-700 mb-1">
+                        Deliver within
+                      </label>
+                      <p className="text-xs text-slate-500 mb-2">
+                        If your rider misses this window, you can claim a refund straight from your order receipt.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { hours: 1, label: '1h · Express' },
+                          { hours: 3, label: '3h · Standard' },
+                          { hours: 6, label: '6h' },
+                          { hours: 24, label: '24h · Tomorrow' },
+                          { hours: 48, label: '48h · Flexible' },
+                        ]
+                          .filter(p => p.hours >= deliveryWindowBounds.min && p.hours <= deliveryWindowBounds.max)
+                          .map(p => (
+                            <button
+                              key={p.hours}
+                              type="button"
+                              onClick={() => setMaxDeliveryHours(p.hours)}
+                              className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
+                                maxDeliveryHours === p.hours ? 'bg-blue-600 text-white' : 'bg-white border border-slate-300 text-slate-600'
+                              }`}
+                            >
+                              {p.label}
+                            </button>
+                          ))}
+                        <label className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-white border border-slate-300 text-slate-600">
+                          Custom
+                          <input
+                            type="number"
+                            min={deliveryWindowBounds.min}
+                            max={deliveryWindowBounds.max}
+                            value={maxDeliveryHours}
+                            onChange={(e) => {
+                              const v = Number(e.target.value);
+                              if (!Number.isNaN(v)) {
+                                setMaxDeliveryHours(Math.min(Math.max(v, deliveryWindowBounds.min), deliveryWindowBounds.max));
+                              }
+                            }}
+                            className="w-12 outline-none"
+                          />
+                          h
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
+          )}
+        </div>
+      )}
 
-            {/* Normal Delivery's own smart on-ramp: real products auto-loaded
-                from the closest few stores, no store picked yet. Purely a
-                shortcut — tapping anything here commits to that one store
-                via jumpToStoreProduct, same as manually choosing it in
-                "From a Store" would. */}
-            {deliveryMode === 'normal' && (() => {
-              const previewCandidates = nearestAnyStores.slice(0, 8);
-              const storesWithProducts = previewCandidates.filter(sm => (nearbyStoreProducts[sm.id]?.length ?? 0) > 0).slice(0, 3);
-              const stillLoading = loadingNearbyProducts && storesWithProducts.length === 0 && previewCandidates.some(sm => !(sm.id in nearbyStoreProducts));
-              return (
-                <div>
-                  <p className="text-xs font-medium text-slate-500 mb-1.5">🛒 Or shop from a nearby store</p>
-                  {!customerGpsLocation && (
-                    <p className="text-[11px] text-slate-400 mb-1.5">📍 Turn on location to see which store is actually nearest.</p>
-                  )}
-                  {supermarkets.length === 0 ? (
-                    <p className="text-[11px] text-slate-400">No stores registered yet.</p>
-                  ) : stillLoading && storesWithProducts.length === 0 ? (
-                    <p className="text-xs text-slate-400 py-3 text-center">Loading nearby stores…</p>
-                  ) : storesWithProducts.length === 0 ? (
-                    <p className="text-[11px] text-slate-400">Stores near you haven't listed products yet — describe what you need below instead.</p>
-                  ) : (
-                    <div className="space-y-3">
-                      {storesWithProducts.map(sm => {
-                        const products = nearbyStoreProducts[sm.id] || [];
-                        return (
-                          <div key={sm.id} className="border border-slate-200 rounded-lg p-2.5">
-                            <button type="button" onClick={() => jumpToStoreProduct(sm.id)} className="w-full flex items-center justify-between gap-2 mb-2 text-left">
-                              <span className="min-w-0 truncate text-xs font-semibold text-slate-700">
-                                {typeEmoji(sm.business_type)} {sm.name}
-                                {sm.distanceKm != null && (
-                                  <span className="ml-1.5 text-[10px] font-normal text-slate-400">
-                                    {sm.distanceKm < 1 ? `${Math.round(sm.distanceKm * 1000)}m away` : `${sm.distanceKm.toFixed(1)}km away`}
-                                  </span>
-                                )}
-                              </span>
-                              <span className="flex-shrink-0 text-[11px] text-blue-600 font-medium">Shop here →</span>
-                            </button>
-                            <div className="flex gap-2 overflow-x-auto pb-0.5">
-                              {products.map(p => (
-                                <button
-                                  key={p.id}
-                                  type="button"
-                                  onClick={() => jumpToStoreProduct(sm.id)}
-                                  className="flex-shrink-0 w-20 text-left"
-                                >
-                                  <div className="w-20 h-20 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
-                                    {p.image_url ? (
-                                      <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" />
-                                    ) : (
-                                      <Package size={18} className="text-slate-300" />
-                                    )}
-                                  </div>
-                                  <p className="text-[10px] text-slate-700 truncate mt-1">{p.name}</p>
-                                  <p className="text-[10px] text-orange-600 font-semibold">
-                                    UGX {Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100)).toLocaleString()}
-                                  </p>
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })()}
+      {/* Route */}
+      <div className="classic-card p-4 sm:p-5 space-y-4">
+        <StepHeading
+          n={1 + stepBase}
+          action={
+            <span className="flex flex-shrink-0 items-center gap-3">
+              {routeReady && !pickupIsAutoFromSupermarket && (
+                <button
+                  type="button"
+                  onClick={handleSwapLocations}
+                  className="flex items-center gap-1 text-xs font-semibold text-orange-600 hover:text-orange-700"
+                >
+                  <ArrowUpDown size={13} /> Swap
+                </button>
+              )}
+              {(pickup || dropoff) && (
+                <button
+                  type="button"
+                  onClick={handleClearSearch}
+                  className="flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-orange-600"
+                >
+                  <X size={13} /> Clear
+                </button>
+              )}
+            </span>
+          }
+        >
+          Where to?
+        </StepHeading>
 
-            {deliveryMode === 'supermarket' && (
-              <>
-                <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-                  {BUSINESS_TYPE_FILTERS.map(f => (
-                    <button
-                      key={f.value}
-                      onClick={() => setStoreTypeFilter(f.value)}
-                      className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
-                        storeTypeFilter === f.value ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
-                      }`}
-                    >
-                      <span>{f.emoji}</span> {f.label}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Always searchable, and ranked nearest-first once the
-                    customer's GPS position resolves — see the
-                    customerGpsLocation effect and filteredStores sort
-                    above. */}
-                <div className="relative">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input
-                    value={storeSearchQuery}
-                    onChange={(e) => setStoreSearchQuery(e.target.value)}
-                    placeholder="Search stores by name or area…"
-                    className="w-full pl-8 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                  />
-                </div>
-                {!customerGpsLocation && (
-                  <p className="text-[11px] text-slate-400 -mt-1">
-                    📍 Turn on location to see which store is nearest.
-                  </p>
-                )}
-
-                <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
-                  {visibleStores.map(sm => (
-                    <button
-                      key={sm.id}
-                      type="button"
-                      onClick={() => setSelectedSupermarketId(sm.id)}
-                      className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors ${
-                        selectedSupermarketId === sm.id ? 'bg-orange-50 text-orange-700' : 'hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      <span className="min-w-0 truncate flex items-center gap-1.5">
-                        {typeEmoji(sm.business_type)} {sm.name} — {sm.location}
-                        {sm.id === nearestStoreId && (
-                          <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-semibold">Nearest</span>
-                        )}
-                      </span>
-                      {sm.distanceKm != null && (
-                        <span className="flex-shrink-0 text-xs text-slate-400">
-                          {sm.distanceKm < 1 ? `${Math.round(sm.distanceKm * 1000)}m` : `${sm.distanceKm.toFixed(1)}km`}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                  {visibleStores.length === 0 && (
-                    <p className="px-3 py-3 text-xs text-slate-400 text-center">
-                      {storeSearchQuery ? 'No stores match your search.' : 'No stores of this type yet.'}
-                    </p>
-                  )}
-                </div>
-
-                {selectedSupermarketId && (
-                  <ProductPicker supermarketId={selectedSupermarketId} onCartChange={setDeliveryCart} />
-                )}
-
-                {selectedSupermarketId && deliveryCart.length > 0 && (
-                  <div className="p-3 rounded-lg border-2 border-slate-200 bg-slate-50">
-                    <label className="block text-sm font-medium text-slate-700 mb-1">
-                      Deliver within
-                    </label>
-                    <p className="text-xs text-slate-500 mb-2">
-                      If your rider misses this window, you can claim a refund straight from your order receipt.
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        { hours: 1, label: '1h · Express' },
-                        { hours: 3, label: '3h · Standard' },
-                        { hours: 6, label: '6h' },
-                        { hours: 24, label: '24h · Tomorrow' },
-                        { hours: 48, label: '48h · Flexible' },
-                      ]
-                        .filter(p => p.hours >= deliveryWindowBounds.min && p.hours <= deliveryWindowBounds.max)
-                        .map(p => (
-                          <button
-                            key={p.hours}
-                            type="button"
-                            onClick={() => setMaxDeliveryHours(p.hours)}
-                            className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
-                              maxDeliveryHours === p.hours ? 'bg-blue-600 text-white' : 'bg-white border border-slate-300 text-slate-600'
-                            }`}
-                          >
-                            {p.label}
-                          </button>
-                        ))}
-                      <label className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-white border border-slate-300 text-slate-600">
-                        Custom
-                        <input
-                          type="number"
-                          min={deliveryWindowBounds.min}
-                          max={deliveryWindowBounds.max}
-                          value={maxDeliveryHours}
-                          onChange={(e) => {
-                            const v = Number(e.target.value);
-                            if (!Number.isNaN(v)) {
-                              setMaxDeliveryHours(Math.min(Math.max(v, deliveryWindowBounds.min), deliveryWindowBounds.max));
-                            }
-                          }}
-                          className="w-12 outline-none"
-                        />
-                        h
-                      </label>
-                    </div>
-                  </div>
-                )}
-              </>
+        {/* Pickup Location */}
+        <div ref={pickupRef} className="relative">
+          <label className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Pickup
+            {pickupIsAutoFromSupermarket && (
+              <span className="text-[10px] px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-semibold normal-case tracking-normal">
+                Auto-filled from supermarket
+              </span>
+            )}
+          </label>
+          <div className="relative">
+            <span aria-hidden className="absolute left-4 top-1/2 h-3 w-3 -translate-y-1/2 rounded-full border-[3px] border-green-500 bg-white" />
+            <input
+              type="text"
+              value={pickupGeocodingStore ? 'Locating store…' : pickup}
+              readOnly={pickupIsAutoFromSupermarket || pickupGeocodingStore}
+              onChange={(e) => !pickupIsAutoFromSupermarket && handlePickupChange(e.target.value)}
+              onFocus={() => !pickupIsAutoFromSupermarket && pickup && setShowPickupSuggestions(true)}
+              placeholder="Where are you now? (e.g., Kampala Road, Acacia Mall)"
+              className={`w-full pl-11 pr-9 py-3 border-2 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none text-slate-800 placeholder-slate-400 ${
+                pickupIsAutoFromSupermarket || pickupGeocodingStore ? 'border-green-300 bg-green-50 cursor-default' : 'border-slate-200'
+              }`}
+            />
+            {selectedPickup && (
+              <CheckCircle size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
             )}
           </div>
+          {serviceType === 'delivery' && deliveryMode === 'supermarket' && selectedSupermarketId && !pickupIsAutoFromSupermarket && !pickupGeocodingStore && (
+            <p className="text-xs text-amber-600 mt-1">
+              Couldn't automatically locate this store — please confirm the pickup point manually.
+            </p>
+          )}
+
+          {/* Smart nearest-place suggestion for normal delivery — only
+              while the pickup is still empty, and only ever a tap-to-use
+              suggestion, never auto-applied (see nearestAnyStore above). */}
+          {serviceType === 'delivery' && deliveryMode === 'normal' && !selectedPickup && nearestAnyStore && (
+            <button
+              type="button"
+              onClick={() => {
+                const loc: Location = {
+                  id: `supermarket_${nearestAnyStore.id}`,
+                  name: nearestAnyStore.name,
+                  area: nearestAnyStore.location,
+                  fullAddress: nearestAnyStore.address || `${nearestAnyStore.name}, ${nearestAnyStore.location}`,
+                  coordinates: { lat: nearestAnyStore.latitude as number, lng: nearestAnyStore.longitude as number },
+                };
+                setSelectedPickup(loc);
+                setPickup(loc.fullAddress);
+              }}
+              className="mt-1.5 w-full flex items-center justify-between gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-left text-xs text-blue-700 hover:bg-blue-100 transition-colors"
+            >
+              <span className="truncate">
+                📍 Nearest place: {typeEmoji(nearestAnyStore.business_type)} {nearestAnyStore.name}
+                {' '}({(nearestAnyStore.distanceKm as number) < 1
+                  ? `${Math.round((nearestAnyStore.distanceKm as number) * 1000)}m`
+                  : `${(nearestAnyStore.distanceKm as number).toFixed(1)}km`})
+              </span>
+              <span className="flex-shrink-0 font-semibold">Use this</span>
+            </button>
+          )}
+          {/* Pickup Suggestions */}
+          {!pickupIsAutoFromSupermarket && showPickupSuggestions && pickupSuggestions.length > 0 && (
+            <div className="absolute z-10 w-full mt-2 bg-white border-2 border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
+              {pickupSuggestions.map((location) => (
+                <button
+                  key={location.id}
+                  onClick={() => selectPickupLocation(location)}
+                  className="w-full text-left px-4 py-3 hover:bg-orange-50 border-b border-slate-100 last:border-b-0 transition-colors"
+                >
+                  <div className="flex items-start gap-3">
+                    <MapPin className="text-orange-500 mt-1 flex-shrink-0" size={18} />
+                    <div>
+                      <div className="font-semibold text-slate-800">{location.name}</div>
+                      <div className="text-sm text-slate-600">{location.fullAddress}</div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Dropoff Location */}
+        <div ref={dropoffRef} className="relative">
+          <label className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            Drop-off
+            {defaultDropoff && selectedDropoff?.id === defaultDropoff.id && (
+              <span className="text-[10px] px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full font-semibold normal-case tracking-normal">
+                Your default area
+              </span>
+            )}
+          </label>
+          <div className="relative">
+            <MapPin className="absolute left-3.5 top-1/2 -translate-y-1/2 text-red-500" size={18} />
+            <input
+              type="text"
+              value={dropoff}
+              onChange={(e) => handleDropoffChange(e.target.value)}
+              onFocus={() => dropoff && setShowDropoffSuggestions(true)}
+              placeholder="Where do you want to go? (e.g., Ntinda, Garden City)"
+              className="w-full pl-11 pr-9 py-3 border-2 border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none text-slate-800 placeholder-slate-400"
+            />
+            {selectedDropoff && (
+              <CheckCircle size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
+            )}
+          </div>
+          {/* Dropoff Suggestions */}
+          {showDropoffSuggestions && dropoffSuggestions.length > 0 && (
+            <div className="absolute z-10 w-full mt-2 bg-white border-2 border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
+              {dropoffSuggestions.map((location) => (
+                <button
+                  key={location.id}
+                  onClick={() => selectDropoffLocation(location)}
+                  className="w-full text-left px-4 py-3 hover:bg-orange-50 border-b border-slate-100 last:border-b-0 transition-colors"
+                >
+                  <div className="flex items-start gap-3">
+                    <MapPin className="text-orange-500 mt-1 flex-shrink-0" size={18} />
+                    <div>
+                      <div className="font-semibold text-slate-800">{location.name}</div>
+                      <div className="text-sm text-slate-600">{location.fullAddress}</div>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {routeInfo && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-100">
+              <Navigation size={12} />
+              {routeInfo.distanceKm.toFixed(1)} km · ~{Math.round(routeInfo.durationMin)} min
+            </span>
+          </div>
         )}
+
+        {/* Map picker — sets the same selectedPickup/selectedDropoff state
+            as typing a suggestion above; either method works, and they
+            stay in sync with each other. */}
+        <button
+          type="button"
+          onClick={() => setShowMap(!showMap)}
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#c4a052]/60 py-2.5 text-sm font-semibold text-orange-700 hover:bg-orange-50 transition-colors"
+        >
+          <MapPin size={15} /> {showMap ? 'Hide map' : 'Pick on the map'}
+        </button>
+        {showMap && (
+          <LocationPickerMap
+            pickup={selectedPickup}
+            dropoff={selectedDropoff}
+            onPickupChange={handleMapPickupChange}
+            onDropoffChange={handleMapDropoffChange}
+            onRouteInfo={(distanceKm, durationMin) => setRouteInfo({ distanceKm, durationMin })}
+            pickupLocked={pickupIsAutoFromSupermarket}
+            gpsTarget={serviceType === 'delivery' && deliveryMode === 'supermarket' ? 'dropoff' : 'pickup'}
+            height={300}
+          />
+        )}
+      </div>
+
+      {/* Ride options */}
+      <div className="classic-card p-4 sm:p-5 space-y-4">
+        <StepHeading n={2 + stepBase}>{needsCrossBorderPath ? 'Your courier' : isDelivery ? 'Choose a vehicle' : 'Choose your ride'}</StepHeading>
 
         {/* Cross-border delivery: mode/vehicle-type/power/rain-cover filters
             below don't apply to cargo couriers, so hide them and explain
@@ -1835,510 +2115,413 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         )}
 
         {!needsCrossBorderPath && (
-        <>
-        {/* Ride mode preference — filters matched riders by their real pricing mode */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-slate-700 mb-2">Ride Type</label>
-          <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-            {(
-              [
-                { id: 'all' as ModePreference, label: 'All', icon: null, badge: null },
-                { id: 'normal' as ModePreference, label: 'Normal', icon: DollarSign, badge: '0%' },
-                { id: 'vip' as ModePreference, label: 'VIP', icon: Crown, badge: '+10%' },
-                { id: 'discount' as ModePreference, label: 'Discount', icon: Tag, badge: '-10%' },
-              ] as const
-            ).map(opt => {
-              const Icon = opt.icon;
-              const isSelected = modePreference === opt.id;
-              return (
+          <>
+            {/* Vehicle — matched against mbg_find_available_riders'
+                p_vehicle_types filter so a request only reaches drivers of
+                the chosen type. */}
+            <div className="grid grid-cols-5 gap-2">
+              {([
+                { id: 'any' as VehicleTypeFilter, label: 'Any', icon: Sparkles },
+                { id: 'motorcycle' as VehicleTypeFilter, label: 'Boda', icon: Bike },
+                { id: 'car' as VehicleTypeFilter, label: 'Car', icon: Car },
+                { id: 'van' as VehicleTypeFilter, label: 'Van', icon: Truck },
+                { id: 'truck' as VehicleTypeFilter, label: 'Truck', icon: Truck },
+              ]).map(opt => {
+                const selected = vehicleTypeFilter === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => setVehicleTypeFilter(opt.id)}
+                    className={`flex flex-col items-center gap-1.5 rounded-2xl border-2 px-1 py-2.5 transition-all active:scale-[0.97] ${
+                      selected ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200/70' : 'border-slate-200 hover:border-orange-300'
+                    }`}
+                  >
+                    <span className={`grid h-10 w-10 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${
+                      selected ? 'bg-gradient-to-br from-orange-500 to-amber-400 text-white' : 'bg-orange-50 text-orange-600'
+                    }`}>
+                      <opt.icon size={20} />
+                    </span>
+                    <span className={`text-[11px] font-semibold ${selected ? 'text-orange-700' : 'text-slate-600'}`}>{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Power / rain cover — only mean anything for a boda
+                (motorcycle/bicycle/tuktuk); a car/van/truck has neither
+                concept, so these only show for the Boda filter. */}
+            {vehicleTypeFilter === 'motorcycle' && (
+              <div className="grid grid-cols-3 gap-2">
+                {(['any', 'electric', 'fuel'] as PowerFilter[]).map(opt => (
+                  <button
+                    key={opt}
+                    type="button"
+                    onClick={() => setPowerFilter(opt)}
+                    className={`flex items-center justify-center gap-1 py-2 rounded-xl text-xs sm:text-sm font-semibold border-2 transition-all ${
+                      powerFilter === opt ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'
+                    }`}
+                  >
+                    {opt === 'electric' ? <Zap size={14} /> : opt === 'fuel' ? <Fuel size={14} /> : null}
+                    {opt === 'any' ? 'Any Vehicle' : opt === 'electric' ? 'Electric' : 'Fuel'}
+                  </button>
+                ))}
                 <button
-                  key={opt.id}
-                  onClick={() => setModePreference(opt.id)}
-                  className={`flex flex-col items-center justify-center gap-0.5 py-2 rounded-lg text-[10px] sm:text-xs font-semibold border-2 transition-all ${
-                    isSelected ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+                  type="button"
+                  onClick={() => setUmbrellaRequired(!umbrellaRequired)}
+                  className={`col-span-3 flex items-center justify-center gap-2 py-2 rounded-xl text-xs sm:text-sm font-semibold border-2 transition-all ${
+                    umbrellaRequired ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
                   }`}
                 >
-                  {Icon && <Icon size={14} />}
-                  <span>{opt.label}</span>
-                  {opt.badge && <span className="text-[9px] opacity-75">{opt.badge}</span>}
+                  <Umbrella size={14} /> {umbrellaRequired ? 'Rain cover required' : 'Rain cover not required'}
                 </button>
-              );
-            })}
-          </div>
-          <button
-            onClick={() => setModePreference(modePreference === 'return' ? 'all' : 'return')}
-            className={`mt-1.5 w-full flex items-center justify-center gap-1.5 py-2 rounded-lg text-[10px] sm:text-xs font-semibold border-2 transition-all ${
-              modePreference === 'return' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-200 text-slate-500'
-            }`}
-          >
-            <Home size={14} />
-            <span>Return (rider going home) — -30%</span>
-          </button>
-        </div>
+              </div>
+            )}
 
-        {/* Ride type — Boda vs Car, matched against mbg_find_available_riders'
-            p_vehicle_types filter so a request actually only reaches
-            drivers of the chosen type, instead of any vehicle_type mixed
-            together with no way to tell them apart before choosing. */}
-        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 mb-3">
-          {([
-            { id: 'any' as VehicleTypeFilter, label: 'Any Ride', icon: null },
-            { id: 'motorcycle' as VehicleTypeFilter, label: 'Boda', icon: Bike },
-            { id: 'car' as VehicleTypeFilter, label: 'Car', icon: Car },
-            { id: 'van' as VehicleTypeFilter, label: 'Van', icon: Truck },
-            { id: 'truck' as VehicleTypeFilter, label: 'Truck', icon: Truck },
-          ]).map(opt => (
-            <button
-              key={opt.id}
-              onClick={() => setVehicleTypeFilter(opt.id)}
-              className={`flex items-center justify-center gap-1 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-                vehicleTypeFilter === opt.id ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
-              }`}
-            >
-              {opt.icon && <opt.icon size={14} />}
-              {opt.label}
-            </button>
-          ))}
-        </div>
+            {/* Fare style — filters matched riders by their real pricing mode */}
+            <div>
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Fare style</p>
+              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 scrollbar-hide">
+                {(
+                  [
+                    { id: 'all' as ModePreference, label: 'All', icon: null },
+                    { id: 'normal' as ModePreference, label: 'Normal', icon: DollarSign },
+                    { id: 'vip' as ModePreference, label: 'VIP +10%', icon: Crown },
+                    { id: 'discount' as ModePreference, label: 'Discount −10%', icon: Tag },
+                    { id: 'return' as ModePreference, label: 'Return home −30%', icon: Home },
+                  ] as const
+                ).map(opt => {
+                  const Icon = opt.icon;
+                  const selected = modePreference === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => setModePreference(opt.id)}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border-2 px-3.5 py-2 text-xs font-semibold whitespace-nowrap transition-all ${
+                        selected
+                          ? opt.id === 'return' ? 'border-green-500 bg-green-50 text-green-700' : 'border-orange-500 bg-orange-50 text-orange-700'
+                          : 'border-slate-200 text-slate-500 hover:border-orange-300'
+                      }`}
+                    >
+                      {Icon && <Icon size={13} />}
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
-        {/* Vehicle / weather filters — fuel/electric and rain cover only mean
-            anything for a boda (motorcycle/bicycle/tuktuk); a car/van/truck
-            has neither concept, so these only show for the Boda filter. */}
-        {vehicleTypeFilter === 'motorcycle' && (
-          <div className="grid grid-cols-3 gap-2 mb-4">
-            {(['any', 'electric', 'fuel'] as PowerFilter[]).map(opt => (
+      {/* Payment + extras */}
+      <div className="classic-card p-4 sm:p-5 space-y-4">
+        <StepHeading n={3 + stepBase}>Payment</StepHeading>
+
+        {/* Payment method — Wallet settles automatically the instant the
+            trip ends, for the all-in amount shown as the fare; Cash means
+            paying the rider directly in person. */}
+        <div>
+          <div className={companyTransport.eligible ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-2 gap-2'}>
+            {companyTransport.eligible && (
               <button
-                key={opt}
-                onClick={() => setPowerFilter(opt)}
-                className={`flex items-center justify-center gap-1 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-                  powerFilter === opt ? 'border-emerald-500 bg-emerald-50 text-emerald-700' : 'border-slate-200 text-slate-500'
+                type="button"
+                aria-pressed={paymentMethod === 'company'}
+                onClick={() => setPaymentMethod('company')}
+                className={`flex flex-col items-center gap-1 rounded-2xl border-2 py-3 text-xs sm:text-sm font-semibold transition-all active:scale-[0.98] ${
+                  paymentMethod === 'company' ? 'border-blue-500 bg-blue-50 text-blue-700 ring-2 ring-blue-200/70' : 'border-slate-200 text-slate-500'
                 }`}
               >
-                {opt === 'electric' ? <Zap size={14} /> : opt === 'fuel' ? <Fuel size={14} /> : null}
-                {opt === 'any' ? 'Any Vehicle' : opt === 'electric' ? 'Electric' : 'Fuel'}
+                <span className="text-xl leading-none">🏢</span> Company
               </button>
-            ))}
+            )}
             <button
-              onClick={() => setUmbrellaRequired(!umbrellaRequired)}
-              className={`col-span-3 flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-                umbrellaRequired ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500'
+              type="button"
+              aria-pressed={paymentMethod === 'wallet'}
+              onClick={() => setPaymentMethod('wallet')}
+              className={`flex flex-col items-center gap-1 rounded-2xl border-2 py-3 text-xs sm:text-sm font-semibold transition-all active:scale-[0.98] ${
+                paymentMethod === 'wallet' ? 'border-purple-500 bg-purple-50 text-purple-700 ring-2 ring-purple-200/70' : 'border-slate-200 text-slate-500'
               }`}
             >
-              <Umbrella size={14} /> {umbrellaRequired ? 'Rain cover required' : 'Rain cover not required'}
+              <span className="text-xl leading-none">🪙</span> ICANera Wallet
+            </button>
+            <button
+              type="button"
+              aria-pressed={paymentMethod === 'cash'}
+              onClick={() => setPaymentMethod('cash')}
+              className={`flex flex-col items-center gap-1 rounded-2xl border-2 py-3 text-xs sm:text-sm font-semibold transition-all active:scale-[0.98] ${
+                paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700 ring-2 ring-green-200/70' : 'border-slate-200 text-slate-500'
+              }`}
+            >
+              <span className="text-xl leading-none">💵</span> Cash
             </button>
           </div>
-        )}
-        </>
-        )}
-
-        {/* Any available rider/vehicle (open marketplace) vs one specific
-            transport company's own roster — mbg_list_ride_companies /
-            p_business_profile_id on mbg_find_available_riders /
-            mbg_find_available_vehicles (ADD_COMPANY_CHOICE_TO_RIDE_AND_
-            ESCORT_REQUESTS.sql). */}
-        <div className="mb-4">
-          <label className="block text-sm font-medium text-slate-700 mb-2">Choose driver from</label>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => setRiderProviderFilter('any')}
-              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
-                riderProviderFilter === 'any' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
-              }`}
-            >
-              Any Available Driver
-            </button>
-            <button
-              onClick={() => setRiderProviderFilter('company')}
-              className={`flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-sm font-semibold border-2 transition-all ${
-                riderProviderFilter === 'company' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
-              }`}
-            >
-              A Specific Company
-            </button>
-          </div>
-          {riderProviderFilter === 'company' && (
-            <>
-              <select
-                value={selectedRideCompanyId}
-                onChange={(e) => setSelectedRideCompanyId(e.target.value)}
-                className="mt-2 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-              >
-                <option value="">Select a company…</option>
-                {rideCompanies.map((c) => (
-                  <option key={c.business_profile_id} value={c.business_profile_id}>
-                    {c.business_name} ({c.available_vehicles} available)
-                  </option>
-                ))}
-              </select>
-              {rideCompanies.length === 0 && (
-                <p className="text-xs text-slate-400 mt-1">No transport companies with an available vehicle of this type right now.</p>
-              )}
-            </>
+          {paymentMethod === 'company' ? (
+            <p className="text-[11px] text-blue-600 mt-2">Paid by {companyTransport.business_name || 'your company'} from its business wallet ({companyTransport.billing_mode === 'monthly' ? 'monthly settlement' : 'per ride'}).</p>
+          ) : paymentMethod === 'wallet' ? (
+            <p className="text-[11px] text-slate-400 mt-2">Charged automatically when the trip ends.</p>
+          ) : (
+            <p className="text-[11px] text-slate-400 mt-2">Pay the rider directly in cash at the end of the trip.</p>
           )}
         </div>
 
-        {/* Security escort add-on — available for both rides and
-            deliveries, assigned from mbg_riders rows with operator_type =
-            'escort' via mbg_request_ride_escort once the ride is created. */}
-        <div className="mb-4">
+        <div className="landing-classic-divider" />
+
+        {/* More options — collapsed by default (same pattern as the
+            Overview's Recent Rides) with a one-line summary of what's set. */}
+        <div>
           <button
             type="button"
-            onClick={() => setEscortRequested(!escortRequested)}
-            className={`w-full flex items-center justify-between gap-2 py-2.5 px-3 rounded-lg text-sm font-semibold border-2 transition-all ${
-              escortRequested ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-500'
-            }`}
+            onClick={() => setExtrasOpen(o => !o)}
+            aria-expanded={extrasOpen}
+            className="flex w-full items-center justify-between gap-3 text-left"
           >
-            <span className="flex items-center gap-2">
-              <ShieldCheck size={16} /> Add a security escort
-            </span>
-            {escortRequested && (
-              <span className="text-xs font-medium">
-                {escortFeeEstimate == null
-                  ? 'Estimating…'
-                  : Number.isNaN(escortFeeEstimate)
-                  ? selectedSecurityCompanyId
-                    ? "This company hasn't set escort pricing yet"
-                    : 'No escort pricing set up yet'
-                  : `+UGX ${escortFeeEstimate.toLocaleString()}`}
+            <span className="flex min-w-0 items-center gap-3">
+              <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-orange-50 ring-1 ring-inset ring-orange-100">
+                <SlidersHorizontal size={17} className="text-orange-500" />
               </span>
+              <span className="min-w-0">
+                <span className="block font-classic-display text-base font-semibold leading-tight text-slate-800">More options</span>
+                <span className="block truncate text-xs text-slate-400">{extrasSummary}</span>
+              </span>
+            </span>
+            <ChevronDown size={18} className={`flex-shrink-0 text-slate-400 transition-transform ${extrasOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {extrasOpen && (
+            <div className="mt-4 space-y-5">
+              {/* Any available driver (nearest first) vs one specific
+                  transport company's own roster — mbg_list_ride_companies /
+                  p_business_profile_id on mbg_find_available_riders /
+                  mbg_find_available_vehicles (ADD_COMPANY_CHOICE_TO_RIDE_AND_
+                  ESCORT_REQUESTS.sql). Riders always come back nearest first,
+                  so leaving the company unpicked simply means "nearest". */}
+              <div>
+                <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Choose driver from</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRiderProviderFilter('any')}
+                    className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all ${
+                      riderProviderFilter === 'any' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+                    }`}
+                  >
+                    Anyone nearest
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRiderProviderFilter('company')}
+                    className={`flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-sm font-semibold border-2 transition-all ${
+                      riderProviderFilter === 'company' ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+                    }`}
+                  >
+                    A specific company
+                  </button>
+                </div>
+                {riderProviderFilter === 'company' && (
+                  <>
+                    <select
+                      value={selectedRideCompanyId}
+                      onChange={(e) => setSelectedRideCompanyId(e.target.value)}
+                      className="mt-2 w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none"
+                    >
+                      <option value="">Any company — nearest available driver</option>
+                      {rideCompanies.map((c) => (
+                        <option key={c.business_profile_id} value={c.business_profile_id}>
+                          {c.business_name} ({c.available_vehicles} available)
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      {selectedRideCompanyId
+                        ? 'Only this company\'s drivers are offered your trip, nearest first.'
+                        : 'No company chosen — we\'ll use the nearest available driver from any company.'}
+                    </p>
+                    {rideCompanies.length === 0 && (
+                      <p className="text-xs text-slate-400 mt-1">No transport companies with an available vehicle of this type right now.</p>
+                    )}
+                  </>
+                )}
+              </div>
+
+              {/* Security escort add-on — available for both rides and
+                  deliveries, assigned from mbg_riders rows with operator_type =
+                  'escort' via mbg_request_ride_escort once the ride is created. */}
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setEscortRequested(!escortRequested)}
+                  className={`w-full flex items-center justify-between gap-2 py-3 px-3.5 rounded-xl text-sm font-semibold border-2 transition-all ${
+                    escortRequested ? 'border-violet-500 bg-violet-50 text-violet-700' : 'border-slate-200 text-slate-500'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <ShieldCheck size={16} /> Add a security escort
+                  </span>
+                  {escortRequested && (
+                    <span className="text-xs font-medium">
+                      {escortFeeEstimate == null
+                        ? 'Estimating…'
+                        : Number.isNaN(escortFeeEstimate)
+                        ? selectedSecurityCompanyId
+                          ? "This company hasn't set escort pricing yet"
+                          : 'No escort pricing set up yet'
+                        : `+UGX ${escortFeeEstimate.toLocaleString()}`}
+                    </span>
+                  )}
+                </button>
+                {/* Which security company the escort comes from — same choice
+                    (and shared selection) as the standalone "Just send security"
+                    picker below. Left on "anyone available", the nearest
+                    escort to the pickup is assigned. */}
+                {escortRequested && (
+                  <select
+                    value={selectedSecurityCompanyId}
+                    onChange={(e) => setSelectedSecurityCompanyId(e.target.value)}
+                    className="mt-2 w-full px-3 py-2.5 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-violet-500 outline-none"
+                  >
+                    <option value="">Anyone available — nearest to your pickup</option>
+                    {securityCompanies.map((c) => (
+                      <option key={c.business_profile_id} value={c.business_profile_id}>
+                        {c.business_name} ({c.available_escorts} available)
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Actions */}
+      <div className="space-y-3">
+        {!routeReady && (
+          <p className="text-center text-xs text-slate-500">
+            Choose your pickup and drop-off above to see riders.
+          </p>
+        )}
+
+        <button
+          onClick={handleSearchRiders}
+          disabled={searching || autoDispatching || !routeReady}
+          className="w-full py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold text-lg rounded-2xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg shadow-orange-500/25 active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          {searching ? (
+            <>
+              <div className="animate-spin w-5 h-5 border-3 border-white border-t-transparent rounded-full" />
+              Searching for riders...
+            </>
+          ) : (
+            <>
+              <Search size={20} />
+              Find Available Riders — Choose One
+            </>
+          )}
+        </button>
+
+        {!needsCrossBorderPath && (
+          <button
+            onClick={handleJustSend}
+            disabled={searching || autoDispatching || !routeReady}
+            className="classic-card w-full py-3.5 !border-2 !border-orange-400 text-orange-600 font-bold rounded-2xl hover:bg-orange-50 transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {autoDispatching ? (
+              <>
+                <div className="animate-spin w-5 h-5 border-3 border-orange-400 border-t-transparent rounded-full" />
+                Sending...
+              </>
+            ) : (
+              <>
+                <Zap size={20} />
+                Just Send — Nearest Available Rider
+              </>
             )}
           </button>
-          {/* Which security company the escort comes from — same choice
-              (and shared selection) as the standalone "Just send security"
-              picker below; mbg_request_ride_escort now stays with this
-              company instead of always auto-picking the best-rated one. */}
-          {escortRequested && (
+        )}
+        <p className="text-[11px] text-slate-400 text-center">
+          We'll offer it to the nearest rider first — if they don't respond in 10s, it moves to the next one automatically.
+        </p>
+      </div>
+
+      {/* No vehicle of your own — skip picking a rider entirely and let
+          the system decide whether the escort transports you directly
+          or a driver gets paired in alongside them. */}
+      {serviceType === 'ride' && !needsCrossBorderPath && (
+        <div className="classic-card !border-violet-200 p-4 sm:p-5 space-y-3">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-2xl bg-violet-50 text-violet-600 ring-1 ring-inset ring-black/5">
+              <ShieldCheck size={19} />
+            </span>
+            <div className="min-w-0">
+              <p className="font-classic-display text-base font-semibold leading-tight text-slate-800">No transport of your own?</p>
+              <p className="text-xs text-slate-500">Just send security — the nearest available escort comes to you.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
             <select
               value={selectedSecurityCompanyId}
               onChange={(e) => setSelectedSecurityCompanyId(e.target.value)}
-              className="mt-2 w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-violet-500 outline-none"
+              className="border rounded-xl p-2 bg-white text-slate-900 text-xs"
             >
-              <option value="">Any available security company</option>
+              <option value="">Anyone available (nearest)</option>
               {securityCompanies.map((c) => (
                 <option key={c.business_profile_id} value={c.business_profile_id}>
                   {c.business_name} ({c.available_escorts} available)
                 </option>
               ))}
             </select>
-          )}
-        </div>
 
-        {/* Payment method — Wallet settles automatically the instant the
-            trip ends, for the all-in amount shown as the fare; Cash means
-            paying the rider directly in person. */}
-        <div className="mb-4">
-          <p className="text-xs font-semibold text-slate-500 mb-2">Payment method</p>
-          <div className={companyTransport.eligible ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-2 gap-2'}>
-            {companyTransport.eligible && (
-              <button
-                onClick={() => setPaymentMethod('company')}
-                className="flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 border-blue-500 bg-blue-50 text-blue-700"
-              >
-                🏢 Company
-              </button>
-            )}
-            <button
-              onClick={() => setPaymentMethod('wallet')}
-              className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-                paymentMethod === 'wallet' ? 'border-purple-500 bg-purple-50 text-purple-700' : 'border-slate-200 text-slate-500'
-              }`}
-            >
-              🪙 ICANera Wallet
-            </button>
-            <button
-              onClick={() => setPaymentMethod('cash')}
-              className={`flex items-center justify-center gap-2 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all ${
-                paymentMethod === 'cash' ? 'border-green-500 bg-green-50 text-green-700' : 'border-slate-200 text-slate-500'
-              }`}
-            >
-              💵 Cash
-            </button>
-          </div>
-          {paymentMethod === 'company' ? (
-            <p className="text-[11px] text-blue-600 mt-1">Paid by {companyTransport.business_name || 'your company'} from its business wallet ({companyTransport.billing_mode === 'monthly' ? 'monthly settlement' : 'per ride'}).</p>
-          ) : paymentMethod === 'wallet' ? (
-            <p className="text-[11px] text-slate-400 mt-1">Charged automatically when the trip ends.</p>
-          ) : (
-            <p className="text-[11px] text-slate-400 mt-1">Pay the rider directly in cash at the end of the trip.</p>
-          )}
-        </div>
-
-        <div className="space-y-4">
-          {/* Map picker — sets the same selectedPickup/selectedDropoff state
-              as typing a suggestion below; either method works, and they
-              stay in sync with each other. */}
-          <div className="flex items-center justify-between">
-            <label className="block text-sm font-medium text-slate-700">Pick locations on the map</label>
-            <button
-              type="button"
-              onClick={() => setShowMap(!showMap)}
-              className="text-xs text-orange-600 hover:text-orange-700 font-medium"
-            >
-              {showMap ? 'Hide map' : 'Show map'}
-            </button>
-          </div>
-          {showMap && (
-            <LocationPickerMap
-              pickup={selectedPickup}
-              dropoff={selectedDropoff}
-              onPickupChange={handleMapPickupChange}
-              onDropoffChange={handleMapDropoffChange}
-              onRouteInfo={(distanceKm, durationMin) => setRouteInfo({ distanceKm, durationMin })}
-              pickupLocked={pickupIsAutoFromSupermarket}
-              gpsTarget={serviceType === 'delivery' && deliveryMode === 'supermarket' ? 'dropoff' : 'pickup'}
-            />
-          )}
-
-          {/* Pickup Location */}
-          <div ref={pickupRef} className="relative">
-            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
-              Pickup Location
-              {pickupIsAutoFromSupermarket && (
-                <span className="text-[10px] px-2 py-0.5 bg-green-100 text-green-700 rounded-full font-semibold">
-                  Auto-filled from supermarket
-                </span>
-              )}
-            </label>
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-green-500" size={20} />
-              <input
-                type="text"
-                value={pickupGeocodingStore ? 'Locating store…' : pickup}
-                readOnly={pickupIsAutoFromSupermarket || pickupGeocodingStore}
-                onChange={(e) => !pickupIsAutoFromSupermarket && handlePickupChange(e.target.value)}
-                onFocus={() => !pickupIsAutoFromSupermarket && pickup && setShowPickupSuggestions(true)}
-                placeholder="Where are you now? (e.g., Kampala Road, Acacia Mall)"
-                className={`w-full pl-11 pr-4 py-3 border-2 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none text-slate-800 placeholder-slate-400 ${
-                  pickupIsAutoFromSupermarket || pickupGeocodingStore ? 'border-green-300 bg-green-50 cursor-default' : 'border-slate-300'
-                }`}
-              />
-              {selectedPickup && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 bg-green-500 rounded-full" />
-              )}
-            </div>
-            {serviceType === 'delivery' && deliveryMode === 'supermarket' && selectedSupermarketId && !pickupIsAutoFromSupermarket && !pickupGeocodingStore && (
-              <p className="text-xs text-amber-600 mt-1">
-                Couldn't automatically locate this store — please confirm the pickup point manually.
-              </p>
-            )}
-
-            {/* Smart nearest-place suggestion for normal delivery — only
-                while the pickup is still empty, and only ever a tap-to-use
-                suggestion, never auto-applied (see nearestAnyStore above). */}
-            {serviceType === 'delivery' && deliveryMode === 'normal' && !selectedPickup && nearestAnyStore && (
-              <button
-                type="button"
-                onClick={() => {
-                  const loc: Location = {
-                    id: `supermarket_${nearestAnyStore.id}`,
-                    name: nearestAnyStore.name,
-                    area: nearestAnyStore.location,
-                    fullAddress: nearestAnyStore.address || `${nearestAnyStore.name}, ${nearestAnyStore.location}`,
-                    coordinates: { lat: nearestAnyStore.latitude as number, lng: nearestAnyStore.longitude as number },
-                  };
-                  setSelectedPickup(loc);
-                  setPickup(loc.fullAddress);
-                }}
-                className="mt-1.5 w-full flex items-center justify-between gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded-lg text-left text-xs text-blue-700 hover:bg-blue-100 transition-colors"
-              >
-                <span className="truncate">
-                  📍 Nearest place: {typeEmoji(nearestAnyStore.business_type)} {nearestAnyStore.name}
-                  {' '}({(nearestAnyStore.distanceKm as number) < 1
-                    ? `${Math.round((nearestAnyStore.distanceKm as number) * 1000)}m`
-                    : `${(nearestAnyStore.distanceKm as number).toFixed(1)}km`})
-                </span>
-                <span className="flex-shrink-0 font-semibold">Use this</span>
-              </button>
-            )}
-
-            {/* Pickup Suggestions */}
-            {!pickupIsAutoFromSupermarket && showPickupSuggestions && pickupSuggestions.length > 0 && (
-              <div className="absolute z-10 w-full mt-2 bg-white border-2 border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
-                {pickupSuggestions.map((location) => (
-                  <button
-                    key={location.id}
-                    onClick={() => selectPickupLocation(location)}
-                    className="w-full text-left px-4 py-3 hover:bg-orange-50 border-b border-slate-100 last:border-b-0 transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      <MapPin className="text-orange-500 mt-1 flex-shrink-0" size={18} />
-                      <div>
-                        <div className="font-semibold text-slate-800">{location.name}</div>
-                        <div className="text-sm text-slate-600">{location.fullAddress}</div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
+            <div className="flex items-center justify-between border rounded-xl bg-white px-2 py-1">
+              <span className="text-xs text-slate-500">People</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSecurityPassengerCount((n) => Math.max(1, n - 1))}
+                  className="w-7 h-7 rounded-full bg-slate-100 text-slate-600 font-bold text-sm"
+                >
+                  −
+                </button>
+                <span className="text-sm font-semibold text-slate-800 w-4 text-center">{securityPassengerCount}</span>
+                <button
+                  type="button"
+                  onClick={() => setSecurityPassengerCount((n) => Math.min(8, n + 1))}
+                  className="w-7 h-7 rounded-full bg-slate-100 text-slate-600 font-bold text-sm"
+                >
+                  +
+                </button>
               </div>
-            )}
-          </div>
-
-          {/* Dropoff Location */}
-          <div ref={dropoffRef} className="relative">
-            <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-2">
-              Drop-off Location
-              {defaultDropoff && selectedDropoff?.id === defaultDropoff.id && (
-                <span className="text-[10px] px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full font-semibold">
-                  Your default area
-                </span>
-              )}
-            </label>
-            <div className="relative">
-              <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-red-500" size={20} />
-              <input
-                type="text"
-                value={dropoff}
-                onChange={(e) => handleDropoffChange(e.target.value)}
-                onFocus={() => dropoff && setShowDropoffSuggestions(true)}
-                placeholder="Where do you want to go? (e.g., Ntinda, Garden City)"
-                className="w-full pl-11 pr-4 py-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 outline-none text-slate-800 placeholder-slate-400"
-              />
-              {selectedDropoff && (
-                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-2 h-2 bg-red-500 rounded-full" />
-              )}
             </div>
-
-            {/* Dropoff Suggestions */}
-            {showDropoffSuggestions && dropoffSuggestions.length > 0 && (
-              <div className="absolute z-10 w-full mt-2 bg-white border-2 border-slate-200 rounded-lg shadow-xl max-h-64 overflow-y-auto">
-                {dropoffSuggestions.map((location) => (
-                  <button
-                    key={location.id}
-                    onClick={() => selectDropoffLocation(location)}
-                    className="w-full text-left px-4 py-3 hover:bg-orange-50 border-b border-slate-100 last:border-b-0 transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      <MapPin className="text-orange-500 mt-1 flex-shrink-0" size={18} />
-                      <div>
-                        <div className="font-semibold text-slate-800">{location.name}</div>
-                        <div className="text-sm text-slate-600">{location.fullAddress}</div>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
 
-          {routeInfo && (
-            <p className="text-xs text-slate-500 -mt-2">
-              Estimated road distance: <span className="font-semibold text-slate-700">{routeInfo.distanceKm.toFixed(1)} km</span>
-              {' '}(~{Math.round(routeInfo.durationMin)} min)
-            </p>
-          )}
+          <p className="text-[11px] text-slate-500">
+            If the escort has their own vehicle, that's your one fare. Otherwise we pair the nearest{' '}
+            {securityPassengerCount <= 1 ? 'boda' : securityPassengerCount <= 4 ? 'car' : 'van'} with them automatically.
+          </p>
 
           <button
-            onClick={handleSearchRiders}
-            disabled={searching || autoDispatching || !selectedPickup || !selectedDropoff}
-            className="w-full py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold text-lg rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            onClick={handleRequestSecurityOnly}
+            disabled={securityOnlyLoading || !routeReady}
+            className="w-full py-3 bg-violet-600 text-white font-semibold text-sm rounded-2xl hover:bg-violet-700 transition-all active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
-            {searching ? (
+            {securityOnlyLoading ? (
               <>
-                <div className="animate-spin w-5 h-5 border-3 border-white border-t-transparent rounded-full" />
-                Searching for riders...
+                <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
+                Arranging security...
               </>
             ) : (
               <>
-                <Search size={20} />
-                Find Available Riders — Choose One
+                <ShieldCheck size={18} />
+                Send Nearest Security
               </>
             )}
           </button>
-
-          {!needsCrossBorderPath && (
-            <button
-              onClick={handleJustSend}
-              disabled={searching || autoDispatching || !selectedPickup || !selectedDropoff}
-              className="w-full py-3.5 bg-white border-2 border-orange-400 text-orange-600 font-bold rounded-xl hover:bg-orange-50 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-            >
-              {autoDispatching ? (
-                <>
-                  <div className="animate-spin w-5 h-5 border-3 border-orange-400 border-t-transparent rounded-full" />
-                  Sending...
-                </>
-              ) : (
-                <>
-                  <Zap size={20} />
-                  Just Send — Any Available Rider
-                </>
-              )}
-            </button>
-          )}
-          <p className="text-[11px] text-slate-400 text-center -mt-3">
-            We'll offer it to the nearest rider first — if they don't respond in 10s, it moves to the next one automatically.
-          </p>
-
-          {/* No vehicle of your own — skip picking a rider entirely and let
-              the system decide whether the escort transports you directly
-              or a driver gets paired in alongside them. */}
-          {serviceType === 'ride' && !needsCrossBorderPath && (
-            <div className="border-2 border-violet-200 rounded-xl p-3 space-y-2.5 bg-violet-50/40">
-              <p className="text-xs font-semibold text-violet-700 flex items-center gap-1.5">
-                <ShieldCheck size={14} /> No transport of your own? Just send security
-              </p>
-
-              <div className="grid grid-cols-2 gap-2">
-                <select
-                  value={selectedSecurityCompanyId}
-                  onChange={(e) => setSelectedSecurityCompanyId(e.target.value)}
-                  className="border rounded-lg p-2 bg-white text-slate-900 text-xs"
-                >
-                  <option value="">Any available company</option>
-                  {securityCompanies.map((c) => (
-                    <option key={c.business_profile_id} value={c.business_profile_id}>
-                      {c.business_name} ({c.available_escorts} available)
-                    </option>
-                  ))}
-                </select>
-
-                <div className="flex items-center justify-between border rounded-lg bg-white px-2 py-1">
-                  <span className="text-xs text-slate-500">People</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSecurityPassengerCount((n) => Math.max(1, n - 1))}
-                      className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 font-bold text-sm"
-                    >
-                      −
-                    </button>
-                    <span className="text-sm font-semibold text-slate-800 w-4 text-center">{securityPassengerCount}</span>
-                    <button
-                      type="button"
-                      onClick={() => setSecurityPassengerCount((n) => Math.min(8, n + 1))}
-                      className="w-6 h-6 rounded-full bg-slate-100 text-slate-600 font-bold text-sm"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <p className="text-[10px] text-slate-500">
-                If the escort has their own vehicle, that's your one fare. Otherwise we pair a{' '}
-                {securityPassengerCount <= 1 ? 'boda' : securityPassengerCount <= 4 ? 'car' : 'van'} with them automatically.
-              </p>
-
-              <button
-                onClick={handleRequestSecurityOnly}
-                disabled={securityOnlyLoading || !selectedPickup || !selectedDropoff}
-                className="w-full py-3 bg-violet-600 text-white font-semibold text-sm rounded-xl hover:bg-violet-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {securityOnlyLoading ? (
-                  <>
-                    <div className="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                    Arranging security...
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck size={18} />
-                    Request Security
-                  </>
-                )}
-              </button>
-            </div>
-          )}
         </div>
-      </div>
+      )}
 
       {/* Matched Riders */}
       {matchedRiders.length > 0 && (() => {
@@ -2347,14 +2530,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           : matchedRiders.filter(r => r.mode === modePreference);
 
         return (
-          <div className="bg-white rounded-xl shadow-lg p-4 sm:p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg sm:text-xl font-bold text-slate-800">
+          <div ref={resultsRef} className="classic-card scroll-mt-32 p-4 sm:p-5">
+            <div className="mb-4 flex items-center gap-3">
+              <h3 className="font-classic-display text-lg font-semibold text-slate-800">
                 Available Riders ({displayedRiders.length})
               </h3>
-              <p className="text-xs sm:text-sm text-slate-600">
-                Sorted by best match
-              </p>
+              <div className="landing-classic-divider flex-1" />
+              <span className="text-xs text-slate-500">Nearest first</span>
             </div>
 
             <VipDemandInsight riders={matchedRiders} />
@@ -2386,16 +2568,29 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             )}
 
             {/* Algorithm Info */}
-            <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-              <p className="text-sm text-blue-800">
-                <strong>Real Matching:</strong> Riders are ranked by real registered areas they know,
-                real GPS distance, rating, and their own vehicle/mode. Riders who know your destination
-                area appear first — no simulated data.
-              </p>
-            </div>
+            <p className="mt-5 text-[11px] leading-relaxed text-slate-500">
+              <strong className="text-slate-600">Real matching:</strong> riders are ranked by real GPS distance first,
+              then the areas they know, rating, and their own vehicle/mode. Riders who know your destination
+              area are favoured among the closest — no simulated data.
+            </p>
           </div>
         );
       })()}
+    </div>
+  );
+}
+
+// Numbered section heading — same serif + gold-rule treatment as the
+// Overview's SectionHeading, with a step badge so the form reads top to bottom.
+function StepHeading({ n, children, action }: { n: number; children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3">
+      <span className="grid h-7 w-7 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-orange-500 to-amber-400 text-xs font-bold text-white shadow-sm ring-1 ring-[#c4a052]/40">
+        {n}
+      </span>
+      <h3 className="font-classic-display text-lg font-semibold text-slate-800">{children}</h3>
+      <div className="landing-classic-divider flex-1" />
+      {action}
     </div>
   );
 }
@@ -2512,6 +2707,7 @@ function RiderCard({
 
   const config = modeConfig[rider.mode] || modeConfig.normal;
   const ModeIcon = config.icon;
+  const walletSurchargePct = useWalletSurchargePct();
 
   return (
     <div className={`border-2 rounded-xl p-4 sm:p-5 transition-all ${
@@ -2591,7 +2787,7 @@ function RiderCard({
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-baseline gap-2">
               <span className="text-xl sm:text-2xl font-bold text-slate-800">
-                UGX {payableFare(rider.fare, paymentMethod).toLocaleString()}
+                UGX {payableFare(rider.fare, paymentMethod, walletSurchargePct).toLocaleString()}
               </span>
             </div>
 
@@ -2886,6 +3082,8 @@ function RiderOnTheWay({
   paymentMethod: 'wallet' | 'cash' | 'company';
   onChangePaymentMethod: (m: 'wallet' | 'cash') => void;
 }) {
+  const walletSurchargePct = useWalletSurchargePct();
+
   return (
     <div className="space-y-6">
       {/* Header Status */}
@@ -2909,7 +3107,7 @@ function RiderOnTheWay({
       <LiveTrackingMap riderId={rider.rider_id} pickup={pickup} dropoff={dropoff} phase="to_pickup" />
 
       {/* Rider Details Card */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
+      <div className="classic-card p-6">
         <h3 className="text-lg font-bold text-slate-800 mb-4">Rider Details</h3>
         <div className="flex items-start gap-4 mb-6">
           <div className="w-20 h-20 bg-gradient-to-br from-orange-400 to-yellow-400 rounded-full flex items-center justify-center text-white font-bold text-2xl shadow-lg">
@@ -2989,7 +3187,7 @@ function RiderOnTheWay({
           <div className="flex items-center justify-between">
             <span className="text-slate-600">Fare Amount</span>
             <span className="text-2xl font-bold text-slate-800">
-              UGX {payableFare(rider.fare, paymentMethod).toLocaleString()}
+              UGX {payableFare(rider.fare, paymentMethod, walletSurchargePct).toLocaleString()}
             </span>
           </div>
           <PaymentMethodSwitcher paymentMethod={paymentMethod} onChange={onChangePaymentMethod} />
@@ -3030,6 +3228,7 @@ function JourneyStarted({
   onChangePaymentMethod: (m: 'wallet' | 'cash') => void;
 }) {
   const [journeyTime, setJourneyTime] = React.useState(0);
+  const walletSurchargePct = useWalletSurchargePct();
 
   React.useEffect(() => {
     const timer = setInterval(() => {
@@ -3078,7 +3277,7 @@ function JourneyStarted({
       <LiveTrackingMap riderId={rider.rider_id} pickup={pickup} dropoff={dropoff} phase="to_dropoff" />
 
       {/* Trip Details */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
+      <div className="classic-card p-6">
         <h3 className="text-lg font-bold text-slate-800 mb-4">Trip Details</h3>
 
         {/* Route */}
@@ -3139,7 +3338,7 @@ function JourneyStarted({
           <div className="flex items-center justify-between">
             <span className="text-slate-600 font-medium">Trip Fare</span>
             <span className="text-2xl sm:text-3xl font-bold text-green-600">
-              UGX {payableFare(rider.fare, paymentMethod).toLocaleString()}
+              UGX {payableFare(rider.fare, paymentMethod, walletSurchargePct).toLocaleString()}
             </span>
           </div>
           <PaymentMethodSwitcher paymentMethod={paymentMethod} onChange={onChangePaymentMethod} />
@@ -3173,6 +3372,7 @@ function JourneyCompleted({
 }) {
   const [rating, setRating] = React.useState(0);
   const [hoveredRating, setHoveredRating] = React.useState(0);
+  const walletSurchargePct = useWalletSurchargePct();
 
   return (
     <div className="space-y-6">
@@ -3200,7 +3400,7 @@ function JourneyCompleted({
       </div>
 
       {/* Trip Summary */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
+      <div className="classic-card p-6">
         <h3 className="text-lg font-bold text-slate-800 mb-4">Trip Summary</h3>
 
         <div className="space-y-3 mb-6">
@@ -3219,14 +3419,14 @@ function JourneyCompleted({
           <div className="flex justify-between py-2 border-t-2 border-slate-200 pt-4">
             <span className="text-slate-700 font-medium text-lg">Total Fare</span>
             <span className="text-2xl sm:text-3xl font-bold text-green-600">
-              UGX {payableFare(rider.fare, paymentMethod).toLocaleString()}
+              UGX {payableFare(rider.fare, paymentMethod, walletSurchargePct).toLocaleString()}
             </span>
           </div>
         </div>
       </div>
 
       {/* Rate Your Rider */}
-      <div className="bg-white rounded-xl shadow-lg p-6">
+      <div className="classic-card p-6">
         <h3 className="text-lg font-bold text-slate-800 mb-4 text-center">Rate Your Experience</h3>
         <p className="text-slate-600 text-center mb-4">How was your ride with {rider.full_name.split(' ')[0]}?</p>
 

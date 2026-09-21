@@ -48,6 +48,9 @@ interface LocationPickerMapProps {
   gpsTarget?: 'pickup' | 'dropoff';
   /** Optional country hint for the map search. */
   searchCountry?: string;
+  /** Map height in px. Defaults to 420; the Book a Ride form passes a
+   * shorter one so the map doesn't push the rest of the form off-screen. */
+  height?: number;
 }
 
 export default function LocationPickerMap({
@@ -61,6 +64,7 @@ export default function LocationPickerMap({
   selectionMode = 'dropoff',
   gpsTarget = 'pickup',
   searchCountry,
+  height = 420,
 }: LocationPickerMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
@@ -245,7 +249,7 @@ export default function LocationPickerMap({
           {searching ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
         </button>
       </div>
-      <div className="relative rounded-lg border-2 border-slate-200" style={{ height: 420, width: '100%' }}>
+      <div className="relative rounded-lg border-2 border-slate-200" style={{ height, width: '100%' }}>
         <div ref={containerRef} className="h-full w-full rounded-lg" />
         {!mapReady && (
           <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-slate-50 text-slate-400 text-sm gap-2">

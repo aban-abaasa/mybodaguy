@@ -6,6 +6,12 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
 import VerifyReceiptPage from "./mybodaguy/components/VerifyReceiptPage";
 import SupportConsole from "./mybodaguy/pages/SupportConsole";
+import { captureReferralFromUrl } from "./mybodaguy/services/referralService";
+
+// A shared referral link (/?ref=CODE) can land anywhere, signed in or not —
+// remember the code now, redeem it once the visitor has an account
+// (UnifiedDashboard calls consumePendingReferralCode).
+captureReferralFromUrl();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

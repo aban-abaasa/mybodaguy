@@ -8,6 +8,7 @@ import {
   redeemPointsForCoins, redeemPointsForItem, pointsToICAN, POINTS_PER_ICAN, TIER_META,
   type RewardSummary, type RewardCatalogItem, type RewardTransaction, type RewardRedemption,
 } from '../services/rewardsService';
+import ReferralCard from './ReferralCard';
 
 interface Props {
   user: any;
@@ -129,6 +130,9 @@ export default function RewardsHub({ user, role, onGoToWallet }: Props) {
           )}
         </div>
       </div>
+
+      {/* Referral link + earnings (paid in ICAN on a friend's first deposit) */}
+      <ReferralCard />
 
       {/* Convert points to ICAN coins */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">

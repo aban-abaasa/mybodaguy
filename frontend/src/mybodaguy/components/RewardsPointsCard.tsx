@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react';
 import { getRewardSummary, TIER_META, type RewardSummary } from '../services/rewardsService';
+import PremiumStatCard from './PremiumStatCard';
 
 interface Props {
   userId: string;
   onOpen?: () => void;
+  // 'premium' is the customer Overview's larger engraved-card face; the
+  // default compact tile is what the rider stat grid expects.
+  variant?: 'compact' | 'premium';
 }
 
 // Compact "at a glance" card for the Overview grid — mirrors IcanCoinCard's
 // shape/sizing so the two sit side by side, but in a gold/amber gradient to
 // read as a distinct currency (loyalty points, not spendable ICAN coins).
-export default function RewardsPointsCard({ userId, onOpen }: Props) {
+export default function RewardsPointsCard({ userId, onOpen, variant = 'compact' }: Props) {
   const [summary, setSummary] = useState<RewardSummary | null>(null);
 
   useEffect(() => {
@@ -18,6 +22,21 @@ export default function RewardsPointsCard({ userId, onOpen }: Props) {
   }, [userId]);
 
   const tier = TIER_META[summary?.tier ?? 'bronze'];
+
+  if (variant === 'premium') {
+    return (
+      <PremiumStatCard
+        gradient={tier.color}
+        glow="rgba(120,53,15,0.5)"
+        emblem={tier.emoji}
+        label="Reward Points"
+        value={summary === null ? '…' : Math.floor(summary.points_balance).toLocaleString()}
+        caption={`${tier.label} tier`}
+        cta="View rewards"
+        onClick={onOpen}
+      />
+    );
+  }
 
   return (
     <div

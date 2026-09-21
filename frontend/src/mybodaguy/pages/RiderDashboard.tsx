@@ -1,12 +1,18 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Bike, MapPin, DollarSign, TrendingUp, LogOut, Settings, Map, ShoppingBag, User, Package, Bell, ChevronDown, Car, Truck, Gift } from 'lucide-react';
+import {
+  Bike, Settings, Map as MapIcon, ShoppingBag, User, Package, Bell, Car, Truck, Gift,
+  Home, LayoutGrid, X, Star, ArrowRight, type LucideIcon,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
 import RiderICANEarnings from '../components/RiderICANEarnings';
+import IcanCoinCard from '../components/IcanCoinCard';
 import RewardsPointsCard from '../components/RewardsPointsCard';
+import RiderEarningsCard, { buildWeekEarnings, type DayEarning } from '../components/RiderEarningsCard';
+import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import RewardsHub from '../components/RewardsHub';
 import SupermarketDeliveryPool from '../components/SupermarketDeliveryPool';
 import RiderRideRequests from '../components/RiderRideRequests';
@@ -18,9 +24,28 @@ import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
 interface RiderDashboardProps {
   user: any;
   onSignOut: () => void;
+  // Switches UnifiedDashboard's activeRole to 'ican-wallet' (this app has no
+  // router, so the wallet is a role tab, not a URL). Without it the ICAN Coins
+  // card on Overview still shows the balance but isn't tappable.
+  onGoToWallet?: () => void;
 }
 
 type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards';
+
+// emoji drives the desktop tab strip; icon drives the phone section bar and
+// menu sheet. 'requests' is deliberately not in NAV_TABS — it stays a card on
+// Overview rather than permanent tab space — but still needs a label/icon for
+// the phone section bar while it's the active view.
+const TAB_META: Record<TabType, { label: string; emoji: string; icon: LucideIcon }> = {
+  overview:     { label: 'Overview',   emoji: '🏠', icon: Home },
+  requests:     { label: 'Requests',   emoji: '🔔', icon: Bell },
+  mode:         { label: 'Work Mode',  emoji: '⚙️', icon: Settings },
+  locations:    { label: 'Areas',      emoji: '📍', icon: MapIcon },
+  partnerships: { label: 'Markets',    emoji: '🛒', icon: ShoppingBag },
+  deliveries:   { label: 'Deliveries', emoji: '📦', icon: Package },
+  rewards:      { label: 'Rewards',    emoji: '🎁', icon: Gift },
+};
+const NAV_TABS: TabType[] = ['overview', 'mode', 'locations', 'partnerships', 'deliveries', 'rewards'];
 
 // True while this user has an active (accepted/in_progress) ride that is
 // the dispatched vehicle for a journey's sea_leg — i.e. mid-voyage, departed
@@ -97,7 +122,7 @@ function useLiveLocationPing(userId: string | undefined) {
 // mbg_riders row now (multi-vehicle), and only the ACTIVE one should ever
 // flip online; the inactive one(s) must stay offline regardless (enforced
 // server-side too, by mbg_switch_active_vehicle).
-function WorkingTimeToggle({ userId, vehicleType }: { userId: string; vehicleType: string | null }) {
+function WorkingTimeToggle({ userId, vehicleType, children }: { userId: string; vehicleType: string | null; children?: React.ReactNode }) {
   const [isAvailable, setIsAvailable] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -136,40 +161,54 @@ function WorkingTimeToggle({ userId, vehicleType }: { userId: string; vehicleTyp
   };
 
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={isAvailable}
-      onClick={toggle}
-      disabled={!loaded || saving}
-      className={`w-full rounded-lg xs:rounded-xl shadow-md p-3 xs:p-4 sm:p-6 flex items-center justify-between gap-3 transition-colors disabled:opacity-60 ${
-        isAvailable ? 'bg-gradient-to-r from-green-500 to-emerald-500' : 'bg-white border-2 border-slate-200'
-      }`}
-    >
-      <span className="min-w-0 text-left">
-        <span className={`block font-bold text-xs xs:text-sm sm:text-lg ${isAvailable ? 'text-white' : 'text-slate-800'}`}>
-          {isAvailable ? "You're Online" : "You're Offline"}
-        </span>
-        <span className={`block text-[9px] xs:text-[11px] sm:text-sm truncate ${isAvailable ? 'text-white/80' : 'text-slate-500'}`}>
-          {isAvailable ? 'Accepting ride requests' : 'Turn on to start working'}
-        </span>
-      </span>
+    <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-4 text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40 min-[360px]:p-5">
+      <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full border border-[#c4a052]/25" />
+      <span aria-hidden className="pointer-events-none absolute -right-5 -top-5 h-28 w-28 rounded-full border border-[#c4a052]/20" />
       <span
-        className={`relative flex-shrink-0 w-11 h-6 xs:w-14 xs:h-8 rounded-full transition-colors ${
-          isAvailable ? 'bg-white/30' : 'bg-slate-300'
+        aria-hidden
+        className={`pointer-events-none absolute -bottom-14 -left-10 h-40 w-40 rounded-full blur-2xl transition-colors duration-700 ${
+          isAvailable ? 'bg-emerald-500/30' : 'bg-orange-500/20'
         }`}
-      >
-        <span
-          className={`absolute top-0.5 xs:top-1 left-0.5 xs:left-1 w-5 h-5 xs:w-6 xs:h-6 rounded-full bg-white shadow-md transition-transform ${
-            isAvailable ? 'translate-x-5 xs:translate-x-6' : 'translate-x-0'
+      />
+
+      <div className="relative flex items-center justify-between gap-4">
+        <div className="min-w-0">
+          <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]">
+            <span className={`h-1.5 w-1.5 rounded-full ${isAvailable ? 'animate-pulse bg-emerald-400' : 'bg-white/40'}`} />
+            Working time
+          </p>
+          <p className="mt-1 font-classic-display text-[26px] font-bold leading-tight">
+            {isAvailable ? "You're Online" : "You're Offline"}
+          </p>
+          <p className="mt-1 text-[13px] text-white/70">
+            {isAvailable ? 'Customers can request you right now' : 'Switch on to start receiving requests'}
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={isAvailable}
+          aria-label="Working status"
+          onClick={toggle}
+          disabled={!loaded || saving}
+          className={`relative h-10 w-[68px] flex-shrink-0 rounded-full ring-1 ring-inset transition-colors active:scale-95 disabled:opacity-60 ${
+            isAvailable ? 'bg-emerald-500 ring-emerald-300/60' : 'bg-white/15 ring-[#c4a052]/50'
           }`}
-        />
-      </span>
-    </button>
+        >
+          <span
+            className={`absolute left-1 top-1 h-8 w-8 rounded-full bg-[#fffdf7] shadow-md transition-transform ${
+              isAvailable ? 'translate-x-7' : 'translate-x-0'
+            }`}
+          />
+        </button>
+      </div>
+
+      {children && <div className="relative mt-4 border-t border-[#c4a052]/25 pt-4">{children}</div>}
+    </div>
   );
 }
 
-// Compact "UGX 45k" style formatting for the earnings stat card.
+// Compact "UGX 45k" style formatting for the greeting's insight slides.
 function formatEarnings(amount: number): string {
   if (amount >= 1_000_000) return `UGX ${(amount / 1_000_000).toFixed(1)}M`;
   if (amount >= 1000) return `UGX ${Math.round(amount / 1000)}k`;
@@ -191,7 +230,6 @@ const VEHICLE_TYPE_META: Record<string, { label: string; icon: typeof Bike; use:
 };
 
 interface RiderStats {
-  earningsTodayUGX: number;
   ridesDone: number;
   rating: number;
   mode: string;
@@ -205,7 +243,9 @@ interface RiderVehicle {
   operatorType: string | null;
 }
 
-// Pulls real numbers for the overview stat cards straight from Supabase.
+// Pulls real numbers for the overview cards straight from Supabase. (Earnings
+// come from useRiderActivity's 7-day query instead, so today's headline figure
+// and the chart beneath it can never disagree.)
 // A person can hold more than one mbg_riders row now (multi-vehicle — see
 // ADD_MULTI_VEHICLE_SUPPORT.sql), so this fetches ALL of them plus
 // mbg_users.active_vehicle_type to know which one is currently live,
@@ -232,7 +272,7 @@ function useRiderStats(userId: string | undefined) {
     if (rows.length === 0) {
       setActiveVehicleType(null);
       setActiveRiderId(null);
-      setStats({ earningsTodayUGX: 0, ridesDone: 0, rating: 0, mode: 'normal', vehicleType: null, operatorType: null, escortHasOwnTransport: false });
+      setStats({ ridesDone: 0, rating: 0, mode: 'normal', vehicleType: null, operatorType: null, escortHasOwnTransport: false });
       setLoading(false);
       return;
     }
@@ -243,26 +283,7 @@ function useRiderStats(userId: string | undefined) {
     setActiveVehicleType(active.vehicle_type);
     setActiveRiderId(active.id);
 
-    const startOfToday = new Date();
-    startOfToday.setHours(0, 0, 0, 0);
-
-    const { data: todaysRides } = await supabase
-      .from('mbg_rides')
-      .select('fare, rider_earning')
-      .eq('rider_id', active.id)
-      .eq('status', 'completed')
-      .gte('completed_at', startOfToday.toISOString());
-
-    // rider_earning (net, after chairperson commission cuts) is what the
-    // rider actually keeps — fall back to the gross fare only for old rows
-    // completed before that column existed.
-    const earningsTodayUGX = (todaysRides || []).reduce(
-      (sum, r: any) => sum + (Number(r.rider_earning ?? r.fare) || 0),
-      0
-    );
-
     setStats({
-      earningsTodayUGX,
       ridesDone: active.completed_rides || 0,
       rating: Number(active.rating) || 0,
       mode: active.mode || 'normal',
@@ -281,7 +302,7 @@ function useRiderStats(userId: string | undefined) {
     // leaves these Overview cards showing whatever was true at page load —
     // completed_rides/rating/mode only change via an UPDATE on this user's
     // mbg_riders row(s), so listening for that and re-querying covers
-    // earnings/rides/rating/mode together in one place.
+    // rides/rating/mode together in one place.
     const channel = supabase
       .channel(`mbg_rider_stats_${userId}`)
       .on(
@@ -300,19 +321,44 @@ function useRiderStats(userId: string | undefined) {
   return { stats, loading, allVehicles, activeVehicleType, activeRiderId, reload: load };
 }
 
-// Greeting insights for the active vehicle: total jobs, the hour customers
-// request them most, and the pickup location they come from most — the
-// rider's own demand pattern, mirroring the same stats on the Customer
-// Overview greeting. Live via realtime on this rider's own mbg_rides rows.
-function useRiderOwnRideInsights(riderId: string | null) {
-  const [totalCount, setTotalCount] = useState<number | null>(null);
-  const [insights, setInsights] = useState<OrderInsights | null>(null);
+// Everything the Overview shows about this rider's own work, kept live via
+// realtime on their mbg_rides rows: demand pattern (total jobs, the hour and
+// place requests come from most), the last 7 days of earnings, and how many
+// requests are waiting / jobs in progress right now. Escort operators also
+// receive add-on requests through mbg_ride_escort_requests, so those are
+// counted too.
+interface RiderActivity {
+  totalCount: number | null;
+  insights: OrderInsights | null;
+  week: DayEarning[] | null;
+  pendingCount: number;
+  activeCount: number;
+}
+
+const NO_ACTIVITY: RiderActivity = { totalCount: null, insights: null, week: null, pendingCount: 0, activeCount: 0 };
+
+function useRiderActivity(riderId: string | null, isEscort: boolean): RiderActivity {
+  const [activity, setActivity] = useState<RiderActivity>(NO_ACTIVITY);
 
   useEffect(() => {
-    if (!riderId) { setTotalCount(null); setInsights(null); return; }
+    if (!riderId) { setActivity(NO_ACTIVITY); return; }
+    let cancelled = false;
 
     const load = async () => {
-      const [{ data }, { count }] = await Promise.all([
+      const weekStart = new Date();
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(weekStart.getDate() - 6);
+
+      const count = (status: string | string[]) => {
+        const q = supabase.from('mbg_rides').select('id', { count: 'exact', head: true }).eq('rider_id', riderId);
+        return Array.isArray(status) ? q.in('status', status) : q.eq('status', status);
+      };
+      const escortCount = (status: string) =>
+        isEscort
+          ? supabase.from('mbg_ride_escort_requests').select('id', { count: 'exact', head: true }).eq('escort_rider_id', riderId).eq('status', status)
+          : Promise.resolve({ count: 0 });
+
+      const [recent, total, weekRows, pending, active, escortPending, escortActive] = await Promise.all([
         supabase
           .from('mbg_rides')
           .select('created_at, pickup_location')
@@ -320,34 +366,81 @@ function useRiderOwnRideInsights(riderId: string | null) {
           .order('created_at', { ascending: false })
           .limit(20),
         supabase.from('mbg_rides').select('id', { count: 'exact', head: true }).eq('rider_id', riderId),
+        supabase
+          .from('mbg_rides')
+          .select('fare, rider_earning, completed_at')
+          .eq('rider_id', riderId)
+          .eq('status', 'completed')
+          .gte('completed_at', weekStart.toISOString()),
+        count('pending'),
+        count(['accepted', 'in_progress']),
+        escortCount('pending'),
+        escortCount('accepted'),
       ]);
-      setInsights(computeOrderInsights(data || []));
-      setTotalCount(count ?? 0);
+      if (cancelled) return;
+
+      setActivity({
+        totalCount: total.count ?? 0,
+        insights: computeOrderInsights(recent.data || []),
+        week: buildWeekEarnings(weekRows.data || []),
+        pendingCount: (pending.count ?? 0) + (escortPending.count ?? 0),
+        activeCount: (active.count ?? 0) + (escortActive.count ?? 0),
+      });
     };
     load();
 
-    const channel = supabase
-      .channel(`mbg_rider_own_rides_${riderId}`)
-      .on(
+    let channel = supabase
+      .channel(`mbg_rider_activity_${riderId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'mbg_rides', filter: `rider_id=eq.${riderId}` }, () => load());
+    if (isEscort) {
+      channel = channel.on(
         'postgres_changes',
-        { event: '*', schema: 'public', table: 'mbg_rides', filter: `rider_id=eq.${riderId}` },
+        { event: '*', schema: 'public', table: 'mbg_ride_escort_requests', filter: `escort_rider_id=eq.${riderId}` },
         () => load()
-      )
-      .subscribe();
+      );
+    }
+    channel.subscribe();
 
-    return () => { supabase.removeChannel(channel); };
-  }, [riderId]);
+    // An Overview left open past midnight would otherwise keep showing
+    // yesterday as "today" until the next ride event — refresh once the day
+    // rolls over.
+    let midnightTimer: ReturnType<typeof setTimeout>;
+    const scheduleMidnight = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+      midnightTimer = setTimeout(() => { load(); scheduleMidnight(); }, nextMidnight - now.getTime() + 1000);
+    };
+    scheduleMidnight();
 
-  return { totalCount, insights };
+    return () => {
+      cancelled = true;
+      clearTimeout(midnightTimer);
+      supabase.removeChannel(channel);
+    };
+  }, [riderId, isEscort]);
+
+  return activity;
 }
 
-export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps) {
+// Five small stars, filled to the nearest whole rating.
+function RatingStars({ rating }: { rating: number }) {
+  const filled = Math.round(rating);
+  return (
+    <span className="flex gap-0.5" aria-hidden>
+      {[0, 1, 2, 3, 4].map(i => (
+        <Star key={i} size={11} className={i < filled ? 'fill-amber-400 text-amber-400' : 'text-slate-300 dark:text-slate-600'} />
+      ))}
+    </span>
+  );
+}
+
+export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [quickStartOpen, setQuickStartOpen] = useState(false);
   const { stats: riderStats, loading: riderStatsLoading, allVehicles, activeVehicleType, activeRiderId, reload: reloadRiderStats } = useRiderStats(user?.id);
-  const { totalCount: totalJobsCount, insights: demandInsights } = useRiderOwnRideInsights(activeRiderId);
+  const { totalCount: totalJobsCount, insights: demandInsights, week, pendingCount, activeCount } =
+    useRiderActivity(activeRiderId, riderStats?.operatorType === 'escort');
   const [switchingVehicle, setSwitchingVehicle] = useState(false);
   const [riderName, setRiderName] = useState('You');
 
@@ -366,11 +459,46 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
       });
   }, [user?.id]);
 
-  // Each demand stat gets its own slide in the greeting's carousel — only
-  // real, live data ever shows up here (a stat is simply omitted until it
-  // has one), mirroring the same slider on the Customer Overview greeting.
+  // The phone menu is a bottom sheet: Escape closes it, and the page behind
+  // it stops scrolling while it's up (tapping the scrim closes it too).
+  useEffect(() => {
+    if (!showMobileMenu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setShowMobileMenu(false); };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showMobileMenu]);
+
+  // Each stat gets its own slide in the greeting's carousel — only real, live
+  // data ever shows up here (a stat is simply omitted until it has one),
+  // mirroring the same slider on the Customer Overview greeting.
   const insightSlides = useMemo<InsightSlide[]>(() => {
     const slides: InsightSlide[] = [];
+    const today = week?.[6];
+    const yesterday = week?.[5];
+    if (today && yesterday && today.amount > 0 && yesterday.amount > 0) {
+      const pct = Math.round((today.amount / yesterday.amount) * 100);
+      slides.push(pct >= 100
+        ? {
+            key: 'trend', emoji: '📈', tint: 'bg-emerald-50 text-emerald-700',
+            content: <>Today is <strong>{pct - 100}% ahead</strong> of yesterday</>,
+          }
+        : {
+            key: 'trend', emoji: '🎯', tint: 'bg-emerald-50 text-emerald-700',
+            content: <>You're at <strong>{pct}%</strong> of yesterday's earnings</>,
+          });
+    }
+    const best = (week || []).reduce<DayEarning | null>((b, d) => (d.amount > 0 && (!b || d.amount > b.amount) ? d : b), null);
+    if (best) {
+      slides.push({
+        key: 'best', emoji: '🏆', tint: 'bg-amber-50 text-amber-700',
+        content: <>Best day this week: <strong>{best.date.toLocaleDateString(undefined, { weekday: 'long' })}</strong> — {formatEarnings(best.amount)}</>,
+      });
+    }
     if (totalJobsCount !== null && totalJobsCount > 0) {
       slides.push({
         key: 'jobs', emoji: '🏍️', tint: 'bg-orange-50 text-orange-700',
@@ -390,7 +518,7 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
       });
     }
     return slides;
-  }, [totalJobsCount, demandInsights]);
+  }, [week, totalJobsCount, demandInsights]);
 
   const MODE_CYCLE = ['normal', 'vip', 'discount', 'return'] as const;
   const [cyclingMode, setCyclingMode] = useState(false);
@@ -432,341 +560,269 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
     }
   };
 
+  const switchTab = (id: TabType) => { setActiveTab(id); setShowMobileMenu(false); };
+
+  const activeTabMeta = TAB_META[activeTab];
+  const ActiveTabIcon = activeTabMeta.icon;
+  const greeting = greetingForHour(new Date().getHours());
+  const isEscort = riderStats?.operatorType === 'escort';
+  const rating = riderStats?.rating ?? 0;
+  // The week only loads once there's a vehicle row to query by; an account
+  // with none should read as an empty week, not sit on "…" forever.
+  const weekForCard = week ?? (riderStatsLoading || activeRiderId ? null : buildWeekEarnings([]));
+
+  // Requests card copy follows what's actually happening right now.
+  const requestsTitle = pendingCount > 0
+    ? `${pendingCount} new request${pendingCount === 1 ? '' : 's'} waiting`
+    : activeCount > 0
+      ? 'Job in progress'
+      : isEscort ? 'Escort Requests' : 'Ride Requests';
+  const requestsCaption = pendingCount > 0
+    ? 'Tap to review and accept'
+    : activeCount > 0
+      ? 'Tap to continue your current job'
+      : 'Accept real requests near you';
+
   return (
-    <div>
-      {/* Content without header - header is in UnifiedDashboard */}
-      
-      {/* Navigation Tabs - Desktop Only */}
-      <div className="hidden md:block bg-white border-b border-slate-200 sticky top-12 xs:top-14 sm:top-16 z-40">
-        <div className="container mx-auto px-1 xs:px-2 sm:px-4">
-          <div className="flex gap-0.5 overflow-x-auto scrollbar-hide">
-            <TabButton
-              active={activeTab === 'overview'}
-              onClick={() => setActiveTab('overview')}
-              icon={<TrendingUp size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-              label="Overview"
-            />
-            <TabButton
-              active={activeTab === 'mode'}
-              onClick={() => setActiveTab('mode')}
-              icon={<Settings size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-              label="Work Mode"
-            />
-            <TabButton
-              active={activeTab === 'locations'}
-              onClick={() => setActiveTab('locations')}
-              icon={<Map size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-              label="Areas"
-            />
-            <TabButton
-              active={activeTab === 'partnerships'}
-              onClick={() => setActiveTab('partnerships')}
-              icon={<ShoppingBag size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-              label="Markets"
-            />
-            <TabButton
-              active={activeTab === 'rewards'}
-              onClick={() => setActiveTab('rewards')}
-              icon={<Gift size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-              label="Rewards"
-            />
+    <div className="min-h-screen classic-page">
+      {/* Content without brand header - that lives in UnifiedDashboard. This
+          bar mirrors the customer dashboard's embedded navigation, sticking
+          just below it. */}
+      <header className="sticky top-12 z-40 shadow-md xs:top-14 sm:top-16">
+        {/* Desktop / tablet tab strip */}
+        <div className="hidden border-b border-[#c4a052]/25 bg-white dark:border-slate-700 sm:block">
+          <div className="container mx-auto px-2">
+            <nav className="scrollbar-hide flex gap-0.5 overflow-x-auto py-1">
+              {NAV_TABS.map(id => (
+                <button
+                  key={id}
+                  onClick={() => switchTab(id)}
+                  className={`flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium transition-all ${
+                    activeTab === id
+                      ? 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-orange-50 hover:text-orange-600'
+                  }`}
+                >
+                  <span>{TAB_META[id].emoji}</span>{TAB_META[id].label}
+                </button>
+              ))}
+            </nav>
           </div>
         </div>
-      </div>
 
-      {/* Mobile: Current Tab Indicator with Dropdown — RiderDashboard is
-          always rendered inside UnifiedDashboard, which already shows the
-          real profile avatar above this header, so this trigger is a plain
-          chevron rather than a second avatar-look button (a duplicate
-          account icon otherwise, per screenshot feedback on the customer
-          page's equivalent bar). */}
-      <div className="md:hidden bg-white border-b border-slate-200 sticky top-12 xs:top-14 z-40">
-        <button
-          type="button"
-          onClick={() => setShowMobileMenu(!showMobileMenu)}
-          className="w-full container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            {activeTab === 'overview' && <><TrendingUp size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Overview</span></>}
-            {activeTab === 'requests' && <><Bell size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Requests</span></>}
-            {activeTab === 'mode' && <><Settings size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Work Mode</span></>}
-            {activeTab === 'locations' && <><Map size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Areas</span></>}
-            {activeTab === 'partnerships' && <><ShoppingBag size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Markets</span></>}
-            {activeTab === 'rewards' && <><Gift size={16} className="text-orange-500" /><span className="text-sm font-medium text-slate-800">Rewards</span></>}
-          </div>
-          <ChevronDown size={16} className={`text-orange-500 transition-transform flex-shrink-0 ${showMobileMenu ? 'rotate-180' : ''}`} />
-        </button>
-
-        {/* Mobile Dropdown Menu */}
-        {showMobileMenu && (
-          <div className="absolute right-2 xs:right-3 top-14 bg-white rounded-lg shadow-xl py-2 min-w-[180px] xs:min-w-[200px] z-50">
-            {/* Navigation Items */}
-            <div className="py-1 border-b border-slate-200">
-              <button
-                onClick={() => {
-                  setActiveTab('overview');
-                  setShowMobileMenu(false);
-                }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'overview' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <TrendingUp size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Overview</span>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('mode');
-                  setShowMobileMenu(false);
-                }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'mode' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Settings size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Work Mode</span>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('locations');
-                  setShowMobileMenu(false);
-                }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'locations' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Map size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Areas</span>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('partnerships');
-                  setShowMobileMenu(false);
-                }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'partnerships' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <ShoppingBag size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Markets</span>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('deliveries');
-                  setShowMobileMenu(false);
-                }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'deliveries' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Package size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Deliveries</span>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('rewards');
-                  setShowMobileMenu(false);
-                }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'rewards' ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'
-                }`}
-              >
-                <Gift size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Rewards</span>
-              </button>
+        {/* Phone section bar — current section in serif + the one menu
+            trigger (opens the bottom sheet at the end of this component). */}
+        <div className="border-b border-[#c4a052]/25 bg-white dark:border-slate-700 sm:hidden">
+          <div className="flex h-12 items-center justify-between gap-3 px-4">
+            <div className="flex min-w-0 items-center gap-2">
+              <ActiveTabIcon size={17} className="flex-shrink-0 text-orange-500" />
+              <h1 className="truncate font-classic-display text-[18px] font-semibold leading-none text-slate-800">
+                {activeTabMeta.label}
+              </h1>
             </div>
-
-            {/* Profile */}
             <button
-              onClick={() => {
-                setShowMobileMenu(false);
-                setShowProfileModal(true);
-              }}
-              className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+              type="button"
+              onClick={() => setShowMobileMenu(true)}
+              aria-label="Open menu"
+              aria-expanded={showMobileMenu}
+              className="flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full border border-[#c4a052]/40 bg-[#faf8f3] px-3.5 text-xs font-semibold text-slate-700 shadow-sm transition-transform active:scale-95 dark:border-slate-600 dark:bg-slate-800"
             >
-              <User size={14} className="xs:w-4 xs:h-4" />
-              <span className="text-xs xs:text-sm font-medium">My Profile</span>
+              <LayoutGrid size={14} className="text-orange-500" /> Menu
             </button>
           </div>
-        )}
-      </div>
+        </div>
+      </header>
 
-      {/* Main Content */}
-      <div className="container mx-auto px-2 xs:px-3 sm:px-4 py-3 xs:py-4 sm:py-8">
+      {/* Generous bottom padding so the floating chat button never sits on
+          top of the last card when scrolled to the end. */}
+      <div className="container mx-auto px-4 pb-28 pt-5">
         {activeTab === 'overview' && (
-          <div className="space-y-4 sm:space-y-6">
-            {/* Greeting — this rider's own demand pattern: total jobs, the
-                hour customers request them most, and where those requests
-                mostly come from. Live via realtime on their own mbg_rides
-                rows (useRiderOwnRideInsights). */}
+          <div className="space-y-6">
+            {/* Greeting — live insights from this rider's own work: how today
+                compares with yesterday, the best day of the week, total jobs,
+                the hour requests come in most and where from. */}
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base xs:text-lg font-bold text-slate-800">Hi, {riderName} 👋</h2>
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="min-w-0 font-classic-display leading-tight">
+                  <span className="block text-[18px] font-medium text-slate-500">{greeting},</span>
+                  <span className="block break-words text-[30px] font-bold tracking-tight text-slate-900">{riderName}</span>
+                </h2>
                 {insightSlides.length > 0 && (
-                  <span className="flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" /> Live
+                  <span className="mt-1.5 flex flex-shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-100">
+                    <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> Live
                   </span>
                 )}
               </div>
-              <p className="text-xs xs:text-sm text-slate-500">Here's what's happening with your account today.</p>
+              <p className="mt-1 text-sm text-slate-500">Here's how your day is going.</p>
+              <div className="landing-classic-divider mt-4" />
               {insightSlides.length > 0 && (
-                <div className="mt-2 max-w-sm">
+                <div className="mt-3">
                   <InsightSlider slides={insightSlides} />
                 </div>
               )}
             </div>
 
-            {/* Registered role — confirms which vehicle type this account
-                was approved for, since the rest of this dashboard doesn't
-                otherwise distinguish car/van/truck from a plain boda rider.
-                When someone holds more than one vehicle (multi-vehicle —
-                see ADD_MULTI_VEHICLE_SUPPORT.sql), this becomes a switcher
-                instead of a passive label. */}
-            {riderStats?.vehicleType && (() => {
-              const meta = VEHICLE_TYPE_META[riderStats.vehicleType] || { label: riderStats.vehicleType, icon: Bike, use: '' };
-              const Icon = meta.icon;
+            {/* Working time — the one switch that matters — with the vehicle
+                this account was approved for (or a switcher when they hold
+                more than one; see ADD_MULTI_VEHICLE_SUPPORT.sql) tucked
+                underneath. */}
+            <WorkingTimeToggle userId={user.id} vehicleType={activeVehicleType}>
+              {riderStats?.vehicleType && (() => {
+                const meta = VEHICLE_TYPE_META[riderStats.vehicleType] || { label: riderStats.vehicleType, icon: Bike, use: '' };
+                const Icon = meta.icon;
+                const detail = `${meta.use}${riderStats.operatorType === 'cargo' ? ' · Cargo operator' : ''}`;
 
-              if (allVehicles.length <= 1) {
-                return (
-                  <div className="bg-white rounded-lg xs:rounded-xl shadow-lg p-3 xs:p-4 flex items-center gap-3">
-                    <div className="p-2 bg-orange-100 rounded-lg text-orange-600"><Icon size={20} /></div>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">You're driving as: {meta.label}</p>
-                      <p className="text-xs text-slate-500">{meta.use}{riderStats.operatorType === 'cargo' ? ' · Cargo operator' : ''}</p>
+                if (allVehicles.length <= 1) {
+                  return (
+                    <div className="flex items-center gap-3">
+                      <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-white/10 text-[#e6c980] ring-1 ring-[#c4a052]/50">
+                        <Icon size={18} />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold">Driving as {meta.label}</p>
+                        <p className="text-xs text-white/60">{detail}</p>
+                      </div>
                     </div>
+                  );
+                }
+
+                return (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]">Driving as</p>
+                    <div className="mt-2 grid gap-2" style={{ gridTemplateColumns: `repeat(${allVehicles.length}, minmax(0, 1fr))` }}>
+                      {allVehicles.map((v) => {
+                        const vMeta = VEHICLE_TYPE_META[v.vehicleType] || { label: v.vehicleType, icon: Bike, use: '' };
+                        const VIcon = vMeta.icon;
+                        const isActive = v.vehicleType === activeVehicleType;
+                        return (
+                          <button
+                            key={v.vehicleType}
+                            type="button"
+                            onClick={() => switchVehicle(v.vehicleType)}
+                            disabled={switchingVehicle}
+                            aria-pressed={isActive}
+                            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 ${
+                              isActive
+                                ? 'bg-gradient-to-r from-orange-500 to-amber-400 text-white shadow-md shadow-orange-950/30'
+                                : 'bg-white/10 text-white/70 ring-1 ring-inset ring-white/15'
+                            }`}
+                          >
+                            <VIcon size={14} /> {vMeta.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-2 text-xs text-white/60">{detail}</p>
                   </div>
                 );
-              }
+              })()}
+            </WorkingTimeToggle>
 
-              return (
-                <div className="bg-white rounded-lg xs:rounded-xl shadow-lg p-3 xs:p-4">
-                  <p className="text-sm font-semibold text-slate-800 mb-2">Driving as:</p>
-                  <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${allVehicles.length}, minmax(0, 1fr))` }}>
-                    {allVehicles.map((v) => {
-                      const vMeta = VEHICLE_TYPE_META[v.vehicleType] || { label: v.vehicleType, icon: Bike, use: '' };
-                      const VIcon = vMeta.icon;
-                      const isActive = v.vehicleType === activeVehicleType;
-                      return (
-                        <button
-                          key={v.vehicleType}
-                          onClick={() => switchVehicle(v.vehicleType)}
-                          disabled={switchingVehicle}
-                          className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs sm:text-sm font-semibold border-2 transition-all disabled:opacity-50 ${
-                            isActive ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
-                          }`}
-                        >
-                          <VIcon size={14} /> {vMeta.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-2">{meta.use}{riderStats.operatorType === 'cargo' ? ' · Cargo operator' : ''}</p>
-                </div>
-              );
-            })()}
-
-            {/* Working Time — online/offline slider */}
-            <WorkingTimeToggle userId={user.id} vehicleType={activeVehicleType} />
-
-            {/* Ride Requests — was its own nav tab; moved here as a dashboard
-                card so it doesn't take up permanent tab space, but stays one
-                tap away from Overview. */}
+            {/* Requests — was its own nav tab; lives here as a card so it
+                doesn't take permanent tab space but stays one tap away. The
+                copy and the badge follow what's actually waiting right now. */}
             <button
+              type="button"
               onClick={() => setActiveTab('requests')}
-              className="w-full rounded-lg xs:rounded-xl shadow-md p-3 xs:p-4 sm:p-6 flex items-center justify-between gap-3 text-left bg-gradient-to-r from-orange-500 to-yellow-500 hover:brightness-105 transition-all"
+              className={`classic-card flex w-full items-center gap-4 p-4 text-left transition-all hover:border-orange-300 active:scale-[0.99] ${
+                pendingCount > 0 ? '!border-orange-400 ring-2 ring-orange-200/70' : ''
+              }`}
             >
-              <span className="flex items-center gap-3 min-w-0">
-                <span className="p-2 bg-white/20 rounded-lg text-white flex-shrink-0"><Bell size={20} /></span>
-                <span className="min-w-0 text-left">
-                  <span className="block font-bold text-xs xs:text-sm sm:text-lg text-white">Ride Requests</span>
-                  <span className="block text-[9px] xs:text-[11px] sm:text-sm text-white/80 truncate">Accept real requests near you</span>
-                </span>
+              <span className="relative grid h-12 w-12 flex-shrink-0 place-items-center rounded-full bg-orange-50 ring-1 ring-inset ring-orange-100">
+                <Bell size={21} className="text-orange-500" />
+                {pendingCount > 0 && (
+                  <span className="absolute -right-1 -top-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-800">
+                    {pendingCount}
+                  </span>
+                )}
               </span>
-              <ChevronDown size={18} className="text-white -rotate-90 flex-shrink-0" />
+              <span className="min-w-0 flex-1">
+                <span className="block font-classic-display text-lg font-semibold leading-tight text-slate-800">{requestsTitle}</span>
+                <span className="mt-0.5 block text-xs text-slate-500">{requestsCaption}</span>
+              </span>
+              <span className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-orange-500 to-amber-400 text-white shadow-md shadow-orange-500/30">
+                <ArrowRight size={15} />
+              </span>
             </button>
 
-            {/* Stats Cards — live from Supabase (mbg_riders / mbg_rides) */}
-            <div className="grid grid-cols-2 xs:gap-3 gap-2 sm:grid-cols-5 sm:gap-6">
-              <StatCard
-                title="Today's Earnings"
-                value={riderStatsLoading ? '…' : formatEarnings(riderStats?.earningsTodayUGX || 0)}
-                icon={<DollarSign size={20} className="sm:w-6 sm:h-6" />}
-                color="green"
-              />
-              <StatCard
-                title="Rides Done"
-                value={riderStatsLoading ? '…' : String(riderStats?.ridesDone ?? 0)}
-                icon={<Bike size={20} className="sm:w-6 sm:h-6" />}
-                color="blue"
-              />
-              <StatCard
-                title="Rating"
-                value={riderStatsLoading ? '…' : `${(riderStats?.rating ?? 0).toFixed(1)} ⭐`}
-                icon={<TrendingUp size={20} className="sm:w-6 sm:h-6" />}
-                color="yellow"
-              />
-              <StatCard
-                title="Mode"
-                value={riderStatsLoading || cyclingMode ? '…' : (riderStats?.mode || 'normal').replace(/^\w/, c => c.toUpperCase())}
-                icon={<Settings size={20} className="sm:w-6 sm:h-6" />}
-                color="purple"
+            {/* Earnings — today as the headline, the week as the shape of it */}
+            <RiderEarningsCard week={weekForCard} loading={weekForCard === null} />
+
+            {/* Standing — rides done, rating, and the work mode (tap to cycle) */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="classic-card p-3.5">
+                <span className="grid h-8 w-8 place-items-center rounded-full bg-sky-50 text-sky-600 ring-1 ring-inset ring-black/5">
+                  <Bike size={15} />
+                </span>
+                <p className="classic-eyebrow mt-2.5 !tracking-[0.14em]">Rides done</p>
+                <p className="mt-1 font-classic-display text-[22px] font-bold leading-none tabular-nums text-slate-900">
+                  {riderStatsLoading ? '…' : (riderStats?.ridesDone ?? 0).toLocaleString()}
+                </p>
+              </div>
+              <div className="classic-card p-3.5">
+                <span className="grid h-8 w-8 place-items-center rounded-full bg-amber-50 text-amber-600 ring-1 ring-inset ring-black/5">
+                  <Star size={15} />
+                </span>
+                <p className="classic-eyebrow mt-2.5 !tracking-[0.14em]">Rating</p>
+                <p className="mt-1 font-classic-display text-[22px] font-bold leading-none tabular-nums text-slate-900">
+                  {riderStatsLoading ? '…' : rating > 0 ? rating.toFixed(1) : '—'}
+                </p>
+                <div className="mt-1.5">
+                  {rating > 0 ? <RatingStars rating={rating} /> : <span className="text-[10px] text-slate-400">No ratings yet</span>}
+                </div>
+              </div>
+              <button
+                type="button"
                 onClick={cycleMode}
-              />
-              <RewardsPointsCard userId={user?.id} onOpen={() => setActiveTab('rewards')} />
+                disabled={cyclingMode || !activeVehicleType}
+                className="classic-card p-3.5 text-left transition-all hover:border-orange-300 active:scale-[0.97] disabled:opacity-60"
+              >
+                <span className="grid h-8 w-8 place-items-center rounded-full bg-violet-50 text-violet-600 ring-1 ring-inset ring-black/5">
+                  <Settings size={15} />
+                </span>
+                <p className="classic-eyebrow mt-2.5 !tracking-[0.14em]">Mode</p>
+                <p className="mt-1 truncate font-classic-display text-[19px] font-bold leading-none text-slate-900">
+                  {riderStatsLoading || cyclingMode ? '…' : (riderStats?.mode || 'normal').replace(/^\w/, c => c.toUpperCase())}
+                </p>
+                <p className="mt-1.5 text-[10px] text-slate-400">Tap to change</p>
+              </button>
+            </div>
+
+            {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
+            <div className="grid grid-cols-2 gap-3">
+              <IcanCoinCard variant="premium" userId={user?.id} onGoToWallet={onGoToWallet} />
+              <RewardsPointsCard variant="premium" userId={user?.id} onOpen={() => setActiveTab('rewards')} />
             </div>
 
             {/* ICAN Wallet Earnings */}
             <RiderICANEarnings user={user} />
 
-            {/* Quick Actions — collapsible, compact on small phones */}
-            <div className="bg-white rounded-lg xs:rounded-xl shadow-lg overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setQuickStartOpen(o => !o)}
-                className="w-full flex items-center justify-between p-3 xs:p-4 sm:p-6"
-              >
-                <h3 className="text-sm xs:text-base sm:text-xl font-bold text-slate-800">Quick Start</h3>
-                <ChevronDown
-                  size={18}
-                  className={`text-slate-400 transition-transform xs:w-5 xs:h-5 ${quickStartOpen ? 'rotate-180' : ''}`}
-                />
-              </button>
-              {quickStartOpen && (
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 xs:gap-3 sm:gap-4 px-3 xs:px-4 sm:px-6 pb-3 xs:pb-4 sm:pb-6">
+            {/* Quick actions */}
+            <div className="space-y-3">
+              <SectionHeading>Quick actions</SectionHeading>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                {([
+                  { label: 'Work Mode',  desc: 'VIP, Normal, Discount or Return', icon: Settings,    tile: 'bg-violet-50 text-violet-600',   tab: 'mode' },
+                  { label: 'Areas',      desc: 'Mark places you know well',       icon: MapIcon,     tile: 'bg-sky-50 text-sky-600',         tab: 'locations' },
+                  { label: 'Markets',    desc: 'Work for businesses',             icon: ShoppingBag, tile: 'bg-orange-50 text-orange-600',   tab: 'partnerships' },
+                  { label: 'Deliveries', desc: 'Supermarket delivery jobs',       icon: Package,     tile: 'bg-emerald-50 text-emerald-600', tab: 'deliveries' },
+                ] as { label: string; desc: string; icon: LucideIcon; tile: string; tab: TabType }[]).map(c => (
                   <button
-                    onClick={() => setActiveTab('mode')}
-                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-lg xs:rounded-xl border-2 border-purple-200 hover:border-purple-400 transition-all text-left"
+                    key={c.tab}
+                    type="button"
+                    onClick={() => setActiveTab(c.tab)}
+                    className="classic-card flex min-h-[128px] flex-col justify-between gap-3 p-4 text-left transition-all hover:border-orange-300 active:scale-[0.98]"
                   >
-                    <Settings className="text-purple-500 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
-                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Set Work Mode</h4>
-                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">VIP, Normal, Discount, or Return</p>
+                    <span className={`grid h-11 w-11 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${c.tile}`}>
+                      <c.icon size={20} />
+                    </span>
+                    <span>
+                      <span className="block text-[15px] font-semibold leading-tight text-slate-800">{c.label}</span>
+                      <span className="mt-1 block text-xs leading-snug text-slate-500">{c.desc}</span>
+                    </span>
                   </button>
-                  <button
-                    onClick={() => setActiveTab('locations')}
-                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg xs:rounded-xl border-2 border-blue-200 hover:border-blue-400 transition-all text-left"
-                  >
-                    <Map className="text-blue-500 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
-                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Manage Areas</h4>
-                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">Mark locations you know well</p>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('partnerships')}
-                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-orange-50 to-orange-100 rounded-lg xs:rounded-xl border-2 border-orange-200 hover:border-orange-400 transition-all text-left"
-                  >
-                    <ShoppingBag className="text-orange-500 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
-                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Partnerships</h4>
-                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">Work for supermarkets</p>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('rewards')}
-                    className="p-2.5 xs:p-3 sm:p-6 bg-gradient-to-br from-amber-50 to-amber-100 rounded-lg xs:rounded-xl border-2 border-amber-200 hover:border-amber-400 transition-all text-left"
-                  >
-                    <Gift className="text-amber-600 mb-1 xs:mb-1.5 sm:mb-3" size={18} />
-                    <h4 className="font-bold text-[11px] xs:text-xs sm:text-base text-slate-800 mb-0.5 sm:mb-1 leading-tight">Rewards</h4>
-                    <p className="hidden xs:block text-[10px] sm:text-xs text-slate-600 leading-tight">Earn points, redeem gear</p>
-                  </button>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -779,14 +835,14 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
             component collapses its own visible list down to nothing (still
             showing the ringing overlay if a request comes in) until
             activeTab === 'requests'. */}
-        {riderStats?.operatorType === 'escort' ? (
+        {isEscort ? (
           <div className="space-y-4">
             {/* Escorts with their own vehicle can be booked directly as
                 the ride (mbg_request_security's self-transport path,
                 which assigns them via mbg_rides like any other rider) —
                 RiderEscortRequests alone only watches the add-on table
                 (mbg_ride_escort_requests) and would miss those offers. */}
-            {riderStats.escortHasOwnTransport && (
+            {riderStats?.escortHasOwnTransport && (
               <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} collapsed={activeTab !== 'requests'} />
             )}
             <RiderEscortRequests riderId={user.id} collapsed={activeTab !== 'requests'} />
@@ -815,9 +871,84 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
         <SupermarketDeliveryPool user={user} collapsed={activeTab !== 'deliveries'} />
 
         {activeTab === 'rewards' && (
-          <RewardsHub user={user} role="rider" />
+          <RewardsHub user={user} role="rider" onGoToWallet={onGoToWallet} />
         )}
       </div>
+
+      {/* Phone menu — bottom sheet. Rendered outside <header> so its fixed
+          positioning isn't affected by the sticky header's stacking context.
+          z-[1000] clears the floating chat button (z-[999]). */}
+      {showMobileMenu && (
+        <div className="fixed inset-0 z-[1000] sm:hidden" role="dialog" aria-modal="true" aria-label="Menu">
+          <button
+            type="button"
+            aria-label="Close menu"
+            onClick={() => setShowMobileMenu(false)}
+            className="animate-fade-soft absolute inset-0 h-full w-full cursor-default bg-black/50"
+          />
+          <div className="animate-sheet-up safe-bottom absolute inset-x-0 bottom-0 max-h-[88vh] overflow-y-auto rounded-t-[28px] bg-white shadow-2xl">
+            <div className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-slate-300" />
+
+            <div className="flex items-center gap-3 px-5 pb-4 pt-4">
+              <span className="grid h-12 w-12 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-orange-400 to-amber-500 font-classic-display text-xl font-bold text-white ring-2 ring-[#e6c980] ring-offset-2 ring-offset-white dark:ring-offset-slate-800">
+                {(user?.email?.[0] || 'U').toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-classic-display text-lg font-semibold leading-tight text-slate-800">{riderName}</p>
+                <p className="truncate text-xs text-slate-500">{user?.email}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMobileMenu(false)}
+                aria-label="Close menu"
+                className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-slate-100 text-slate-500 transition-transform active:scale-95"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="landing-classic-divider mx-5" />
+
+            <div className="grid grid-cols-3 gap-2.5 px-4 pb-1 pt-4">
+              {NAV_TABS.map(id => {
+                const active = activeTab === id;
+                const Icon = TAB_META[id].icon;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => switchTab(id)}
+                    aria-current={active ? 'page' : undefined}
+                    className={`flex flex-col items-center gap-2 rounded-2xl px-2 py-3.5 text-center transition-all active:scale-95 ${
+                      active ? 'bg-orange-50 ring-1 ring-inset ring-orange-300' : 'bg-slate-50 ring-1 ring-inset ring-slate-100'
+                    }`}
+                  >
+                    <span className={`grid h-11 w-11 place-items-center rounded-full ${
+                      active
+                        ? 'bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/30'
+                        : 'bg-white text-orange-600 shadow-sm ring-1 ring-inset ring-slate-100'
+                    }`}>
+                      <Icon size={20} />
+                    </span>
+                    <span className={`text-[11px] leading-tight ${active ? 'font-bold text-orange-600' : 'font-medium text-slate-700'}`}>
+                      {TAB_META[id].label}
+                    </span>
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => { setShowMobileMenu(false); setShowProfileModal(true); }}
+                className="flex flex-col items-center gap-2 rounded-2xl bg-slate-50 px-2 py-3.5 text-center ring-1 ring-inset ring-slate-100 transition-all active:scale-95"
+              >
+                <span className="grid h-11 w-11 place-items-center rounded-full bg-white text-orange-600 shadow-sm ring-1 ring-inset ring-slate-100">
+                  <User size={20} />
+                </span>
+                <span className="text-[11px] font-medium leading-tight text-slate-700">My Profile</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Profile Modal */}
       <ProfileModal
@@ -830,65 +961,5 @@ export default function RiderDashboard({ user, onSignOut }: RiderDashboardProps)
         }}
       />
     </div>
-  );
-}
-
-function TabButton({ 
-  active, 
-  onClick, 
-  icon, 
-  label 
-}: { 
-  active: boolean; 
-  onClick: () => void; 
-  icon: React.ReactNode; 
-  label: string; 
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1 sm:gap-2 px-2 xs:px-2.5 sm:px-4 py-1.5 xs:py-2 sm:py-3 font-medium transition-all relative whitespace-nowrap text-[10px] xs:text-xs sm:text-sm ${
-        active
-          ? 'text-orange-500'
-          : 'text-slate-600 hover:text-slate-800'
-      }`}
-    >
-      {icon}
-      <span className="hidden xs:inline">{label}</span>
-      {active && (
-        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
-      )}
-    </button>
-  );
-}
-
-function StatCard({
-  title,
-  value,
-  icon,
-  color,
-  onClick,
-}: {
-  title: string;
-  value: string;
-  icon: React.ReactNode;
-  color: string;
-  onClick?: () => void;
-}) {
-  const Wrapper = onClick ? 'button' : 'div';
-  return (
-    <Wrapper
-      type={onClick ? 'button' : undefined}
-      onClick={onClick}
-      className={`bg-white rounded-lg xs:rounded-xl shadow-md p-2.5 xs:p-3 sm:p-6 text-left w-full ${onClick ? 'hover:shadow-lg hover:brightness-95 active:scale-[0.98] transition-all cursor-pointer' : ''}`}
-    >
-      <div className="flex items-center justify-between mb-1.5 xs:mb-2 sm:mb-3">
-        <div className={`w-7 h-7 xs:w-8 xs:h-8 sm:w-12 sm:h-12 rounded-full bg-${color}-100 flex items-center justify-center text-${color}-600`}>
-          {icon}
-        </div>
-      </div>
-      <h4 className="text-[9px] xs:text-[10px] sm:text-sm text-slate-600 mb-0.5 truncate leading-tight">{title}</h4>
-      <p className="text-base xs:text-lg sm:text-2xl font-bold text-slate-800 truncate">{value}</p>
-    </Wrapper>
   );
 }

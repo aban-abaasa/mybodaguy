@@ -1,8 +1,9 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
-  Bike, Clock, Star, LogOut, Package, ShoppingBag, History,
-  ShoppingCart, LayoutDashboard, Gift, User, Wallet,
-  X, CheckCircle, RefreshCw, ChevronDown,
+  Bike, Clock, LogOut, Package, History, Gift, User, Wallet,
+  X, CheckCircle, ChevronDown, ArrowRight, Home, ClipboardList, MapPin,
+  CalendarDays, Truck, Building2, LayoutGrid, ScanLine,
+  type LucideIcon,
 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 import EnhancedRideRequest from '../components/EnhancedRideRequest';
@@ -20,6 +21,7 @@ import JourneyTracker from '../components/JourneyTracker';
 import RefundableDeliveries from '../components/RefundableDeliveries';
 import { computeOrderInsights, shortenLocation } from '../utils/orderInsights';
 import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
+import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { ThemeToggle } from '../../components/ThemeToggle';
 
 interface CustomerDashboardProps {
@@ -48,18 +50,20 @@ interface CustomerDashboardProps {
 // rather than its own tab.
 type TabType = 'overview' | 'book-ride' | 'shop' | 'book-service' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'become-operator' | 'manage-business' | 'profile';
 
-const ALL_TABS = [
-  { id: 'overview'  as TabType, label: 'Overview',  emoji: '🏠' },
-  { id: 'book-ride' as TabType, label: 'Book a Ride', emoji: '🏍️' },
-  { id: 'shop'      as TabType, label: 'Shop',      emoji: '🛒' },
-  { id: 'book-service' as TabType, label: 'Book', emoji: '📅' },
-  { id: 'delivery'  as TabType, label: 'Delivery',  emoji: '📦' },
-  { id: 'orders'    as TabType, label: 'Orders',    emoji: '📋' },
-  { id: 'areas'     as TabType, label: 'My Areas',  emoji: '📍' },
-  { id: 'rewards'   as TabType, label: 'Rewards',   emoji: '🎁' },
-  { id: 'become-operator' as TabType, label: 'Become a Driver', emoji: '🚚' },
-  { id: 'manage-business' as TabType, label: 'Manage Your Business', emoji: '🏢' },
-  { id: 'profile'   as TabType, label: 'Profile',   emoji: '👤' },
+// emoji drives the desktop tab strip; icon drives the phone header + menu
+// sheet, where crisp line icons read as more refined than mixed-font emoji.
+const ALL_TABS: { id: TabType; label: string; emoji: string; icon: LucideIcon }[] = [
+  { id: 'overview',  label: 'Overview',  emoji: '🏠', icon: Home },
+  { id: 'book-ride', label: 'Book a Ride', emoji: '🏍️', icon: Bike },
+  { id: 'shop',      label: 'Shop',      emoji: '🛒', icon: ScanLine },
+  { id: 'book-service', label: 'Book', emoji: '📅', icon: CalendarDays },
+  { id: 'delivery',  label: 'Delivery',  emoji: '📦', icon: Package },
+  { id: 'orders',    label: 'Orders',    emoji: '📋', icon: ClipboardList },
+  { id: 'areas',     label: 'My Areas',  emoji: '📍', icon: MapPin },
+  { id: 'rewards',   label: 'Rewards',   emoji: '🎁', icon: Gift },
+  { id: 'become-operator', label: 'Become a Driver', emoji: '🚚', icon: Truck },
+  { id: 'manage-business', label: 'Manage Your Business', emoji: '🏢', icon: Building2 },
+  { id: 'profile',   label: 'Profile',   emoji: '👤', icon: User },
 ];
 
 // ── Ride/delivery row — collapsed to one line, expands in place on click ──────
@@ -82,29 +86,33 @@ function RideListItem({
   serviceIcon?: React.ReactNode;
 }) {
   return (
-    <div className="border-b border-slate-50 last:border-0">
+    <div className="border-b border-slate-100 last:border-0">
       <button
         type="button"
         onClick={onToggle}
-        className="w-full flex items-center justify-between gap-2 py-2 px-2 -mx-2 rounded-lg hover:bg-slate-50 transition-colors text-left"
+        aria-expanded={expanded}
+        className="w-full flex items-center gap-3 py-3 px-2 -mx-2 rounded-xl hover:bg-slate-50 active:bg-slate-50 transition-colors text-left"
       >
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-slate-700 truncate flex items-center gap-1.5">
-            {serviceIcon}{ride.pickup_location} → {ride.dropoff_location}
-          </p>
-          <p className="text-xs text-slate-400">{new Date(ride.created_at).toLocaleDateString()}</p>
+        <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-orange-50 ring-1 ring-inset ring-orange-100">
+          {serviceIcon ?? <Bike size={16} className="text-orange-500" />}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-slate-800 line-clamp-2 break-words">{ride.pickup_location}</p>
+          <p className="text-xs text-slate-400 line-clamp-2 break-words">to {ride.dropoff_location}</p>
+          <div className="mt-1.5 flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-semibold capitalize ${
+              contact ? 'bg-emerald-100 text-emerald-700' : statusColor(ride.status)
+            }`}>
+              <span className={`h-1.5 w-1.5 rounded-full bg-current ${contact ? 'animate-pulse' : ''}`} />
+              {contact ? 'Active' : String(ride.status).replace(/_/g, ' ')}
+            </span>
+            <span className="text-[11px] text-slate-400">{new Date(ride.created_at).toLocaleDateString()}</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-            contact ? 'bg-emerald-100 text-emerald-700 animate-pulse' : statusColor(ride.status)
-          }`}>
-            {contact ? '🟢 Active' : ride.status}
-          </span>
-          <ChevronDown size={14} className={`text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-        </div>
+        <ChevronDown size={16} className={`flex-shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </button>
       {expanded && (
-        <div className="pb-3 px-2 -mx-2">
+        <div className="mb-3 rounded-xl bg-slate-50 px-3 py-2">
           <div className="flex items-center justify-between text-sm py-1">
             <span className="text-slate-500">Fare</span>
             <span className="font-bold text-slate-800">UGX {(ride.fare || 0).toLocaleString()}</span>
@@ -119,7 +127,7 @@ function RideListItem({
             <>
               <button
                 onClick={onOpenTracking}
-                className="w-full mt-1 mb-2 py-1.5 text-xs font-semibold text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-50 transition-colors"
+                className="w-full mt-1 mb-2 py-2 text-xs font-semibold text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-50 transition-colors"
               >
                 View live tracking →
               </button>
@@ -180,16 +188,20 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   // Best-stocked shop right now — the same "live availability" idea as
   // busiestStage, but for goods instead of riders.
   const [bestStockedStore, setBestStockedStore] = useState<{ store_name: string; location: string | null; available_stock: number } | null>(null);
-  const menuRef                         = useRef<HTMLDivElement>(null);
 
-  // Close mobile menu on outside click
+  // The phone menu is a bottom sheet: Escape closes it, and the page behind
+  // it stops scrolling while it's up (tapping the scrim closes it too).
   useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMobileMenu(false);
+    if (!mobileMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileMenu(false); };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener('keydown', onKey);
     };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  }, [mobileMenuOpen]);
 
   // Fetch ride history: mbg_users → mbg_customers → mbg_rides
   useEffect(() => {
@@ -364,43 +376,52 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
 
   const switchTab = (id: TabType) => { setActiveTab(id); setMobileMenu(false); };
 
+  const activeTabMeta = ALL_TABS.find(t => t.id === activeTab) ?? ALL_TABS[0];
+  const ActiveTabIcon = activeTabMeta.icon;
+  const greeting = greetingForHour(new Date().getHours());
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-orange-50 to-yellow-50">
+    <div className="min-h-screen classic-page">
 
       {/* ── Sticky 2-row Header ── */}
       {/* When embedded, stick below UnifiedDashboard's own header instead of at top-0 (matches ChairpersonDashboard's same offset) */}
       <header className={`sticky z-40 shadow-md ${embedded ? 'top-12 xs:top-14 sm:top-16' : 'top-0'}`}>
 
-        {/* Row 1 — brand + user + mobile 3-dot (skipped when embedded — UnifiedDashboard already shows this) */}
+        {/* Row 1 — brand + user (skipped when embedded — UnifiedDashboard already shows this).
+            safe-top keeps the brand clear of the notch / status bar when installed as a PWA
+            (index.html sets a black-translucent status bar). */}
         {!embedded && (
-          <div className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white">
+          <div className="safe-top bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 text-white">
             <div className="container mx-auto px-4">
-              <div className="flex items-center justify-between h-14">
-                <div className="flex items-center gap-2">
-                  <Bike size={22} />
-                  <div>
-                    <p className="font-bold leading-none text-sm">BodaGoEra</p>
-                    <p className="text-[10px] opacity-75">Your Trusted Partner</p>
+              <div className="flex items-center justify-between h-16">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-white/15 ring-1 ring-[#f5dfa0]/70 shadow-inner">
+                    <Bike size={20} />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-classic-display text-[20px] font-bold leading-none tracking-tight">BodaGoEra</p>
+                    <p className="mt-1.5 whitespace-nowrap text-[8px] font-medium uppercase leading-none tracking-[0.14em] text-white/80 min-[360px]:text-[9px] min-[360px]:tracking-[0.24em]">Your Trusted Partner</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-shrink-0">
                   <span className="hidden sm:block text-xs opacity-85 bg-white/20 px-2 py-1 rounded-full truncate max-w-[160px]">
                     {user?.email}
                   </span>
-                  <ThemeToggle />
-                  <button onClick={onSignOut}
-                    className="flex items-center gap-1 px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-lg text-sm transition-colors">
-                    <LogOut size={14} />
-                    <span className="hidden sm:inline text-sm">Sign Out</span>
+                  <ThemeToggle className="!h-10 !w-10 !rounded-full !p-0 !bg-white/15 hover:!bg-white/25 !text-white ring-1 ring-white/25" />
+                  <button onClick={onSignOut} aria-label="Sign out"
+                    className="flex h-10 items-center justify-center gap-1.5 rounded-full bg-white/15 px-0 w-10 sm:w-auto sm:px-4 ring-1 ring-white/25 hover:bg-white/25 text-sm font-medium transition-colors">
+                    <LogOut size={16} />
+                    <span className="hidden sm:inline">Sign Out</span>
                   </button>
                 </div>
               </div>
             </div>
+            <div className="h-px bg-gradient-to-r from-transparent via-[#f5dfa0] to-transparent" />
           </div>
         )}
 
         {/* Row 2 — nav tabs (hidden on mobile, shown via 3-dot) */}
-        <div className="hidden sm:block bg-white border-b border-orange-100">
+        <div className="hidden sm:block bg-white border-b border-[#c4a052]/25 dark:border-slate-700">
           <div className="container mx-auto px-2">
             <nav className="flex overflow-x-auto scrollbar-hide gap-0.5 py-1">
               {ALL_TABS.map(tab => (
@@ -421,78 +442,54 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
           </div>
         </div>
 
-        {/* Mobile active-tab indicator bar — the one and only mobile menu trigger.
-            When embedded, UnifiedDashboard already shows the real profile
-            avatar above this header, so this row uses a plain chevron
-            instead of a second avatar-look button that would read as a
-            duplicate account icon (see screenshot feedback). Standalone
-            (not embedded — no other icon on the page), the trigger doubles
-            as the profile icon itself. */}
-        <div className="sm:hidden bg-white border-b border-orange-100 relative" ref={menuRef}>
-          {embedded ? (
-            <button type="button" onClick={() => setMobileMenu(o => !o)}
-              className="w-full px-4 py-2 flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-700">
-                {ALL_TABS.find(t => t.id === activeTab)?.emoji}{' '}
-                {ALL_TABS.find(t => t.id === activeTab)?.label}
-              </span>
-              <ChevronDown size={16} className={`text-orange-500 transition-transform flex-shrink-0 ${mobileMenuOpen ? 'rotate-180' : ''}`} />
+        {/* Mobile section bar — current section in serif + the one menu
+            trigger (opens the bottom sheet rendered at the end of this
+            component). Same bar whether standalone or embedded in
+            UnifiedDashboard, which already shows its own avatar above. */}
+        <div className="sm:hidden bg-white border-b border-[#c4a052]/25 dark:border-slate-700">
+          <div className="px-4 h-12 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <ActiveTabIcon size={17} className="flex-shrink-0 text-orange-500" />
+              <h1 className="font-classic-display text-[18px] font-semibold leading-none text-slate-800 truncate">
+                {activeTabMeta.label}
+              </h1>
+            </div>
+            <button type="button" onClick={() => setMobileMenu(true)}
+              aria-label="Open menu" aria-expanded={mobileMenuOpen}
+              className="flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full border border-[#c4a052]/40 bg-[#faf8f3] px-3.5 text-xs font-semibold text-slate-700 shadow-sm active:scale-95 transition-transform dark:border-slate-600 dark:bg-slate-800">
+              <LayoutGrid size={14} className="text-orange-500" /> Menu
             </button>
-          ) : (
-            <div className="px-4 py-2 flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-700">
-                {ALL_TABS.find(t => t.id === activeTab)?.emoji}{' '}
-                {ALL_TABS.find(t => t.id === activeTab)?.label}
-              </span>
-              <button onClick={() => setMobileMenu(o => !o)}
-                aria-label="Open menu"
-                className="relative flex items-center justify-center w-8 h-8 rounded-full bg-gradient-to-br from-orange-400 to-yellow-500 text-white text-xs font-bold shadow-sm flex-shrink-0">
-                {mobileMenuOpen ? <X size={14} /> : (user?.email?.[0] || 'U').toUpperCase()}
-              </button>
-            </div>
-          )}
-
-          {mobileMenuOpen && (
-            <div className="absolute right-4 top-full mt-2 w-48 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-50">
-              {ALL_TABS.map(tab => (
-                <button key={tab.id} onClick={() => switchTab(tab.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors text-left
-                    ${activeTab === tab.id ? 'bg-orange-50 text-orange-600' : 'text-slate-700 hover:bg-slate-50'}`}>
-                  <span>{tab.emoji}</span>
-                  {tab.label}
-                  {activeTab === tab.id && <CheckCircle size={14} className="ml-auto text-orange-500" />}
-                </button>
-              ))}
-              <button onClick={() => { goToWallet(); setMobileMenu(false); }}
-                className="w-full flex items-center gap-3 px-4 py-3 text-sm font-medium text-violet-600 hover:bg-violet-50 border-t border-slate-100">
-                <span>₡</span> ICAN Wallet
-              </button>
-            </div>
-          )}
+          </div>
         </div>
       </header>
 
       {/* ── Tab Content ── */}
-      <div className="container mx-auto px-4 py-5">
+      {/* Generous bottom padding so the floating chat button never sits on
+          top of the last card when scrolled to the end. */}
+      <div className="container mx-auto px-4 pt-5 pb-28">
 
         {/* Overview */}
         {activeTab === 'overview' && (
-          <div className="space-y-5">
+          <div className="space-y-6">
             {/* Greeting — live traffic/peak-time/location insights update as
                 rides come in (realtime) and every 45s for the rider/stock
                 hotspots, cycling through an animated slider one at a time */}
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-lg font-bold text-slate-800">Hi, {customerName} 👋</h2>
+              <div className="flex items-start justify-between gap-3">
+                <h2 className="min-w-0 font-classic-display leading-tight">
+                  <span className="block text-[18px] font-medium text-slate-500">{greeting},</span>
+                  <span className="block break-words text-[30px] font-bold tracking-tight text-slate-900">{customerName}</span>
+                </h2>
                 {insightSlides.length > 0 && (
-                  <span className="flex items-center gap-1 text-[10px] text-emerald-600 font-medium">
+                  <span className="mt-1.5 flex flex-shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-100">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" /> Live
                   </span>
                 )}
               </div>
-              <p className="text-sm text-slate-500">Here's what's happening with your account today.</p>
+              <p className="mt-1 text-sm text-slate-500">Here's what's happening with your account today.</p>
+              <div className="landing-classic-divider mt-4" />
               {insightSlides.length > 0 && (
-                <div className="mt-2 max-w-sm">
+                <div className="mt-3">
                   <InsightSlider slides={insightSlides} />
                 </div>
               )}
@@ -500,63 +497,108 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
 
             {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
             <div className="grid grid-cols-2 gap-3">
-              <IcanCoinCard userId={user?.id} onGoToWallet={goToWallet} />
-              <RewardsPointsCard userId={user?.id} onOpen={() => setActiveTab('rewards')} />
+              <IcanCoinCard variant="premium" userId={user?.id} onGoToWallet={goToWallet} />
+              <RewardsPointsCard variant="premium" userId={user?.id} onOpen={() => setActiveTab('rewards')} />
             </div>
 
-            {/* Quick actions */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-              {[
-                { label: 'Book a Ride', desc: 'Boda, car, van or truck', emoji: '🏍️', tab: 'book-ride' as TabType },
-                { label: 'Delivery',    desc: 'From a store or a normal pickup', emoji: '📦', tab: 'delivery' as TabType },
-                { label: 'Scan & Checkout',  desc: 'POS · Pay with ICAN',     emoji: '🛒', tab: 'shop' as TabType },
-                { label: 'My Orders',       desc: 'Track rides & deliveries', emoji: '📋', tab: 'orders' as TabType },
-                { label: 'Rewards',       desc: 'Earn & redeem points', emoji: '🎁', tab: 'rewards' as TabType },
-              ].map(c => (
-                <button key={c.tab} onClick={() => setActiveTab(c.tab)}
-                  className="bg-white rounded-xl shadow-sm border border-slate-100 p-5 text-left hover:shadow-md hover:border-orange-200 transition-all">
-                  <p className="text-3xl mb-2">{c.emoji}</p>
-                  <p className="font-semibold text-slate-800 text-sm">{c.label}</p>
-                  <p className="text-xs text-slate-500 mt-0.5">{c.desc}</p>
-                </button>
-              ))}
+            {/* Quick actions — Book a Ride gets the hero treatment (it's the
+                thing most people open the app to do), the rest sit in a 2-up grid */}
+            <div className="space-y-3">
+              <SectionHeading>Quick actions</SectionHeading>
+
+              <button type="button" onClick={() => setActiveTab('book-ride')}
+                className="group relative w-full overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-4 min-[360px]:p-5 text-left text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40 transition-transform active:scale-[0.99]">
+                <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full border border-[#c4a052]/25" />
+                <span aria-hidden className="pointer-events-none absolute -right-5 -top-5 h-28 w-28 rounded-full border border-[#c4a052]/20" />
+                <span aria-hidden className="pointer-events-none absolute -bottom-14 -left-10 h-40 w-40 rounded-full bg-orange-500/20 blur-2xl" />
+                <div className="relative flex items-center justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]">Get moving</p>
+                    <p className="mt-1 font-classic-display text-[26px] font-bold leading-tight">Book a Ride</p>
+                    <p className="mt-1 text-[13px] text-white/70">Boda, car, van or truck</p>
+                    <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-orange-950/30">
+                      Book now <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
+                    </span>
+                  </div>
+                  <span className="grid h-16 w-16 flex-shrink-0 place-items-center rounded-full bg-white/5 ring-1 ring-[#c4a052]/50 min-[360px]:h-20 min-[360px]:w-20">
+                    <Bike size={36} strokeWidth={1.4} className="text-[#e6c980]" />
+                  </span>
+                </div>
+              </button>
+
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                {[
+                  { label: 'Delivery',        desc: 'From a store or a normal pickup', icon: Package,       tile: 'bg-sky-50 text-sky-600',         tab: 'delivery' as TabType },
+                  { label: 'Scan & Checkout', desc: 'POS · Pay with ICAN',             icon: ScanLine,      tile: 'bg-emerald-50 text-emerald-600', tab: 'shop' as TabType },
+                  { label: 'My Orders',       desc: 'Track rides & deliveries',        icon: ClipboardList, tile: 'bg-orange-50 text-orange-600',   tab: 'orders' as TabType },
+                  { label: 'Rewards',         desc: 'Earn & redeem points',            icon: Gift,          tile: 'bg-amber-50 text-amber-600',     tab: 'rewards' as TabType },
+                ].map(c => (
+                  <button key={c.tab} type="button" onClick={() => setActiveTab(c.tab)}
+                    className="classic-card flex min-h-[128px] flex-col justify-between gap-3 p-4 text-left transition-all active:scale-[0.98] hover:border-orange-300">
+                    <span className={`grid h-11 w-11 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${c.tile}`}>
+                      <c.icon size={20} />
+                    </span>
+                    <span>
+                      <span className="block text-[15px] font-semibold leading-tight text-slate-800">{c.label}</span>
+                      <span className="mt-1 block text-xs leading-snug text-slate-500">{c.desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
 
             {/* Recent rides — collapsed by default, tap the header to reveal */}
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+            <div className="classic-card overflow-hidden">
               <button
                 type="button"
                 onClick={() => setRecentRidesOpen(o => !o)}
-                className="w-full flex items-center justify-between p-5"
+                aria-expanded={recentRidesOpen}
+                className="w-full flex items-center justify-between gap-3 p-4"
               >
-                <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                  <History size={16} className="text-orange-500" /> Recent Rides
-                </h3>
-                <ChevronDown size={18} className={`text-slate-400 transition-transform ${recentRidesOpen ? 'rotate-180' : ''}`} />
+                <span className="flex items-center gap-3">
+                  <span className="grid h-10 w-10 place-items-center rounded-full bg-orange-50 ring-1 ring-inset ring-orange-100">
+                    <History size={17} className="text-orange-500" />
+                  </span>
+                  <span className="text-left">
+                    <span className="block font-classic-display text-lg font-semibold leading-tight text-slate-800">Recent Rides</span>
+                    <span className="block text-xs text-slate-400">
+                      {ridesLoading ? 'Loading…' : rides.length === 0 ? 'Nothing yet' : `Your last ${Math.min(rides.length, 5)} trip${Math.min(rides.length, 5) === 1 ? '' : 's'}`}
+                    </span>
+                  </span>
+                </span>
+                <ChevronDown size={18} className={`flex-shrink-0 text-slate-400 transition-transform ${recentRidesOpen ? 'rotate-180' : ''}`} />
               </button>
               {recentRidesOpen && (
-                <div className="px-5 pb-5">
+                <div className="px-4 pb-4">
+                  <div className="landing-classic-divider mb-1" />
                   {ridesLoading ? (
-                    <p className="text-slate-400 text-sm">Loading…</p>
+                    <p className="text-slate-400 text-sm py-3">Loading…</p>
                   ) : rides.length === 0 ? (
                     <p className="text-slate-400 text-sm text-center py-6">No rides yet — book your first one!</p>
                   ) : (
-                    <div>
-                      {rides.slice(0, 5).map(r => (
-                        <RideListItem
-                          key={r.id}
-                          ride={r}
-                          expanded={expandedRideId === r.id}
-                          onToggle={() => setExpandedRideId(id => id === r.id ? null : r.id)}
-                          selfUserId={user.id}
-                          selfName={customerName}
-                          contact={activeRideContacts[r.id]}
-                          escortStatus={escortStatusByRideId[r.id]}
-                          onOpenTracking={() => setTrackedRide(r)}
-                          statusColor={statusColor}
-                        />
-                      ))}
-                    </div>
+                    <>
+                      <div>
+                        {rides.slice(0, 5).map(r => (
+                          <RideListItem
+                            key={r.id}
+                            ride={r}
+                            expanded={expandedRideId === r.id}
+                            onToggle={() => setExpandedRideId(id => id === r.id ? null : r.id)}
+                            selfUserId={user.id}
+                            selfName={customerName}
+                            contact={activeRideContacts[r.id]}
+                            escortStatus={escortStatusByRideId[r.id]}
+                            onOpenTracking={() => setTrackedRide(r)}
+                            statusColor={statusColor}
+                            serviceIcon={r.service_type === 'delivery' ? <Package size={16} className="text-blue-500" /> : undefined}
+                          />
+                        ))}
+                      </div>
+                      <button type="button" onClick={() => setActiveTab('orders')}
+                        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-semibold text-orange-600 hover:bg-orange-50 transition-colors">
+                        See all orders <ArrowRight size={13} />
+                      </button>
+                    </>
                   )}
                 </div>
               )}
@@ -568,9 +610,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             flight, driver at destination) is inbuilt here as a mode toggle,
             not a separate tab */}
         {activeTab === 'book-ride' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-            <EnhancedRideRequest customerId={user?.id} fixedServiceType="ride" showJourneyOption />
-          </div>
+          <EnhancedRideRequest customerId={user?.id} fixedServiceType="ride" showJourneyOption />
         )}
 
         {/* Delivery — same real matching-engine flow as Book a Ride, locked
@@ -578,15 +618,13 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             cross-bloc delivery (e.g. Uganda -> USA) reach ship-cargo journey
             booking, same as the ride tab already does for flights. */}
         {activeTab === 'delivery' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
-            <EnhancedRideRequest customerId={user?.id} fixedServiceType="delivery" showJourneyOption />
-          </div>
+          <EnhancedRideRequest customerId={user?.id} fixedServiceType="delivery" showJourneyOption />
         )}
 
         {/* Become a transport service provider — self-service application,
             reviewed by a developer in DeveloperDashboard's Applications tab */}
         {activeTab === 'become-operator' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="classic-card overflow-hidden">
             <BecomeOperatorForm userId={user?.id} />
           </div>
         )}
@@ -597,14 +635,14 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             the BodaGoEra-specific pieces (driver/escort roster, pricing) —
             see ManageBusinessPanel.tsx. */}
         {activeTab === 'manage-business' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
+          <div className="classic-card p-5">
             <ManageBusinessPanel />
           </div>
         )}
 
         {/* Shop / Scan + POS */}
         {activeTab === 'shop' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="classic-card overflow-hidden">
             <CustomerSelfCheckout user={user} />
           </div>
         )}
@@ -613,7 +651,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             shared service_bookings tables digital-city-era's Book tab uses,
             reusing chatService/useDirectCall for follow-up with the store */}
         {activeTab === 'book-service' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 overflow-hidden">
+          <div className="classic-card overflow-hidden">
             <BrowseServicesAndBook
               identity={{
                 userId: user?.id,
@@ -630,10 +668,10 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
           <div className="space-y-4">
           {user?.id && <RefundableDeliveries customerId={user.id} />}
           {user?.id && <JourneyTracker customerId={user.id} />}
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
-              <Bike size={16} className="text-orange-500" /> Rides &amp; Deliveries
-            </h3>
+          <div className="classic-card p-5">
+            <div className="mb-3">
+              <SectionHeading>Rides &amp; Deliveries</SectionHeading>
+            </div>
             {ridesLoading ? (
               <p className="text-slate-400 text-sm">Loading…</p>
             ) : rides.length === 0 ? (
@@ -659,7 +697,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                     escortStatus={escortStatusByRideId[r.id]}
                     onOpenTracking={() => setTrackedRide(r)}
                     statusColor={statusColor}
-                    serviceIcon={r.service_type === 'delivery' ? <Package size={14} className="text-blue-500" /> : <Bike size={14} className="text-orange-500" />}
+                    serviceIcon={r.service_type === 'delivery' ? <Package size={16} className="text-blue-500" /> : <Bike size={16} className="text-orange-500" />}
                   />
                 ))}
               </div>
@@ -677,16 +715,16 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
 
         {/* Profile */}
         {activeTab === 'profile' && (
-          <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-            <h3 className="font-bold text-slate-800 mb-5 flex items-center gap-2">
-              <User size={16} className="text-orange-500" /> My Profile
-            </h3>
-            <div className="flex items-center gap-4 mb-5 p-4 bg-orange-50 rounded-xl">
-              <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-yellow-500 rounded-full flex items-center justify-center text-white text-2xl font-bold">
+          <div className="classic-card p-5">
+            <div className="mb-4">
+              <SectionHeading>My Profile</SectionHeading>
+            </div>
+            <div className="flex items-center gap-4 mb-5 p-4 bg-orange-50 rounded-2xl">
+              <div className="w-16 h-16 flex-shrink-0 bg-gradient-to-br from-orange-400 to-amber-500 rounded-full flex items-center justify-center text-white font-classic-display text-2xl font-bold ring-2 ring-[#e6c980] ring-offset-2 ring-offset-orange-50">
                 {(user?.email?.[0] || 'U').toUpperCase()}
               </div>
-              <div>
-                <p className="font-semibold text-slate-800">{user?.email}</p>
+              <div className="min-w-0">
+                <p className="font-semibold text-slate-800 truncate">{user?.email}</p>
                 <p className="text-sm text-slate-500 flex items-center gap-1"><CheckCircle size={12} className="text-green-500" /> BodaGoEra Customer</p>
               </div>
             </div>
@@ -724,6 +762,67 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
           customerName={customerName}
           onClose={() => setTrackedRide(null)}
         />
+      )}
+
+      {/* ── Phone menu — bottom sheet. Rendered here, outside <header>, so its
+          fixed positioning isn't affected by the sticky header's stacking
+          context. z-[1000] clears the floating chat button (z-[999]). ── */}
+      {mobileMenuOpen && (
+        <div className="sm:hidden fixed inset-0 z-[1000]" role="dialog" aria-modal="true" aria-label="Menu">
+          <button type="button" aria-label="Close menu" onClick={() => setMobileMenu(false)}
+            className="absolute inset-0 h-full w-full cursor-default bg-black/50 animate-fade-soft" />
+          <div className="animate-sheet-up safe-bottom absolute inset-x-0 bottom-0 max-h-[88vh] overflow-y-auto rounded-t-[28px] bg-white shadow-2xl">
+            <div className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-slate-300" />
+
+            <div className="flex items-center gap-3 px-5 pb-4 pt-4">
+              <span className="grid h-12 w-12 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-orange-400 to-amber-500 font-classic-display text-xl font-bold text-white ring-2 ring-[#e6c980] ring-offset-2 ring-offset-white dark:ring-offset-slate-800">
+                {(user?.email?.[0] || 'U').toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-classic-display text-lg font-semibold leading-tight text-slate-800">{customerName}</p>
+                <p className="truncate text-xs text-slate-500">{user?.email}</p>
+              </div>
+              <button type="button" onClick={() => setMobileMenu(false)} aria-label="Close menu"
+                className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-slate-100 text-slate-500 active:scale-95 transition-transform">
+                <X size={16} />
+              </button>
+            </div>
+            <div className="landing-classic-divider mx-5" />
+
+            <div className="grid grid-cols-3 gap-2.5 px-4 pb-1 pt-4">
+              {ALL_TABS.map(tab => {
+                const active = activeTab === tab.id;
+                return (
+                  <button key={tab.id} type="button" onClick={() => switchTab(tab.id)}
+                    aria-current={active ? 'page' : undefined}
+                    className={`flex flex-col items-center gap-2 rounded-2xl px-2 py-3.5 text-center transition-all active:scale-95 ${
+                      active
+                        ? 'bg-orange-50 ring-1 ring-inset ring-orange-300'
+                        : 'bg-slate-50 ring-1 ring-inset ring-slate-100'
+                    }`}>
+                    <span className={`grid h-11 w-11 place-items-center rounded-full ${
+                      active
+                        ? 'bg-gradient-to-br from-orange-500 to-amber-500 text-white shadow-md shadow-orange-500/30'
+                        : 'bg-white text-orange-600 shadow-sm ring-1 ring-inset ring-slate-100'
+                    }`}>
+                      <tab.icon size={20} />
+                    </span>
+                    <span className={`text-[11px] leading-tight ${active ? 'font-bold text-orange-600' : 'font-medium text-slate-700'}`}>
+                      {tab.label}
+                    </span>
+                  </button>
+                );
+              })}
+              <button type="button" onClick={() => { goToWallet(); setMobileMenu(false); }}
+                className="flex flex-col items-center gap-2 rounded-2xl bg-violet-50 px-2 py-3.5 text-center ring-1 ring-inset ring-violet-100 transition-all active:scale-95">
+                <span className="grid h-11 w-11 place-items-center rounded-full bg-gradient-to-br from-violet-600 to-indigo-800 text-white shadow-md shadow-violet-500/30">
+                  <Wallet size={20} />
+                </span>
+                <span className="text-[11px] font-semibold leading-tight text-violet-700">ICAN Wallet</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   MapPin, Plus, Users, ChevronRight, ChevronDown, 
-  Edit, Trash2, UserPlus, X, Check 
+  Edit, Trash2, UserPlus, X, Check, Search 
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { regionsService, District, Division, Subcounty, Parish, Stage } from '../services/regionsService';
-import { chairpersonService } from '../services/chairpersonService';
+import { chairpersonService, ChairpersonRole } from '../services/chairpersonService';
 import { userService } from '../services/userService';
 import { supabase } from '../services/supabaseClient';
 
@@ -560,22 +560,63 @@ function AddDistrictModal({ onClose, onSuccess }: { onClose: () => void; onSucce
   );
 }
 
+// ─── Assign Chairperson Modal helpers ────────────────────────────────────────
+const roleLabel = (role?: string) =>
+  role
+    ? role.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+    : 'User';
+
+const userDisplayName = (u: any): string =>
+  u?.mbg_user_profiles?.[0]?.full_name || u?.email?.split('@')[0] || 'No Name';
+
+const userInitials = (name: string): string =>
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+
+function UserAvatar({ name, size = 'md' }: { name: string; size?: 'sm' | 'md' }) {
+  return (
+    <div
+      className={`shrink-0 rounded-full bg-gradient-to-br from-orange-400 to-yellow-500 text-white font-semibold flex items-center justify-center ${
+        size === 'sm' ? 'w-8 h-8 text-xs' : 'w-10 h-10 text-sm'
+      }`}
+      aria-hidden="true"
+    >
+      {userInitials(name)}
+    </div>
+  );
+}
+
+function RoleBadge({ role }: { role?: string }) {
+  // Plain customers are the common case, so keep them quiet; anyone who already
+  // holds a role stands out so the developer notices before reassigning them.
+  const isCustomer = !role || role === 'customer';
+  return (
+    <span
+      className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-medium ${
+        isCustomer ? 'bg-slate-100 text-slate-600' : 'bg-amber-100 text-amber-700'
+      }`}
+    >
+      {roleLabel(role || 'customer')}
+    </span>
+  );
+}
+
 // Assign Chairperson Modal
-function AssignChairpersonModal({ 
-  regionType, 
-  regionId, 
-  regionName, 
-  onClose, 
-  onSuccess 
-}: { 
-  regionType: string; 
-  regionId: string; 
+function AssignChairpersonModal({
+  regionType,
+  regionId,
+  regionName,
+  onClose,
+  onSuccess
+}: {
+  regionType: string;
+  regionId: string;
   regionName: string;
   onClose: () => void;
   onSuccess: () => void;
 }) {
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUserId, setSelectedUserId] = useState('');
+  const [changingUser, setChangingUser] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [commissionRate, setCommissionRate] = useState('5.00');
   const [notes, setNotes] = useState('');
@@ -586,12 +627,21 @@ function AssignChairpersonModal({
     loadUsers();
   }, []);
 
+  // Escape closes the dialog (unless a save is in flight).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !assigning) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [assigning, onClose]);
+
   const loadUsers = async () => {
     setLoadingUsers(true);
     try {
       // Fetch from mbg_users table (synced from auth.users)
       const allUsers = await userService.getAllUsers();
-      
+
       // Filter out developers
       const availableUsers = allUsers.filter((u: any) => u.role_type !== 'developer');
       setUsers(availableUsers);
@@ -604,55 +654,53 @@ function AssignChairpersonModal({
     }
   };
 
-  const filteredUsers = users.filter((user) => {
-    const searchLower = searchQuery.toLowerCase();
-    const email = user.email?.toLowerCase() || '';
-    const fullName = (
-      user.mbg_user_profiles?.[0]?.full_name ||
-      user.email?.split('@')[0] ||
-      'User'
-    ).toLowerCase();
-    return email.includes(searchLower) || fullName.includes(searchLower);
-  });
+  const filteredUsers = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return users
+      .filter((user) => {
+        if (!q) return true;
+        return (
+          (user.email?.toLowerCase() || '').includes(q) ||
+          userDisplayName(user).toLowerCase().includes(q)
+        );
+      })
+      .sort((a, b) => userDisplayName(a).localeCompare(userDisplayName(b)));
+  }, [users, searchQuery]);
 
-  const getRoleFromRegionType = (type: string) => {
-    const roleMap: any = {
-      'district': 'district_chairperson',
-      'division': 'division_chairperson',
-      'subcounty': 'subcounty_chairperson',
-      'parish': 'parish_chairperson',
-      'stage': 'stage_chairperson'
-    };
-    return roleMap[type];
+  const selectedUser = users.find((u) => u.id === selectedUserId) || null;
+  const showPicker = !selectedUser || changingUser;
+
+  const targetRole = getRoleFromRegionType(regionType);
+  const levelLabel = regionType.charAt(0).toUpperCase() + regionType.slice(1);
+
+  const rate = parseFloat(commissionRate);
+  const rateValid = !isNaN(rate) && rate >= 0 && rate <= 100;
+  const canSubmit = !!selectedUser && rateValid && !assigning;
+
+  const pickUser = (id: string) => {
+    setSelectedUserId(id);
+    setChangingUser(false);
+    setSearchQuery('');
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    if (!selectedUserId) {
+
+    if (!selectedUser) {
       toast.error('Please select a user');
       return;
     }
 
-    const rate = parseFloat(commissionRate);
-    if (isNaN(rate) || rate < 0 || rate > 100) {
+    if (!rateValid) {
       toast.error('Commission rate must be between 0 and 100');
       return;
     }
 
     setAssigning(true);
 
-    // Get selected user's email
-    const selectedUser = users.find(u => u.id === selectedUserId);
-    if (!selectedUser) {
-      toast.error('User not found');
-      setAssigning(false);
-      return;
-    }
-
     const result = await chairpersonService.assignChairperson({
       targetUserEmail: selectedUser.email,
-      targetRole: getRoleFromRegionType(regionType),
+      targetRole: targetRole,
       targetRegionType: regionType as any,
       targetRegionId: regionId,
       commissionRate: rate,
@@ -669,151 +717,261 @@ function AssignChairpersonModal({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-slate-800">Assign Chairperson</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+    // Bottom sheet on phones, centred dialog from `sm` up. Tapping the backdrop closes it.
+    <div
+      className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 sm:p-4"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget && !assigning) onClose();
+      }}
+    >
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-xl shadow-2xl flex flex-col max-h-[92dvh] sm:max-h-[90dvh]"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="assign-chair-title"
+      >
+        {/* Header — stays put while the body scrolls */}
+        <div className="shrink-0 flex items-start justify-between gap-3 px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4 border-b border-slate-200">
+          <div className="min-w-0">
+            <h3 id="assign-chair-title" className="text-xl font-bold text-slate-800">Assign Chairperson</h3>
+            <p className="mt-1 flex items-center gap-1.5 text-sm text-slate-600">
+              <MapPin size={14} className="shrink-0 text-orange-500" />
+              <span className="truncate">
+                <span className="font-medium text-slate-800">{regionName}</span> · {levelLabel}
+              </span>
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={assigning}
+            className="shrink-0 -mr-1 p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+            aria-label="Close"
+          >
             <X size={24} />
           </button>
         </div>
 
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
-          <p className="text-sm text-blue-700">
-            <strong>Region:</strong> {regionName}<br/>
-            <strong>Level:</strong> {regionType.charAt(0).toUpperCase() + regionType.slice(1)}
-          </p>
-        </div>
+        {/* Body — the only part that scrolls */}
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 sm:px-5 py-3 sm:py-4 space-y-4 sm:space-y-5">
+          {/* User selector */}
+          <div>
+            <div className="flex items-baseline justify-between mb-1.5">
+              <label className="block text-sm font-medium text-slate-700">Select user *</label>
+              {!loadingUsers && showPicker && (
+                <span className="text-xs text-slate-500">
+                  {searchQuery.trim()
+                    ? `${filteredUsers.length} of ${users.length}`
+                    : `${users.length} user${users.length === 1 ? '' : 's'}`}
+                </span>
+              )}
+            </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-4">
-            {/* User Selector */}
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Select User *
-              </label>
-              
-              {loadingUsers ? (
-                <div className="w-full px-4 py-3 border border-slate-300 rounded-lg bg-slate-50 text-slate-600 text-sm">
-                  Loading users...
+            {loadingUsers ? (
+              <div className="space-y-2" aria-label="Loading users">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex items-center gap-3 p-3 border border-slate-200 rounded-lg animate-pulse">
+                    <div className="w-10 h-10 rounded-full bg-slate-200" />
+                    <div className="flex-1 space-y-2">
+                      <div className="h-3 w-1/3 rounded bg-slate-200" />
+                      <div className="h-3 w-2/3 rounded bg-slate-200" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : !showPicker && selectedUser ? (
+              <>
+                {/* Chosen — the list collapses so the rest of the form is in view */}
+                <div className="flex items-center gap-3 p-3 rounded-lg border border-orange-300 bg-orange-50">
+                  <UserAvatar name={userDisplayName(selectedUser)} />
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-slate-800 truncate">{userDisplayName(selectedUser)}</p>
+                    <p className="text-sm text-slate-600 truncate">{selectedUser.email}</p>
+                    <div className="mt-1"><RoleBadge role={selectedUser.role_type} /></div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setChangingUser(true)}
+                    className="shrink-0 px-3 py-1.5 text-sm font-medium text-orange-600 hover:bg-orange-100 rounded-lg transition-colors"
+                  >
+                    Change
+                  </button>
                 </div>
-              ) : (
-                <>
+                <p className="mt-2 text-xs text-slate-500">
+                  Will become <span className="font-medium text-slate-700">{roleLabel(targetRole)}</span> of {regionName}.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="relative mb-2">
+                  <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                   <input
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Enter must never submit the form from here; use it to pick the top match.
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        if (searchQuery.trim() && filteredUsers[0]) pickUser(filteredUsers[0].id);
+                      }
+                    }}
+                    autoFocus={typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: fine)').matches}
                     placeholder="Search by name or email..."
-                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent mb-2"
+                    className="w-full pl-9 pr-9 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
                   />
-                  
-                  <div className="border border-slate-300 rounded-lg max-h-48 overflow-y-auto">
-                    {filteredUsers.length === 0 ? (
-                      <div className="p-4 text-sm text-slate-500 text-center">
-                        {searchQuery ? 'No users found' : 'No users available'}
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-slate-200">
-                        {filteredUsers.map((user) => (
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded"
+                      aria-label="Clear search"
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
+                </div>
+
+                {/* height follows the screen: 16rem on tall screens, ~1/3 of the viewport on short laptops/phones */}
+                <div className="border border-slate-300 rounded-lg max-h-[min(16rem,34dvh)] overflow-y-auto overscroll-contain" role="listbox" aria-label="Users">
+                  {filteredUsers.length === 0 ? (
+                    <div className="p-6 text-sm text-slate-500 text-center">
+                      {searchQuery ? `No users match “${searchQuery.trim()}”` : 'No users available'}
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-200">
+                      {filteredUsers.map((user) => {
+                        const name = userDisplayName(user);
+                        const isSelected = selectedUserId === user.id;
+                        return (
                           <button
                             key={user.id}
                             type="button"
-                            onClick={() => setSelectedUserId(user.id)}
-                            className={`w-full px-4 py-3 text-left hover:bg-slate-50 transition-colors ${
-                              selectedUserId === user.id ? 'bg-orange-50 border-l-4 border-orange-500' : ''
+                            role="option"
+                            aria-selected={isSelected}
+                            onClick={() => pickUser(user.id)}
+                            className={`w-full px-3 py-2.5 text-left flex items-center gap-3 hover:bg-slate-50 transition-colors ${
+                              isSelected ? 'bg-orange-50' : ''
                             }`}
                           >
-                            <div className="flex items-center justify-between">
-                              <div className="flex-1">
-                                <p className="font-medium text-slate-800">
-                                  {user.mbg_user_profiles?.[0]?.full_name || 'No Name'}
-                                </p>
-                                <p className="text-sm text-slate-600">{user.email}</p>
-                                <p className="text-xs text-slate-500 mt-0.5">
-                                  Current role: <span className="font-medium">{user.role_type}</span>
-                                </p>
+                            <UserAvatar name={name} size="sm" />
+                            <div className="min-w-0 flex-1">
+                              {/* badge shares the name line so a 320px phone never squeezes the email */}
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium text-slate-800 truncate">{name}</p>
+                                <span className="shrink-0"><RoleBadge role={user.role_type} /></span>
                               </div>
-                              {selectedUserId === user.id && (
-                                <Check size={20} className="text-orange-600" />
-                              )}
+                              <p className="text-sm text-slate-600 truncate">{user.email}</p>
                             </div>
+                            {isSelected && <Check size={18} className="shrink-0 text-orange-600" />}
                           </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  
-                  {selectedUserId && (
-                    <p className="text-xs text-green-600 mt-2 flex items-center gap-1">
-                      <Check size={14} />
-                      User selected: {users.find(u => u.id === selectedUserId)?.email}
-                    </p>
+                        );
+                      })}
+                    </div>
                   )}
-                </>
-              )}
-            </div>
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Commission Rate (%) *
-              </label>
+                {selectedUser && changingUser && (
+                  <button
+                    type="button"
+                    onClick={() => { setChangingUser(false); setSearchQuery(''); }}
+                    className="mt-2 text-xs font-medium text-slate-500 hover:text-slate-700"
+                  >
+                    Keep {userDisplayName(selectedUser)}
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* Commission */}
+          <div>
+            <label htmlFor="assign-commission" className="block text-sm font-medium text-slate-700 mb-1.5">
+              Commission rate *
+            </label>
+            <div className="relative">
               <input
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
+                id="assign-commission"
+                type="text"
+                inputMode="decimal"
                 value={commissionRate}
-                onChange={(e) => setCommissionRate(e.target.value)}
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
+                onChange={(e) => {
+                  // digits with up to 2 decimals, so no spinner arrows or scroll-wheel surprises
+                  if (/^\d{0,3}(\.\d{0,2})?$/.test(e.target.value)) setCommissionRate(e.target.value);
+                }}
+                className={`w-full pl-4 pr-10 py-2 border rounded-lg focus:ring-2 focus:border-transparent ${
+                  rateValid ? 'border-slate-300 focus:ring-orange-500' : 'border-red-400 focus:ring-red-500'
+                }`}
+                aria-invalid={!rateValid}
                 required
               />
+              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">%</span>
             </div>
-
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Notes
-              </label>
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent"
-                rows={3}
-                placeholder="Optional notes about this assignment..."
-              />
-            </div>
+            {!rateValid && (
+              <p className="mt-1 text-xs text-red-600">Enter a rate between 0 and 100.</p>
+            )}
           </div>
 
-          <div className="flex gap-3 mt-6">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-medium"
-              disabled={assigning}
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="flex-1 px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all font-medium disabled:opacity-50 flex items-center justify-center gap-2"
-              disabled={assigning}
-            >
-              {assigning ? (
-                <>
-                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Assigning...
-                </>
-              ) : (
-                <>
-                  <Check size={18} />
-                  Assign Chairperson
-                </>
-              )}
-            </button>
+          {/* Notes */}
+          <div>
+            <label htmlFor="assign-notes" className="block text-sm font-medium text-slate-700 mb-1.5">
+              Notes <span className="font-normal text-slate-400">(optional)</span>
+            </label>
+            <textarea
+              id="assign-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent resize-none"
+              rows={2}
+              placeholder="Add a note about this assignment..."
+            />
           </div>
-        </form>
-      </div>
+        </div>
+
+        {/* Footer — always visible, so the buttons never fall off the bottom of a phone screen */}
+        <div className="shrink-0 flex gap-3 px-4 sm:px-5 py-3 sm:py-4 border-t border-slate-200 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 px-4 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors font-medium"
+            disabled={assigning}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="flex-1 px-4 py-2.5 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            disabled={!canSubmit}
+          >
+            {assigning ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Assigning...
+              </>
+            ) : (
+              <>
+                <Check size={18} />
+                Assign Chairperson
+              </>
+            )}
+          </button>
+        </div>
+      </form>
     </div>
   );
+}
+
+// Region level → the chairperson role it grants.
+function getRoleFromRegionType(type: string): ChairpersonRole {
+  const roleMap: Record<string, ChairpersonRole> = {
+    district: 'district_chairperson',
+    division: 'division_chairperson',
+    subcounty: 'subcounty_chairperson',
+    parish: 'parish_chairperson',
+    stage: 'stage_chairperson'
+  };
+  return roleMap[type];
 }
 
 

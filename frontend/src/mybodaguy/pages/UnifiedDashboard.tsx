@@ -11,6 +11,7 @@ import ICANWalletPage from './ICANWalletPage';
 import ProfileModal from '../components/ProfileModal';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { toast } from 'sonner';
+import { consumePendingReferralCode } from '../services/referralService';
 
 interface UnifiedDashboardProps {
   user: any;
@@ -45,6 +46,19 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
     loadUserRoles();
     loadAvatar();
   }, [user]);
+
+  // Redeem a referral code picked up from a shared ?ref= link. A no-op unless
+  // one is pending; the server decides eligibility (must be before the
+  // account's first ICAN deposit) and pays the referrer later, on that deposit.
+  useEffect(() => {
+    if (!user?.id) return;
+    consumePendingReferralCode()
+      .then((res) => {
+        if (res.applied) toast.success(`🎉 You joined through ${res.referrerName}'s invite!`);
+        else if (res.message) toast.info(res.message);
+      })
+      .catch((e) => console.warn('[UnifiedDashboard] Referral redeem failed (will retry next load):', e));
+  }, [user?.id]);
 
   const loadAvatar = async () => {
     try {
@@ -284,7 +298,7 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
       <div className="dashboard-content">
         {activeRole === 'developer' && <DeveloperDashboard user={user} onSignOut={onSignOut} embedded onGoToWallet={() => setActiveRole('ican-wallet')} />}
         {activeRole === 'chairperson' && <ChairpersonDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />}
-        {activeRole === 'rider' && <RiderDashboard user={user} onSignOut={onSignOut} />}
+        {activeRole === 'rider' && <RiderDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />}
         {activeRole === 'customer' && <CustomerDashboard user={user} onSignOut={onSignOut} embedded onGoToWallet={() => setActiveRole('ican-wallet')} />}
         {activeRole === 'ican-wallet' && <ICANWalletPage user={user} />}
       </div>

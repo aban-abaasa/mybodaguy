@@ -11,26 +11,36 @@
 -- ADD_DEV_COMMISSION_SETTINGS_ACCESS.sql), so no new UI is needed, just
 -- this new row.
 --
--- Model (fare = 100%): chairpersons keep their existing 12% (boda only,
--- unaffected by this migration). ICANera takes its 8% off the top; whoever
--- is left — the rider, plus the chairperson for a boda ride — shares
--- whatever remains. WHO actually fronts ICANera's 8% depends on payment
+-- Model (fare F = 100%). The platform's pool per ride is 15% of F, made of
+-- two silent slices, and the chairperson (boda only) is paid out of that
+-- pool — never on top of it, never as a separate rider deduction:
+--   · 8% from the CUSTOMER  (commission.icanera_platform_fee_percentage)
+--   · 7% from the RIDER     (commission.rider_platform_cut_percentage)
+--   · 5% of the 15% goes to the chairpersons (commission.*_chair_percentage,
+--     summing to commission.boda_chair_total_percentage = 5); ICANera keeps
+--     the other 10% (all 15% on a non-boda ride, or if a chair seat is empty).
+-- Nobody sees a breakdown. WHO actually fronts the pool depends on payment
 -- method, decided once at request time and never adjusted afterwards:
---   wallet — the customer bears it, folded into the single total they're
---     charged (fare + 8%, via commission.icanera_platform_fee_percentage).
---     Nothing is itemized to them — they just see the one total leaving
---     their account. The rider's earning is completely unaffected by it
---     (fare minus only the chairperson's share, if any).
+--   wallet — the customer is charged F + 8% as ONE total (never itemized).
+--     The rider is shown ONE flat number, F − 7%, which is exactly what
+--     lands in their wallet: rider_earning IS the true final take-home.
+--     Customer pays 108, rider gets 93, chairs 5, ICANera 10.
 --   cash — the app can never add anything on top of a fixed cash handover,
---     so the rider fronts ICANera's 8% themselves, exactly like they
---     already front the chairperson's 12% on a boda ride. Subtracted at
---     REQUEST time (not discovered later), so rider_earning IS the rider's
---     true final take — what they're shown is what they keep, never
---     adjusted downward after the fact. Collected the same way the
---     chairperson's cash share already is: paid out of the platform's own
---     float the moment the ride completes, recovered from the rider as a
---     running debt (cash_commission_debt_ugx) against their NEXT
---     wallet-paid ride.
+--     so the rider fronts BOTH slices (15%): rider_earning = F − 15%, again
+--     the number shown and the number kept. The chairs' 5% and ICANera's 10%
+--     are paid immediately out of the platform's own float when the ride
+--     completes and recovered from the rider as a running debt
+--     (cash_commission_debt_ugx) against their NEXT wallet-paid ride.
+--
+-- COMPANY riders (mbg_riders.business_profile_id set) are on a simpler deal:
+-- ICANera takes the customer's 8% (silent, on top of a wallet total) plus a
+-- flat 5% out of the ride's pay (commission.company_platform_cut_percentage)
+-- and nothing else — no chairperson share. The company's admin sets their own
+-- FARE rates (mbg_set_business_pricing); the fee split is the platform's.
+-- Wallet: customer pays F + 8%, rider gets F − 5%. Cash: rider gets F − 13%.
+-- The arithmetic for both kinds of rider lives in mbg_compute_ride_split, used
+-- by mbg_request_ride and by the company-pricing trigger
+-- (mbg_apply_business_pricing, redefined here).
 --
 -- This SUPERSEDES ADD_ICANERA_REAL_PLATFORM_FEE_BODA_7PCT.sql, which never
 -- shipped (written and revised within the same session) — deleted rather
@@ -69,7 +79,8 @@
 -- mbg_request_ride), ADD_DELIVERY_EXPENSE_CLASSIFICATION.sql (latest
 -- mbg_respond_to_ride), ADD_CUSTOMER_DELIVERY_CONFIRMATION.sql (latest
 -- mbg_complete_ride / mbg_pay_rider_for_ride), ADD_DEV_COMMISSION_SETTINGS_
--- ACCESS.sql (Developer Dashboard editing), and
+-- ACCESS.sql (Developer Dashboard editing), CREATE_BODAGOERA_BUSINESS_PRICING.sql
+-- (company pricing table + trigger), and
 -- ICAN/backend/ROUTE_PLATFORM_FEES_TO_IWOS_BUSINESS.sql
 -- (fn_credit_platform_fee_to_business).
 -- ============================================================================
@@ -79,6 +90,26 @@ INSERT INTO public.mbg_platform_settings (key, value, value_type, description, c
    'ICANera''s own flat platform-fee percentage on every ride/delivery, every vehicle type. Wallet: folded into the customer''s single total, never itemized. Cash: fronted by the rider, recovered from their next wallet-paid ride. Developer-editable from the Commissions tab.',
    'commission', true)
 ON CONFLICT (key) DO UPDATE SET description = EXCLUDED.description;
+
+-- The rider's own silent slice of the platform pool (the 8% above is the
+-- customer's). Wallet: subtracted from the flat price the rider is shown.
+-- Cash: added to the 8% the rider fronts. Developer-editable, same tab.
+INSERT INTO public.mbg_platform_settings (key, value, value_type, description, category, is_public) VALUES
+  ('commission.rider_platform_cut_percentage', '7.0', 'number',
+   'Rider''s slice of the platform pool, taken silently from the fare (rider is shown one flat take-home price). Together with commission.icanera_platform_fee_percentage (customer''s slice) this forms the pool the boda chairpersons are paid out of. Developer-editable from the Commissions tab.',
+   'commission', false)
+ON CONFLICT (key) DO UPDATE SET description = EXCLUDED.description;
+
+-- Chairpersons are now paid 5% of the fare OUT OF the platform pool (was 12%
+-- deducted from the rider). Same 40/24/16/12/8 split across the five levels.
+UPDATE public.mbg_platform_settings SET value = '5.0',  updated_at = NOW(),
+  description = 'Boda chairpersons'' total share of each ride, paid OUT OF the platform pool (customer % + rider %), not deducted from the rider. Keep the five level rows below adding up to this — payouts use the individual levels.'
+  WHERE key = 'commission.boda_chair_total_percentage';
+UPDATE public.mbg_platform_settings SET value = '2.0',  updated_at = NOW() WHERE key = 'commission.stage_chair_percentage';
+UPDATE public.mbg_platform_settings SET value = '1.2',  updated_at = NOW() WHERE key = 'commission.parish_chair_percentage';
+UPDATE public.mbg_platform_settings SET value = '0.8',  updated_at = NOW() WHERE key = 'commission.subcounty_chair_percentage';
+UPDATE public.mbg_platform_settings SET value = '0.6',  updated_at = NOW() WHERE key = 'commission.division_chair_percentage';
+UPDATE public.mbg_platform_settings SET value = '0.4',  updated_at = NOW() WHERE key = 'commission.district_chair_percentage';
 
 -- Both of these were the ACTIVE rate at earlier points this same session
 -- (nonboda_platform_percentage before boda ever had a real cut at all;
@@ -100,6 +131,118 @@ UPDATE public.mbg_platform_settings
    SET description = 'RETIRED — no longer read by any code path (was briefly reused as ICANera''s boda cash-fee rate earlier in development; that role now belongs to commission.icanera_platform_fee_percentage). Kept only so historical rides that used this rate stay meaningful in reports.',
        updated_at = NOW()
  WHERE key = 'commission.wallet_customer_surcharge_percentage';
+
+-- ----------------------------------------------------------------------------
+-- 0. Company riders + the ONE place the split is computed.
+--
+-- A rider who belongs to a company (mbg_riders.business_profile_id set) is on
+-- a simpler deal: ICANera takes the customer's 8% (silent, on top of a wallet
+-- total) plus a flat 5% out of the ride's pay — and that is all. No
+-- chairperson share. The company's admin sets the FARE rates for their own
+-- drivers (mbg_set_business_pricing / mbg_business_pricing_settings, applied
+-- by trg_mbg_apply_business_pricing below); ICANera's cut is not theirs to set.
+-- ----------------------------------------------------------------------------
+
+INSERT INTO public.mbg_platform_settings (key, value, value_type, description, category, is_public) VALUES
+  ('commission.company_platform_cut_percentage', '5.0', 'number',
+   'Company riders only: ICANera''s flat cut taken from the ride''s pay (on top of the customer-side platform fee). No chairperson share applies to company rides. Developer-editable from the Commissions tab.',
+   'commission', false)
+ON CONFLICT (key) DO UPDATE SET description = EXCLUDED.description;
+
+-- rider_earning is the ONE number a rider is shown and keeps. Wallet: the
+-- customer carries their own slice, so only the rider-side slice comes off.
+-- Cash (or anything not paid from the wallet): nothing can be added on top of
+-- the handover, so the rider fronts both slices. o_platform_net is what
+-- ICANera expects to keep (whole pool minus the chairpersons).
+CREATE OR REPLACE FUNCTION public.mbg_compute_ride_split(
+  p_fare NUMERIC,
+  p_is_boda BOOLEAN,
+  p_is_company BOOLEAN,
+  p_payment_method TEXT
+) RETURNS TABLE (o_rider_earning NUMERIC, o_chair_total NUMERIC, o_platform_net NUMERIC)
+LANGUAGE plpgsql STABLE SET search_path = public AS $$
+DECLARE
+  v_customer_slice NUMERIC := ROUND(p_fare * public.mbg_get_setting_numeric('commission.icanera_platform_fee_percentage', 8) / 100);
+  v_rider_slice NUMERIC;
+  v_chair NUMERIC;
+BEGIN
+  IF p_is_company THEN
+    v_rider_slice := ROUND(p_fare * public.mbg_get_setting_numeric('commission.company_platform_cut_percentage', 5) / 100);
+    v_chair := 0;
+  ELSE
+    v_rider_slice := ROUND(p_fare * public.mbg_get_setting_numeric('commission.rider_platform_cut_percentage', 7) / 100);
+    v_chair := CASE WHEN p_is_boda
+      THEN ROUND(p_fare * public.mbg_get_setting_numeric('commission.boda_chair_total_percentage', 5) / 100)
+      ELSE 0
+    END;
+  END IF;
+
+  o_rider_earning := p_fare - v_rider_slice - CASE WHEN COALESCE(p_payment_method, 'wallet') = 'wallet' THEN 0 ELSE v_customer_slice END;
+  o_chair_total   := v_chair;
+  o_platform_net  := GREATEST(v_customer_slice + v_rider_slice - v_chair, 0);
+  RETURN NEXT;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.mbg_compute_ride_split(NUMERIC, BOOLEAN, BOOLEAN, TEXT) FROM PUBLIC;
+
+-- Company pricing trigger (originally CREATE_BODAGOERA_BUSINESS_PRICING.sql).
+-- Still recomputes the FARE from the business's own base/per-km/min rates when
+-- they've set any, but the fee split is no longer the old 70%-rider / 5%-
+-- platform / rest-to-chairpersons model: every company rider's ride now gets
+-- the company split above, whether or not the business set custom rates.
+-- The trigger itself already exists on mbg_rides; replacing the function is
+-- enough.
+CREATE OR REPLACE FUNCTION public.mbg_apply_business_pricing()
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_rider public.mbg_riders%ROWTYPE;
+  v_pricing public.mbg_business_pricing_settings%ROWTYPE;
+  v_fare NUMERIC;
+  v_split RECORD;
+BEGIN
+  IF NEW.rider_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT * INTO v_rider FROM public.mbg_riders WHERE id = NEW.rider_id;
+  IF v_rider.business_profile_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT * INTO v_pricing FROM public.mbg_business_pricing_settings WHERE business_profile_id = v_rider.business_profile_id;
+  IF FOUND
+     AND NEW.distance_km IS NOT NULL
+     AND NOT (v_pricing.base_fare IS NULL AND v_pricing.per_km_rate IS NULL AND v_pricing.min_fare IS NULL) THEN
+    v_fare := GREATEST(
+      COALESCE(v_pricing.min_fare, public.mbg_get_setting_numeric('ride.minimum_fare', 2000)),
+      COALESCE(v_pricing.base_fare, public.mbg_get_setting_numeric('ride.base_fare', 1000))
+        + NEW.distance_km * COALESCE(v_pricing.per_km_rate, public.mbg_get_setting_numeric('ride.per_km_rate', 1000))
+    ) * COALESCE(NEW.time_multiplier, 1);
+
+    IF v_rider.mode = 'vip' THEN
+      v_fare := v_fare * (1 + COALESCE(v_rider.vip_surcharge_pct, 0) / 100);
+    ELSIF v_rider.mode = 'discount' THEN
+      v_fare := v_fare * (1 - COALESCE(v_rider.discount_pct, 0) / 100);
+    ELSIF v_rider.mode = 'return' THEN
+      v_fare := v_fare * (1 - COALESCE(v_rider.return_discount_pct, 0) / 100);
+    END IF;
+    NEW.fare := ROUND(v_fare / 100) * 100;
+  END IF;
+
+  IF COALESCE(NEW.fare, 0) > 0 THEN
+    SELECT * INTO v_split FROM public.mbg_compute_ride_split(
+      NEW.fare,
+      v_rider.vehicle_type::TEXT IN ('motorcycle', 'bicycle', 'tuktuk'),
+      TRUE,
+      NEW.payment_method
+    );
+    NEW.rider_earning := v_split.o_rider_earning;
+    NEW.chairperson_commission_total := v_split.o_chair_total;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
 
 -- ----------------------------------------------------------------------------
 -- 1. mbg_request_ride — one unified split. Same 18-param signature as
@@ -135,7 +278,7 @@ DECLARE
   v_min_fare  NUMERIC := public.mbg_get_setting_numeric('ride.minimum_fare', 2000);
   v_fare NUMERIC;
   v_is_boda BOOLEAN;
-  v_platform_fee NUMERIC;
+  v_platform_net NUMERIC;
   v_rider_earning NUMERIC;
   v_chair_total NUMERIC;
   v_ride_id UUID;
@@ -234,26 +377,16 @@ BEGIN
 
   v_is_boda := v_rider.vehicle_type::TEXT IN ('motorcycle', 'bicycle', 'tuktuk');
 
-  -- Chairperson's cut — boda only, unaffected by payment method or this
-  -- migration.
-  v_chair_total := CASE WHEN v_is_boda
-    THEN ROUND(v_fare * public.mbg_get_setting_numeric('commission.boda_chair_total_percentage', 12) / 100)
-    ELSE 0
-  END;
-
-  -- ICANera's own flat cut — every vehicle type, same rate, developer-
-  -- configurable. Always computed and recorded (mbg_ride_platform_fees
-  -- below) regardless of payment method, but only actually subtracted from
-  -- what the rider is shown when the ride is cash — a wallet ride collects
-  -- it separately from the customer (see mbg_respond_to_ride /
-  -- mbg_complete_ride), so the rider's earning there is untouched by it.
-  v_platform_fee := ROUND(v_fare * public.mbg_get_setting_numeric('commission.icanera_platform_fee_percentage', 8) / 100);
-
-  IF p_payment_method = 'wallet' THEN
-    v_rider_earning := v_fare - v_chair_total;
-  ELSE
-    v_rider_earning := v_fare - v_chair_total - v_platform_fee;
-  END IF;
+  -- rider_earning is the ONE number the rider is shown and the exact amount
+  -- they keep; the chairperson share and ICANera's net are recorded for
+  -- reporting. All of the arithmetic (who fronts what, personal vs company
+  -- rider) lives in mbg_compute_ride_split so it can't drift between here and
+  -- the company-pricing trigger.
+  SELECT s.o_rider_earning, s.o_chair_total, s.o_platform_net
+    INTO v_rider_earning, v_chair_total, v_platform_net
+    FROM public.mbg_compute_ride_split(
+      v_fare, v_is_boda, v_rider.business_profile_id IS NOT NULL, p_payment_method
+    ) s;
 
   SELECT id INTO v_stage_id FROM public.mbg_stages
   WHERE is_active = true AND location_lat IS NOT NULL AND location_lng IS NOT NULL
@@ -286,9 +419,18 @@ BEGIN
     v_multiplier, v_rider_earning, v_chair_total,
     p_order_notes, p_payment_method, p_cart, p_max_delivery_hours, v_expense_classification,
     v_customer_business_profile_id
-  ) RETURNING id INTO v_ride_id;
+  ) RETURNING id, fare, rider_earning INTO v_ride_id, v_fare, v_rider_earning;
 
-  INSERT INTO public.mbg_ride_platform_fees (ride_id, platform_fee_ugx) VALUES (v_ride_id, v_platform_fee);
+  -- A company rider's own pricing (trg_mbg_apply_business_pricing) can change
+  -- the fare and split as the row is written, so the fee record and the
+  -- response below use what was actually stored, not the pre-insert numbers.
+  SELECT s.o_platform_net INTO v_platform_net
+    FROM public.mbg_compute_ride_split(
+      v_fare, v_is_boda, v_rider.business_profile_id IS NOT NULL, p_payment_method
+    ) s;
+
+  -- ICANera's expected net: the whole pool minus what the chairpersons take.
+  INSERT INTO public.mbg_ride_platform_fees (ride_id, platform_fee_ugx) VALUES (v_ride_id, v_platform_net);
 
   RETURN jsonb_build_object(
     'success', true, 'ride_id', v_ride_id, 'fare', v_fare,
@@ -534,6 +676,7 @@ DECLARE
   v_rider_user_id UUID;
   v_rider_vehicle_type TEXT;
   v_is_boda BOOLEAN;
+  v_is_company BOOLEAN;
   v_customer_user_id UUID;
   v_payment_id UUID;
   v_region RECORD;
@@ -550,9 +693,11 @@ DECLARE
   v_actual_method TEXT;
   v_is_pending_customer_confirmation BOOLEAN;
   v_platform_fee_ugx NUMERIC;
+  v_chairs_paid_ugx NUMERIC := 0;
   ICAN_TO_UGX CONSTANT NUMERIC := 5000;
 BEGIN
-  SELECT id, user_id, vehicle_type::TEXT INTO v_rider_id, v_rider_user_id, v_rider_vehicle_type
+  SELECT id, user_id, vehicle_type::TEXT, business_profile_id IS NOT NULL
+    INTO v_rider_id, v_rider_user_id, v_rider_vehicle_type, v_is_company
   FROM public.mbg_riders WHERE user_id = auth.uid();
   SELECT * INTO v_ride FROM public.mbg_rides WHERE id = p_ride_id AND rider_id = v_rider_id FOR UPDATE;
   IF NOT FOUND THEN
@@ -632,17 +777,16 @@ BEGIN
     WHERE id = v_rider_id;
 
   ELSE
-    -- Cash: the rider keeps the full fare physically. The chairperson
-    -- (boda) is paid immediately out of the platform's float, same as
-    -- before; ICANera's own flat cut is paid the exact same way,
-    -- immediately, out of that same float, rather than discarded. The
-    -- rider's combined debt (chairperson + ICANera, recovered later from
-    -- their next wallet-paid ride) is unchanged — this doesn't add a
-    -- second charge, it just routes the platform's share of what was
-    -- already being collected from the rider to somewhere real.
+    -- Cash: the rider keeps the full fare physically and fronted the whole
+    -- platform pool (customer's 8% + rider's 7%) — that pool is exactly
+    -- fare − rider_earning, and it becomes the rider's debt, recovered from
+    -- their next wallet-paid ride. Out of the platform's float, the
+    -- chairpersons (boda) are paid their share immediately, and ICANera is
+    -- credited the rest of the pool immediately (below) rather than discarded.
     v_commission_due_ugx := v_ride.fare - v_ride.rider_earning;
 
-    IF v_is_boda AND v_payment_id IS NOT NULL THEN
+    -- Chairpersons are paid on personal boda rides only, never company rides.
+    IF v_is_boda AND NOT COALESCE(v_is_company, FALSE) AND v_payment_id IS NOT NULL THEN
       SELECT s.parish_id AS parish_id, p.subcounty_id AS subcounty_id, sc.division_id AS division_id, dv.district_id AS district_id
       INTO v_region
       FROM public.mbg_stages s
@@ -672,6 +816,7 @@ BEGIN
 
           IF v_chair_user_id IS NOT NULL AND v_amount_ugx > 0 THEN
             PERFORM public.mbg_credit_ride_earning(v_chair_user_id, v_amount_ican, 'mybodaguy', p_ride_id::TEXT, v_level.region_type::TEXT || ' chairperson commission (cash settlement)');
+            v_chairs_paid_ugx := v_chairs_paid_ugx + v_amount_ugx;
             INSERT INTO public.mbg_commissions (
               ride_id, payment_id, recipient_id, recipient_role, region_type, region_id,
               ride_fare, commission_percentage, commission_amount, status, paid_at
@@ -685,7 +830,9 @@ BEGIN
       END IF;
     END IF;
 
-    v_platform_fee_ugx := ROUND(v_ride.fare * v_platform_fee_pct / 100);
+    -- ICANera keeps whatever of the pool the chairpersons didn't take (all of
+    -- it on a non-boda ride or when a chair seat is empty).
+    v_platform_fee_ugx := GREATEST(v_commission_due_ugx - v_chairs_paid_ugx, 0);
     IF v_platform_fee_ugx > 0 THEN
       PERFORM public.fn_credit_platform_fee_to_business(
         p_amount_ican      => ROUND(v_platform_fee_ugx / ICAN_TO_UGX, 8),
@@ -748,6 +895,7 @@ DECLARE
   v_rider_user_id UUID;
   v_rider_vehicle_type TEXT;
   v_is_boda BOOLEAN;
+  v_is_company BOOLEAN;
   v_payment_id UUID;
   v_region RECORD;
   v_level RECORD;
@@ -757,6 +905,9 @@ DECLARE
   v_amount_ican NUMERIC;
   v_fare_ican NUMERIC;
   v_rider_credit_ican NUMERIC;
+  v_rider_gross_ican NUMERIC;
+  v_chairs_paid_ican NUMERIC := 0;
+  v_platform_share_ican NUMERIC;
   v_debt_ugx NUMERIC;
   v_debt_ican NUMERIC;
   v_recovered_ican NUMERIC;
@@ -770,7 +921,8 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Rider already paid for this ride');
   END IF;
 
-  SELECT id, user_id, vehicle_type::TEXT INTO v_rider_id, v_rider_user_id, v_rider_vehicle_type
+  SELECT id, user_id, vehicle_type::TEXT, business_profile_id IS NOT NULL
+    INTO v_rider_id, v_rider_user_id, v_rider_vehicle_type, v_is_company
   FROM public.mbg_riders WHERE id = v_ride.rider_id;
   IF v_rider_id IS NULL THEN
     RETURN jsonb_build_object('success', false, 'error', 'No rider on this ride');
@@ -781,6 +933,7 @@ BEGIN
   v_is_boda := v_rider_vehicle_type IN ('motorcycle', 'bicycle', 'tuktuk');
   v_fare_ican := ROUND(v_ride.fare / ICAN_TO_UGX, 8);
   v_rider_credit_ican := ROUND(v_fare_ican * v_ride.rider_earning / NULLIF(v_ride.fare, 0), 8);
+  v_rider_gross_ican  := v_rider_credit_ican;
 
   -- Recover any outstanding cash-commission debt first...
   SELECT cash_commission_debt_ugx INTO v_debt_ugx FROM public.mbg_riders WHERE id = v_rider_id;
@@ -812,7 +965,8 @@ BEGIN
     PERFORM public.mbg_credit_ride_earning(v_rider_user_id, v_rider_credit_ican, 'mybodaguy', p_ride_id::TEXT, 'Ride earning');
   END IF;
 
-  IF v_is_boda AND v_payment_id IS NOT NULL THEN
+  -- Chairpersons are paid on personal boda rides only, never company rides.
+  IF v_is_boda AND NOT COALESCE(v_is_company, FALSE) AND v_payment_id IS NOT NULL THEN
     SELECT s.parish_id AS parish_id, p.subcounty_id AS subcounty_id, sc.division_id AS division_id, dv.district_id AS district_id
     INTO v_region
     FROM public.mbg_stages s
@@ -842,6 +996,7 @@ BEGIN
 
         IF v_chair_user_id IS NOT NULL AND v_amount_ugx > 0 THEN
           PERFORM public.mbg_credit_ride_earning(v_chair_user_id, v_amount_ican, 'mybodaguy', p_ride_id::TEXT, v_level.region_type::TEXT || ' chairperson commission');
+          v_chairs_paid_ican := v_chairs_paid_ican + v_amount_ican;
           INSERT INTO public.mbg_commissions (
             ride_id, payment_id, recipient_id, recipient_role, region_type, region_id,
             ride_fare, commission_percentage, commission_amount, status, paid_at
@@ -853,6 +1008,23 @@ BEGIN
         END IF;
       END LOOP;
     END IF;
+  END IF;
+
+  -- ICANera's real share of the rider's slice: whatever of the fare was held
+  -- back from the rider (fare − rider_earning) that the chairpersons didn't
+  -- take. Credited for real, once (idempotent per ride), never allowed to
+  -- fail the payout. (The customer's own 8% was already credited when the
+  -- wallet was charged.)
+  v_platform_share_ican := ROUND(v_fare_ican - v_rider_gross_ican - v_chairs_paid_ican, 8);
+  IF v_platform_share_ican > 0 THEN
+    PERFORM public.fn_credit_platform_fee_to_business(
+      p_amount_ican      => v_platform_share_ican,
+      p_source_app       => 'mybodaguy',
+      p_source_reference => 'ride-rider-cut:' || p_ride_id::text,
+      p_fee_type         => 'icanera_platform_fee',
+      p_actor_user_id    => v_rider_user_id,
+      p_note             => format('ICANera share of the rider slice on ride/delivery %s (after chairperson payouts)', p_ride_id)
+    );
   END IF;
 
   UPDATE public.mbg_rides SET rider_paid_at = now(), updated_at = now() WHERE id = p_ride_id;

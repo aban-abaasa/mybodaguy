@@ -47,13 +47,13 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
 
     setProcessing(true);
     try {
-      await sellICAN({
+      const result = await sellICAN({
         userId,
         icanAmount: parseFloat(icanAmount),
         reference: `MBG-SELL-${Date.now()}`,
       });
-      
-      toast.success(`Successfully sold ${formatICAN(parseFloat(icanAmount))} ICAN for UGX ${ugxAmount.toLocaleString()}!`);
+
+      toast.success(`Successfully sold ${formatICAN(parseFloat(icanAmount))} ICAN for UGX ${result.ugx_payout.toLocaleString()} (after fees) — added to your ICANera Wallet balance!`);
       setIcanAmount('');
       if (onSuccess) onSuccess();
     } catch (error: any) {
@@ -130,8 +130,8 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
         <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-3">
           <p className="text-xs text-amber-200 font-semibold mb-2">ℹ️ Payout Information</p>
           <ul className="text-xs text-amber-200/80 space-y-1">
-            <li>✓ Cash payout handled by admin/cashier</li>
-            <li>✓ Contact support to arrange pickup</li>
+            <li>✓ Credited instantly to your ICANera Wallet balance</li>
+            <li>✓ To cash out to mobile money/bank, use "Send Out" instead</li>
             <li>✓ Floor price: 1 ICAN = UGX 5,000</li>
           </ul>
         </div>
