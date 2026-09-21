@@ -104,6 +104,9 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   // A timeout or gateway error comes back as an HTML page, not JSON.
   const data = await res.json().catch(() => ({} as any));
   if (!res.ok || data.success === false) {
+    // A server-side misconfiguration carries the reason in `detail` — keep it
+    // out of the customer-facing message but make it easy to find.
+    if (data.detail) console.error(`[journey API] ${path}: ${data.code || 'error'} — ${data.detail}`);
     if (!data.error && (res.status === 502 || res.status === 504)) {
       throw new Error('The server took too long to respond — please try again.');
     }

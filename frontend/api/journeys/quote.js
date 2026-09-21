@@ -1,11 +1,19 @@
-import { supabaseAdmin } from '../_lib/supabaseAdmin.js';
 import { applyCors } from '../_lib/cors.js';
-import { requireUser, requireMatchingUser } from '../_lib/auth.js';
+import { loadServer, sendMisconfigured } from '../_lib/loadServer.js';
 import { priceJourney, UnsupportedCurrencyError, PriceUnavailableError } from '../_lib/pricing.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method not allowed' });
+
+  let server;
+  try {
+    server = await loadServer();
+  } catch (err) {
+    return sendMisconfigured(res, err);
+  }
+  const { supabaseAdmin, requireUser, requireMatchingUser } = server;
+
   const user = await requireUser(req, res);
   if (!user) return;
 
