@@ -6,6 +6,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowUpRight, X, Loader } from 'lucide-react';
 import jsQR from 'jsqr';
+import ScanFrameOverlay from './ScanFrameOverlay';
 import { supabase } from '../../services/supabaseClient';
 
 const PayMoneyModal = ({ 
@@ -369,14 +370,7 @@ const PayMoneyModal = ({
             <canvas ref={canvasRef} className="hidden" />
             
             {/* Scanning Overlay */}
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-64 h-64 border-4 border-orange-400 rounded-lg animate-pulse">
-                <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-orange-400"></div>
-                <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-orange-400"></div>
-                <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-orange-400"></div>
-                <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-orange-400"></div>
-              </div>
-            </div>
+            {cameraActive && <ScanFrameOverlay hint="Point at the payment QR code" frameClassName="inset-x-[15%] top-[15%] bottom-[22%]" />}
 
             {/* Status Indicator */}
             {!cameraActive && (

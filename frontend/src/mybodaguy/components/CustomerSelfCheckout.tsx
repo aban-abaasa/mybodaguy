@@ -14,6 +14,7 @@ import {
   type ICANBalance,
 } from '../services/icanWalletService';
 import ProductPicker, { CartLine } from './ProductPicker';
+import ScanFrameOverlay from './ScanFrameOverlay';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -674,7 +675,8 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
 
       {/* ── Camera live view ────────────────────────────────────────────── */}
       {state === 'scanning' && (
-        <div className="bg-black rounded-2xl overflow-hidden relative">
+        <div className="bg-black rounded-2xl overflow-hidden">
+          <div className="relative overflow-hidden">
           <video
             ref={videoRef}
             className="w-full object-cover"
@@ -682,21 +684,12 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             playsInline
             muted
           />
-          {/* Crosshair overlay */}
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-48 h-48 border-2 border-orange-400 rounded-lg opacity-80">
-              <div className="absolute top-0 left-0 w-6 h-6 border-t-4 border-l-4 border-orange-400 rounded-tl-lg" />
-              <div className="absolute top-0 right-0 w-6 h-6 border-t-4 border-r-4 border-orange-400 rounded-tr-lg" />
-              <div className="absolute bottom-0 left-0 w-6 h-6 border-b-4 border-l-4 border-orange-400 rounded-bl-lg" />
-              <div className="absolute bottom-0 right-0 w-6 h-6 border-b-4 border-r-4 border-orange-400 rounded-br-lg" />
-            </div>
+          <ScanFrameOverlay
+            hint={detectorSupported ? 'Point camera at product barcode' : 'Camera open — type barcode below'}
+            frameClassName="inset-x-[12%] top-[14%] bottom-[24%]"
+          />
           </div>
-          <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 p-4">
-            <p className="text-white text-center text-sm mb-3">
-              {detectorSupported
-                ? 'Point camera at product barcode'
-                : 'Camera open — type barcode below'}
-            </p>
+          <div className="bg-gray-900 p-4">
             {/* Manual entry while camera is open */}
             <div className="flex gap-2">
               <input
