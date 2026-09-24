@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import App from "./App";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
+import PushAlertsPrompt from "./components/PushAlertsPrompt";
 import VerifyReceiptPage from "./mybodaguy/components/VerifyReceiptPage";
 import SupportConsole from "./mybodaguy/pages/SupportConsole";
 import { captureReferralFromUrl } from "./mybodaguy/services/referralService";
@@ -79,6 +80,7 @@ createRoot(document.getElementById("root")!).render(
     <ThemeProvider>
       <App />
       <PWAInstallPrompt />
+      <PushAlertsPrompt />
     </ThemeProvider>
   )
 );

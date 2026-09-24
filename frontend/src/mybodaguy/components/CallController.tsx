@@ -318,6 +318,14 @@ export default function CallController({
     ring();
     ringSendIntervalRef.current = window.setInterval(ring, 3000);
 
+    // The ring above only reaches a phone that has the app open. This one push
+    // wakes the other person's phone (if they turned on alerts) so they can open
+    // the app and pick up while the ring is still going. Best-effort: a failed
+    // push must never stop the call itself.
+    supabase
+      .rpc('mbg_notify_incoming_call', { p_ride_id: rideId, p_caller_name: selfName, p_video: outgoingRequest === 'video' })
+      .then(({ error }) => { if (error) console.warn('[CallController] incoming-call push failed:', error.message); });
+
     outgoingTimeoutRef.current = window.setTimeout(() => {
       setPhase(p => {
         if (p !== 'outgoing') return p;
