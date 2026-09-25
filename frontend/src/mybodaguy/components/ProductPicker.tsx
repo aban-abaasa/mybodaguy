@@ -4,7 +4,7 @@
  * builds a cart from. Backed by the shared public.products/inventory tables
  * (see productService.ts) — no mock data.
  */
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Minus, Plus, Image as ImageIcon, ShoppingCart, Search, Store } from 'lucide-react';
 import { productService, Product, SupermarketProfile } from '../services/productService';
 
@@ -18,19 +18,23 @@ interface ProductPickerProps {
   onCartChange: (lines: CartLine[]) => void;
   /** The store's own price currency. Defaults to UGX (whole shillings); any other is shown to 2 decimals, matching how the server prices it. */
   currency?: string;
+  /** Quantities already chosen elsewhere (product id -> qty) for THIS store, so a basket started on another screen carries over. */
+  initialQty?: Record<string, number>;
 }
 
-export default function ProductPicker({ supermarketId, onCartChange, currency = 'UGX' }: ProductPickerProps) {
+export default function ProductPicker({ supermarketId, onCartChange, currency = 'UGX', initialQty }: ProductPickerProps) {
   const [profile, setProfile] = useState<SupermarketProfile | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [qtyById, setQtyById] = useState<Record<string, number>>({});
+  const [qtyById, setQtyById] = useState<Record<string, number>>(initialQty ?? {});
+  // The basket handed in belongs to the store it arrived with; any other store starts empty.
+  const initialFor = useRef<string | null>(initialQty ? supermarketId : null);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('All');
 
   useEffect(() => {
     setLoading(true);
-    setQtyById({});
+    if (initialFor.current !== supermarketId) setQtyById({});
     setSearch('');
     setActiveCategory('All');
     Promise.all([

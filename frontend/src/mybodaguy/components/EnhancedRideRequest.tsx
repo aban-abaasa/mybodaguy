@@ -14,6 +14,7 @@ import JourneyTracker from './JourneyTracker';
 import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type CountryLookup } from '../services/geocodeService';
 import { verifyPin } from '../services/pinService';
 import { productService, type Product } from '../services/productService';
+import type { ImportStore } from '../services/journeyService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
@@ -71,6 +72,10 @@ interface Supermarket {
   latitude: number | null;
   longitude: number | null;
   business_type: string;
+  // Where the store is and the currency its prices are written in (set by its owner). A store
+  // in a country other than the customer's is bought from as a complete journey.
+  country?: string | null;
+  price_currency?: string | null;
 }
 
 // Store type filter — supermarkets, hotels, boutiques, and restaurants/cafés
@@ -78,10 +83,11 @@ interface Supermarket {
 // delivery_mode value stays 'supermarket' regardless of the target's actual
 // business_type (see mbg_request_ride / mbg_rides CHECK constraint) — it
 // just means "structured store delivery scoped to a supermarket_id".
-type BusinessTypeFilter = 'all' | 'supermarket' | 'hotel' | 'boutique' | 'restaurant_cafe';
+type BusinessTypeFilter = 'all' | 'abroad' | 'supermarket' | 'hotel' | 'boutique' | 'restaurant_cafe';
 
 const BUSINESS_TYPE_FILTERS: { value: BusinessTypeFilter; label: string; emoji: string }[] = [
   { value: 'all', label: 'All', emoji: '🏬' },
+  { value: 'abroad', label: 'Abroad', emoji: '🌍' },
   { value: 'supermarket', label: 'Supermarkets', emoji: '🏪' },
   { value: 'hotel', label: 'Hotels', emoji: '🏨' },
   { value: 'boutique', label: 'Boutiques', emoji: '👗' },
@@ -461,12 +467,23 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const dropoffRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Try with each store's country + price currency first (ADD_JOURNEY_STORE_IMPORT.sql); without
+    // those columns the list still loads, just with no store counted as "abroad".
     supabase
       .from('supermarkets')
-      .select('id, name, location, address, latitude, longitude, business_type')
+      .select('id, name, location, address, latitude, longitude, business_type, country, price_currency')
       .eq('is_active', true)
       .order('name', { ascending: true })
-      .then(async ({ data, error }) => {
+      .then(async (withCountry) => {
+        if (!withCountry.error) {
+          setSupermarkets(withCountry.data || []);
+          return;
+        }
+        const { data, error } = await supabase
+          .from('supermarkets')
+          .select('id, name, location, address, latitude, longitude, business_type')
+          .eq('is_active', true)
+          .order('name', { ascending: true });
         if (error) {
           // latitude/longitude migration not applied yet on this project —
           // degrade gracefully instead of losing the supermarket list.
@@ -514,6 +531,27 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       });
   }, []);
 
+  // Where the customer is: their live position, else the country on their profile, else the
+  // pickup they chose, else Uganda (the primary market). A store in any OTHER country is "abroad":
+  // buying from it is a complete journey (courier, flight or ship, courier), not a local delivery.
+  const [gpsCountry, setGpsCountry] = useState<CountryLookup | null>(null);
+  const [profileCountry, setProfileCountry] = useState<string | null>(null);
+  useEffect(() => {
+    if (!customerGpsLocation) return;
+    reverseGeocodeCountry(customerGpsLocation.lat, customerGpsLocation.lng).then(setGpsCountry);
+  }, [customerGpsLocation?.lat, customerGpsLocation?.lng]);
+  useEffect(() => {
+    if (!customerId) return;
+    supabase.from('mbg_user_profiles').select('country').eq('user_id', customerId).maybeSingle()
+      .then(({ data }) => setProfileCountry((data as any)?.country ?? null));
+  }, [customerId]);
+  const homeCountry = gpsCountry?.name ?? profileCountry ?? pickupCountry?.name ?? 'Uganda';
+  // Only a store that can actually be shipped from counts: it needs a country and a location.
+  const isAbroad = (sm: Supermarket) => !!sm.country && sm.latitude != null && sm.longitude != null && sm.country !== homeCountry;
+  const abroadStores = supermarkets.filter(isAbroad);
+  const selectedStore = supermarkets.find(sm => sm.id === selectedSupermarketId) ?? null;
+  const selectedStoreAbroad = !!selectedStore && isAbroad(selectedStore);
+
   // Store list filtered by the chosen business type, then ranked nearest
   // first (once the customer's GPS position is known) so "recommend the
   // nearest available store" is an actual sort, not just a label. Stores
@@ -522,7 +560,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // choosable, just not rankable.
   const filteredStores = (storeTypeFilter === 'all'
     ? supermarkets
-    : supermarkets.filter(sm => sm.business_type === storeTypeFilter)
+    : storeTypeFilter === 'abroad'
+      ? abroadStores
+      : supermarkets.filter(sm => sm.business_type === storeTypeFilter)
   )
     .map(sm => ({
       ...sm,
@@ -531,13 +571,15 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         : null,
     }))
     .sort((a, b) => {
+      // Stores in the customer's own country first; stores abroad after them.
+      if (isAbroad(a) !== isAbroad(b)) return isAbroad(a) ? 1 : -1;
       if (a.distanceKm == null && b.distanceKm == null) return 0;
       if (a.distanceKm == null) return 1;
       if (b.distanceKm == null) return -1;
       return a.distanceKm - b.distanceKm;
     });
 
-  const nearestStoreId = filteredStores.find(sm => sm.distanceKm != null)?.id ?? null;
+  const nearestStoreId = filteredStores.find(sm => !isAbroad(sm) && sm.distanceKm != null)?.id ?? null;
 
   // For "normal" (non-store) delivery, ranked across every registered store
   // regardless of type since that flow never shows the type pills. Same
@@ -547,6 +589,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // shows up here with its real products, just not distance-ranked, instead
   // of the whole preview going empty because nothing happens to have geodata.
   const nearestAnyStores = supermarkets
+    .filter(sm => !isAbroad(sm))
     .map(sm => ({
       ...sm,
       distanceKm: (customerGpsLocation && sm.latitude != null && sm.longitude != null)
@@ -583,7 +626,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const previewCandidateIds = nearestAnyStores.slice(0, 8).map(sm => sm.id).join(',');
   useEffect(() => {
     if (serviceType !== 'delivery' || deliveryMode !== 'normal') return;
-    const targets = nearestAnyStores.slice(0, 8).filter(sm => !(sm.id in nearbyStoreProducts));
+    const targets = [...nearestAnyStores.slice(0, 8), ...abroadStores.slice(0, 4)].filter(sm => !(sm.id in nearbyStoreProducts));
     if (targets.length === 0) return;
     let cancelled = false;
     setLoadingNearbyProducts(true);
@@ -601,12 +644,40 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     }).finally(() => { if (!cancelled) setLoadingNearbyProducts(false); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [serviceType, deliveryMode, previewCandidateIds]);
+  }, [serviceType, deliveryMode, previewCandidateIds, abroadStores.map(sm => sm.id).join(',')]);
 
   // Jumping straight into a real single-store order from the nearby-products
   // preview — an order can only ever belong to one supermarket_id, so
   // picking a product here commits to that store the same way manually
   // searching and selecting it in "From a Store" mode would.
+  // A product from a store abroad can't be delivered by a rider: it is a complete-journey order
+  // (courier from the store, flight or ship, courier to the door). Choosing one opens Book a Journey
+  // on "Buy abroad" with that store and basket already in place.
+  const [importLaunch, setImportLaunch] = useState<{ store: ImportStore; lines: CartLine[] } | null>(null);
+  const launchImport = (sm: Supermarket, lines: CartLine[]) => {
+    setImportLaunch({
+      store: {
+        id: sm.id, name: sm.name, businessType: sm.business_type, address: sm.address,
+        latitude: sm.latitude as number, longitude: sm.longitude as number,
+        country: sm.country as string, currency: sm.price_currency || 'UGX', productCount: 0,
+      },
+      lines,
+    });
+    setResumeJourneyId(null);
+    setBookingMode('journey');
+  };
+  const leaveImportLaunch = () => {
+    setImportLaunch(null);
+    setSelectedSupermarketId('');
+    setDeliveryCart([]);
+  };
+  // In "From a Store" mode: the moment a product from a store abroad is chosen, the journey takes over.
+  useEffect(() => {
+    if (serviceType !== 'delivery' || deliveryMode !== 'supermarket' || deliveryCart.length === 0) return;
+    if (selectedStore && selectedStoreAbroad) launchImport(selectedStore, deliveryCart);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deliveryCart]);
+
   const jumpToStoreProduct = (supermarketId: string) => {
     setDeliveryMode('supermarket');
     setStoreTypeFilter('all');
@@ -638,7 +709,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   useEffect(() => {
     if (serviceType !== 'delivery' || deliveryMode !== 'supermarket') return;
     if (selectedSupermarketId) return;
-    const fallback = nearestStoreId ?? filteredStores[0]?.id ?? null;
+    // Never auto-pick a store abroad: it would drop the customer into a shipping order they didn't ask for.
+    const fallback = nearestStoreId ?? filteredStores.find(sm => !isAbroad(sm))?.id ?? null;
     if (fallback) setSelectedSupermarketId(fallback);
   }, [serviceType, deliveryMode, selectedSupermarketId, nearestStoreId, filteredStores]);
 
@@ -686,7 +758,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       return;
     }
     const sm = supermarkets.find(s => s.id === selectedSupermarketId);
-    if (!sm) {
+    if (!sm || isAbroad(sm)) {
       setPickupIsAutoFromSupermarket(false);
       return;
     }
@@ -723,7 +795,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       }
     });
     return () => { cancelled = true; };
-  }, [serviceType, deliveryMode, selectedSupermarketId, supermarkets]);
+  }, [serviceType, deliveryMode, selectedSupermarketId, supermarkets, homeCountry]);
 
   // Smart default drop-off: pre-fill (but keep editable) from the
   // customer's saved default area when starting a fresh request.
@@ -1436,15 +1508,16 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     return (
       <div className="space-y-4">
         <button
-          onClick={() => { setBookingMode('ride'); setResumeJourneyId(null); onJourneyClosed?.(); }}
+          onClick={() => { setBookingMode('ride'); setResumeJourneyId(null); leaveImportLaunch(); onJourneyClosed?.(); }}
           className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1 font-medium"
         >
-          <ArrowLeft size={16} /> Back to Book a Ride
+          <ArrowLeft size={16} /> {serviceType === 'delivery' ? 'Back to Delivery' : 'Back to Book a Ride'}
         </button>
         <JourneyBookingFlow
-          key={resumeJourneyId ?? 'new-journey'}
+          key={resumeJourneyId ?? (importLaunch ? `import-${importLaunch.store.id}` : 'new-journey')}
           customerId={customerId}
           resumeJourneyId={resumeJourneyId ?? undefined}
+          initialImport={importLaunch ? { ...importLaunch, homeCountry } : undefined}
           initialBookingKind={prefillFromAutoRedirect ? (serviceType === 'delivery' ? 'ship' : 'fly') : undefined}
           initialShipPickup={
             prefillFromAutoRedirect && serviceType === 'delivery'
@@ -1799,6 +1872,43 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                 );
               })()}
 
+              {deliveryMode === 'normal' && (() => {
+                const abroadPreview = abroadStores.filter(sm => (nearbyStoreProducts[sm.id]?.length ?? 0) > 0).slice(0, 3);
+                if (abroadPreview.length === 0) return null;
+                return (
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-1.5">🌍 Or buy from a store abroad — delivered to your door</p>
+                    <div className="space-y-3">
+                      {abroadPreview.map(sm => (
+                        <div key={sm.id} className="border border-violet-200 rounded-lg p-2.5 bg-violet-50/40">
+                          <button type="button" onClick={() => { setDeliveryMode('supermarket'); setStoreTypeFilter('abroad'); setSelectedSupermarketId(sm.id); }} className="w-full flex items-center justify-between gap-2 mb-2 text-left">
+                            <span className="min-w-0 truncate text-xs font-semibold text-slate-700">
+                              {typeEmoji(sm.business_type)} {sm.name}
+                              <span className="ml-1.5 text-[10px] font-normal text-violet-600">🌍 {sm.country} · {sm.price_currency || 'UGX'}</span>
+                            </span>
+                            <span className="flex-shrink-0 text-[11px] text-violet-600 font-medium">Shop here →</span>
+                          </button>
+                          <div className="flex gap-2 overflow-x-auto pb-0.5">
+                            {(nearbyStoreProducts[sm.id] || []).map(p => (
+                              <button key={p.id} type="button" onClick={() => launchImport(sm, [{ product: p, qty: 1 }])} className="flex-shrink-0 w-20 text-left">
+                                <div className="w-20 h-20 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
+                                  {p.image_url ? <img src={p.image_url} alt={p.name} className="w-full h-full object-cover" /> : <Package size={18} className="text-slate-300" />}
+                                </div>
+                                <p className="text-[10px] text-slate-700 truncate mt-1">{p.name}</p>
+                                <p className="text-[10px] text-violet-700 font-semibold">
+                                  {sm.price_currency || 'UGX'} {(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <p className="text-[10px] text-slate-400 mt-1.5">Tapping a product opens a complete delivery: courier, flight or ship, courier.</p>
+                  </div>
+                );
+              })()}
+
               {deliveryMode === 'supermarket' && (
                 <>
                   <div className="flex gap-1.5 overflow-x-auto pb-0.5">
@@ -1849,8 +1959,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                           {sm.id === nearestStoreId && (
                             <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-semibold">Nearest</span>
                           )}
+                          {isAbroad(sm) && (
+                            <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded-full font-semibold">🌍 {sm.country}</span>
+                          )}
                         </span>
-                        {sm.distanceKm != null && (
+                        {sm.distanceKm != null && !isAbroad(sm) && (
                           <span className="flex-shrink-0 text-xs text-slate-400">
                             {sm.distanceKm < 1 ? `${Math.round(sm.distanceKm * 1000)}m` : `${sm.distanceKm.toFixed(1)}km`}
                           </span>
@@ -1864,8 +1977,20 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                     )}
                   </div>
 
+                  {selectedSupermarketId && selectedStoreAbroad && selectedStore && (
+                    <div className="p-3 rounded-lg border border-violet-200 bg-violet-50 text-xs text-violet-800 flex items-start gap-2">
+                      <Plane size={15} className="mt-0.5 flex-shrink-0" />
+                      <span>
+                        <span className="font-semibold">{selectedStore.name} is in {selectedStore.country}.</span> Pick what you want and we'll open a complete delivery — a courier collects it there, it travels by air or sea, and a courier brings it to your door. Prices are in {selectedStore.price_currency || 'UGX'}.
+                      </span>
+                    </div>
+                  )}
                   {selectedSupermarketId && (
-                    <ProductPicker supermarketId={selectedSupermarketId} onCartChange={setDeliveryCart} />
+                    <ProductPicker
+                      supermarketId={selectedSupermarketId}
+                      currency={selectedStoreAbroad ? selectedStore?.price_currency || 'UGX' : undefined}
+                      onCartChange={setDeliveryCart}
+                    />
                   )}
 
                   {selectedSupermarketId && deliveryCart.length > 0 && (
@@ -1981,7 +2106,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               <CheckCircle size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
             )}
           </div>
-          {serviceType === 'delivery' && deliveryMode === 'supermarket' && selectedSupermarketId && !pickupIsAutoFromSupermarket && !pickupGeocodingStore && (
+          {serviceType === 'delivery' && deliveryMode === 'supermarket' && selectedSupermarketId && !selectedStoreAbroad && !pickupIsAutoFromSupermarket && !pickupGeocodingStore && (
             <p className="text-xs text-amber-600 mt-1">
               Couldn't automatically locate this store — please confirm the pickup point manually.
             </p>

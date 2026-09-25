@@ -26,15 +26,19 @@ interface ImportStoreStepProps {
   goods: ImportGoodsQuote | null;
   onGoodsChange: (goods: ImportGoodsQuote | null) => void;
   onContinue: () => void;
+  /** A basket already started elsewhere (e.g. the Delivery tab) for `store`. */
+  initialLines?: CartLine[];
 }
 
 export default function ImportStoreStep({
-  homeCountry, onHomeCountryChange, store, onStoreChange, onCartChange, goods, onGoodsChange, onContinue,
+  homeCountry, onHomeCountryChange, store, onStoreChange, onCartChange, goods, onGoodsChange, onContinue, initialLines,
 }: ImportStoreStepProps) {
   const [stores, setStores] = useState<ImportStore[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [countryFilter, setCountryFilter] = useState('all');
-  const [lines, setLines] = useState<CartLine[]>([]);
+  const [lines, setLines] = useState<CartLine[]>(initialLines ?? []);
+  // Only meaningful for the store it arrived with (ProductPicker ignores it for any other store).
+  const [initialQty, setInitialQty] = useState<Record<string, number> | undefined>(() => initialLines && initialLines.length ? Object.fromEntries(initialLines.map((l) => [l.product.id, l.qty])) : undefined);
   const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
 
@@ -92,7 +96,7 @@ export default function ImportStoreStep({
           id="jb-import-home"
           className="classic-input"
           value={homeCountry}
-          onChange={(e) => { onHomeCountryChange(e.target.value); onStoreChange(null); setLines([]); setCountryFilter('all'); }}
+          onChange={(e) => { onHomeCountryChange(e.target.value); onStoreChange(null); setLines([]); setInitialQty(undefined); setCountryFilter('all'); }}
         >
           {COUNTRIES.map((c) => <option key={c.iso2 || c.name} value={c.name}>{c.name}</option>)}
         </select>
@@ -145,10 +149,10 @@ export default function ImportStoreStep({
               <Store size={16} className="shrink-0" />
               <span className="truncate">{store.name} · {store.country}</span>
             </span>
-            <button type="button" onClick={() => { onStoreChange(null); setLines([]); }} className="shrink-0 text-xs font-semibold text-[#a17c28] underline">Change store</button>
+            <button type="button" onClick={() => { onStoreChange(null); setLines([]); setInitialQty(undefined); }} className="shrink-0 text-xs font-semibold text-[#a17c28] underline">Change store</button>
           </div>
 
-          <ProductPicker supermarketId={store.id} currency={store.currency} onCartChange={setLines} />
+          <ProductPicker supermarketId={store.id} currency={store.currency} onCartChange={setLines} initialQty={initialQty} />
 
           {quoting && <p className="flex items-center justify-center gap-2 text-xs text-slate-500" role="status"><Loader2 className="animate-spin" size={14} /> Pricing your basket…</p>}
           {quoteError && <p role="alert" className="text-center text-xs font-medium text-red-600">{quoteError}</p>}
