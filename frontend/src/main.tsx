@@ -1,4 +1,5 @@
 import { createRoot } from "react-dom/client";
+import { injectSpeedInsights } from "@vercel/speed-insights";
 import "./index.css";
 import "leaflet/dist/leaflet.css";
 import App from "./App";
@@ -13,6 +14,9 @@ import { captureReferralFromUrl } from "./mybodaguy/services/referralService";
 // remember the code now, redeem it once the visitor has an account
 // (UnifiedDashboard calls consumePendingReferralCode).
 captureReferralFromUrl();
+
+// Vercel Speed Insights (no-op outside a Vercel deployment).
+injectSpeedInsights();
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {

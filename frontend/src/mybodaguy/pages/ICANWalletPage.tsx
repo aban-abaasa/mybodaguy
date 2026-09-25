@@ -1,5 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Bike, Copy, ArrowUp, ArrowDown, RefreshCw, Wallet, TrendingUp, ChevronRight, ShoppingCart, Banknote } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
+import {
+  ArrowDown, ArrowUp, Banknote, CheckCircle2, ChevronDown, Gem, Landmark, Receipt, RotateCcw, Search, ShoppingCart,
+  Smartphone, Sparkles, Wallet, X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../../services/supabaseClient';
 import {
@@ -19,16 +22,20 @@ import SendIcanOut from '../components/SendIcanOut';
 import SetPinPrompt from '../components/SetPinPrompt';
 import PayMoneyModal from '../components/PayMoneyModal';
 import ReceiveMoneyModal from '../components/ReceiveMoneyModal';
+import {
+  WalletSheet, BalanceCard, QuickActions, ActivityStrip, AddressQr, CopyButton, formatLocalMoney,
+  type WalletAction, type LocalValue, type DayFlow,
+} from '../components/WalletClassic';
 import { hasPinSet, verifyPin } from '../services/pinService';
 import { parseIcanPayCode, payIcanRequest } from '../services/icanPaymentRequestService';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const TX_LABELS: Record<string, string> = {
-  earn: 'Delivery Earned', cashback: 'Cashback', purchase: 'Purchase',
+  earn: 'Earned', cashback: 'Cashback', purchase: 'Purchase',
   transfer_in: 'Received', transfer_out: 'Sent',
   tithe: 'Tithe (10%)', sale: 'Sale', refund: 'Refund',
-  buy: 'Bought ICAN', sell: 'Sold ICAN',
+  buy: 'Bought ICAN', sell: 'Sold ICAN', journey_payment: 'Journey payment',
 };
 
 const APP_LABELS: Record<string, string> = {
@@ -36,11 +43,72 @@ const APP_LABELS: Record<string, string> = {
   'farm-agent': 'AgriBone', mybodaguy: 'BodaGoEra',
 };
 
+const HIDE_KEY = 'ican_wallet_balance_hidden';
+
 function formatDate(ts: string) {
   return new Date(ts).toLocaleDateString('en-UG', {
     day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   });
+}
+
+const timeOf = (ts: string) => new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Every word typed must appear somewhere in the transaction: its name, the app,
+ * the note, the amount (either as shown or plain), the direction, the date
+ * (as "25 Sep 2026", "September", "Today"…), its status or its id.
+ */
+function matchesQuery(tx: ICANTransaction, query: string): boolean {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return true;
+  const d = new Date(tx.created_at);
+  const hay = [
+    TX_LABELS[tx.transaction_type] ?? tx.transaction_type,
+    tx.transaction_type,
+    APP_LABELS[tx.source_app] ?? tx.source_app,
+    tx.note,
+    tx.direction === 'in' ? 'in received incoming' : 'out sent outgoing',
+    formatICAN(tx.ican_amount),
+    String(Number(tx.ican_amount)),
+    d.toLocaleDateString([], { day: 'numeric', month: 'long', year: 'numeric' }),
+    d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' }),
+    d.toLocaleDateString([], { weekday: 'long' }),
+    dayLabel(tx.created_at),
+    tx.status,
+    tx.id,
+    tx.reference_id,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+function dayLabel(ts: string): string {
+  const d = new Date(ts);
+  const today = new Date();
+  const start = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((start(today) - start(d)) / 86_400_000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: d.getFullYear() === today.getFullYear() ? undefined : 'numeric' });
+}
+
+function txTone(tx: ICANTransaction): { text: string; bg: string } {
+  if (tx.transaction_type === 'tithe') return { text: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-500/15' };
+  if (tx.direction === 'in') return { text: 'text-emerald-700 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-500/15' };
+  return { text: 'text-[#9a4a2e] dark:text-rose-400', bg: 'bg-[#f6e6df] dark:bg-rose-500/15' };
+}
+
+function TxIcon({ tx }: { tx: ICANTransaction }) {
+  const tone = txTone(tx);
+  const type = tx.transaction_type as string;
+  let inner: ReactNode;
+  if (type === 'tithe') inner = <span className="text-[11px] font-bold">10%</span>;
+  else if (type === 'buy' || type === 'purchase') inner = <ShoppingCart size={16} />;
+  else if (type === 'sell' || type === 'sale') inner = <Banknote size={16} />;
+  else if (type === 'refund') inner = <RotateCcw size={16} />;
+  else if (type === 'earn' || type === 'cashback') inner = <Sparkles size={16} />;
+  else inner = tx.direction === 'in' ? <ArrowDown size={16} /> : <ArrowUp size={16} />;
+  return <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${tone.bg} ${tone.text}`}>{inner}</span>;
 }
 
 // ─── Send Modal ───────────────────────────────────────────────────────────────
@@ -53,9 +121,9 @@ interface SendModalProps {
 }
 
 const SEND_DESTINATIONS = [
-  { key: 'wallet', label: '💎 ICAN Wallet' },
-  { key: 'mobilemoneyuganda', label: '📱 Mobile Money' },
-  { key: 'bank', label: '🏦 Bank Account' },
+  { key: 'wallet', label: 'ICAN wallet', Icon: Gem },
+  { key: 'mobilemoneyuganda', label: 'Mobile Money', Icon: Smartphone },
+  { key: 'bank', label: 'Bank', Icon: Landmark },
 ] as const;
 
 function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
@@ -119,181 +187,115 @@ function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl my-8">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="font-bold text-lg text-slate-800">Send</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
-        </div>
-
-        <div className="mb-4">
-          <label className="text-slate-600 text-sm font-medium mb-1 block">Send To</label>
-          <div className="flex gap-2">
-            {SEND_DESTINATIONS.map((d) => (
+    <WalletSheet title="Send" onClose={onClose}>
+      <div className="space-y-4">
+        <div>
+          <span className="classic-label">Send to</span>
+          <div className="grid grid-cols-3 gap-2" role="group" aria-label="Send to">
+            {SEND_DESTINATIONS.map(({ key, label, Icon }) => (
               <button
-                key={d.key}
+                key={key}
                 type="button"
-                onClick={() => setDestination(d.key)}
+                aria-pressed={destination === key}
+                onClick={() => setDestination(key)}
                 disabled={loading}
-                className={`flex-1 py-2 rounded-lg text-xs sm:text-sm font-medium border ${
-                  destination === d.key ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-slate-200 text-slate-600'
-                }`}
+                className={`classic-tile flex flex-col items-center gap-1.5 p-3 text-center ${destination === key ? 'is-active' : ''}`}
               >
-                {d.label}
+                <Icon size={18} className="text-[#a17c28]" />
+                <span className="text-[12px] font-semibold leading-tight">{label}</span>
               </button>
             ))}
           </div>
-          <p className="text-slate-400 text-xs mt-1">
-            Cards can only receive top-ups, not payouts — send to a card isn't supported by any provider we integrate with.
+          <p className="mt-2 text-[11px] leading-snug text-slate-500">
+            Cards can only receive top-ups, not payouts — sending to a card isn't supported by any provider we integrate with.
           </p>
         </div>
 
-        <div className="space-y-4">
-          {destination === 'wallet' && (
-            <div>
-              <label className="text-slate-600 text-sm font-medium mb-1 block">Recipient Wallet Address</label>
-              <input
-                value={address} onChange={e => setAddress(e.target.value)}
-                placeholder="ICA-XXXXXXXXXXXXXXXX"
-                className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400"
-              />
-            </div>
-          )}
-
-          {destination === 'mobilemoneyuganda' && (
-            <>
-              <div className="flex gap-2">
-                {(['MTN', 'AIRTEL'] as const).map((n) => (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setNetwork(n)}
-                    disabled={loading}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium border ${
-                      network === n ? 'bg-orange-500 border-orange-500 text-white' : 'bg-white border-slate-200 text-slate-600'
-                    }`}
-                  >
-                    {n}
-                  </button>
-                ))}
-              </div>
-              <div>
-                <label className="text-slate-600 text-sm font-medium mb-1 block">Mobile Money Number</label>
-                <input
-                  value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)}
-                  placeholder="e.g. 0770123456"
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400"
-                />
-              </div>
-            </>
-          )}
-
-          {destination === 'bank' && (
-            <>
-              <div>
-                <label className="text-slate-600 text-sm font-medium mb-1 block">Bank Code</label>
-                <input value={bankCode} onChange={e => setBankCode(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400" />
-              </div>
-              <div>
-                <label className="text-slate-600 text-sm font-medium mb-1 block">Account Number</label>
-                <input value={accountNumber} onChange={e => setAccountNumber(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400" />
-              </div>
-              <div>
-                <label className="text-slate-600 text-sm font-medium mb-1 block">Account Holder Name</label>
-                <input value={beneficiaryName} onChange={e => setBeneficiaryName(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400" />
-              </div>
-            </>
-          )}
-
+        {destination === 'wallet' && (
           <div>
-            <label className="text-slate-600 text-sm font-medium mb-1 block">Amount (ICAN)</label>
-            <input
-              type="number" step="0.0001" min="0.0001" max={isPayout ? balance.ican : undefined}
-              value={amount} onChange={e => setAmount(e.target.value)}
-              placeholder="0.0000"
-              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400"
-            />
-            {amount && !isPayout && (
-              <p className="text-slate-400 text-xs mt-1">
-                ≈ UGX {(parseFloat(amount || '0') * ICAN_TO_UGX).toLocaleString()}
-              </p>
-            )}
+            <label className="classic-label" htmlFor="w-send-address">Recipient wallet address</label>
+            <input id="w-send-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="ICA-XXXXXXXXXXXXXXXX" className="classic-input font-mono" />
           </div>
+        )}
 
-          {destination === 'wallet' && (
+        {destination === 'mobilemoneyuganda' && (
+          <>
+            <div className="grid grid-cols-2 gap-2" role="group" aria-label="Network">
+              {(['MTN', 'AIRTEL'] as const).map((n) => (
+                <button key={n} type="button" aria-pressed={network === n} onClick={() => setNetwork(n)} disabled={loading} className={`classic-tile p-2.5 text-center text-sm font-semibold ${network === n ? 'is-active' : ''}`}>
+                  {n}
+                </button>
+              ))}
+            </div>
             <div>
-              <label className="text-slate-600 text-sm font-medium mb-1 block">Note (optional)</label>
-              <input value={note} onChange={e => setNote(e.target.value)} placeholder="What's this for?"
-                className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-orange-400" />
+              <label className="classic-label" htmlFor="w-send-phone">Mobile Money number</label>
+              <input id="w-send-phone" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="e.g. 0770123456" inputMode="tel" className="classic-input" />
             </div>
-          )}
+          </>
+        )}
 
-          {isPayout && amountNum > 0 && (
-            <div className="bg-slate-50 rounded-xl p-4 text-sm space-y-1">
-              <div className="flex justify-between text-slate-500"><span>Fee ({feePercent}%)</span><span>-UGX {(ugxGross - ugxNet).toLocaleString()}</span></div>
-              <div className="flex justify-between text-slate-800 font-semibold pt-1 border-t border-slate-200"><span>Recipient Gets</span><span>UGX {ugxNet.toLocaleString()}</span></div>
+        {destination === 'bank' && (
+          <>
+            <div>
+              <label className="classic-label" htmlFor="w-send-bank">Bank code</label>
+              <input id="w-send-bank" value={bankCode} onChange={(e) => setBankCode(e.target.value)} className="classic-input" />
             </div>
-          )}
+            <div>
+              <label className="classic-label" htmlFor="w-send-acc">Account number</label>
+              <input id="w-send-acc" value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} inputMode="numeric" className="classic-input" />
+            </div>
+            <div>
+              <label className="classic-label" htmlFor="w-send-name">Account holder name</label>
+              <input id="w-send-name" value={beneficiaryName} onChange={(e) => setBeneficiaryName(e.target.value)} className="classic-input" />
+            </div>
+          </>
+        )}
 
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-700 text-xs">
-            {isPayout
-              ? 'Sent via Flutterwave. A 3% cash-out fee applies. If the transfer fails, your ICAN is refunded automatically.'
-              : 'No fee — the recipient receives the full amount you send.'}
+        <div>
+          <label className="classic-label" htmlFor="w-send-amount">Amount (ICAN)</label>
+          <input
+            id="w-send-amount"
+            type="number" step="0.0001" min="0.0001" max={isPayout ? balance.ican : undefined} inputMode="decimal"
+            value={amount} onChange={(e) => setAmount(e.target.value)}
+            placeholder="0.0000"
+            className="classic-input font-classic-display text-[18px] font-bold tabular-nums lining-nums"
+          />
+          <div className="mt-1.5 flex items-center justify-between text-[11.5px] text-slate-500">
+            <span>{amount && !isPayout ? `≈ UGX ${(amountNum * ICAN_TO_UGX).toLocaleString()}` : ' '}</span>
+            <button type="button" className="font-semibold text-[#8a6a1f] hover:underline" onClick={() => setAmount(String(balance.ican))}>
+              Max {formatICAN(balance.ican)}
+            </button>
           </div>
         </div>
 
-        <div className="flex gap-3 mt-5">
-          <button onClick={onClose} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm">Cancel</button>
-          <button onClick={handleSend} disabled={!canSend || loading}
-            className="flex-1 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm disabled:opacity-60">
-            {loading ? 'Sending…' : 'Send'}
+        {destination === 'wallet' && (
+          <div>
+            <label className="classic-label" htmlFor="w-send-note">Note (optional)</label>
+            <input id="w-send-note" value={note} onChange={(e) => setNote(e.target.value)} placeholder="What's this for?" className="classic-input" />
+          </div>
+        )}
+
+        {isPayout && amountNum > 0 && (
+          <div className="rounded-2xl border border-[#c4a052]/30 bg-white/70 p-4 text-sm dark:bg-slate-800/60">
+            <div className="flex items-center text-slate-600 dark:text-slate-300"><span>Fee ({feePercent}%)</span><span className="classic-leader" /><span>−UGX {(ugxGross - ugxNet).toLocaleString()}</span></div>
+            <div className="mt-2 flex items-center font-semibold text-slate-800 dark:text-slate-100"><span>Recipient gets</span><span className="classic-leader" /><span>UGX {ugxNet.toLocaleString()}</span></div>
+          </div>
+        )}
+
+        <p className="rounded-2xl border border-[#c4a052]/35 bg-[#fdf8ea] px-4 py-3 text-[12px] leading-relaxed text-[#5c4410] dark:bg-[#c4a052]/10 dark:text-[#e6c980]">
+          {isPayout
+            ? 'Sent via Flutterwave. A 3% cash-out fee applies. If the transfer fails, your ICAN is refunded automatically.'
+            : 'No fee — the recipient receives the full amount you send.'}
+        </p>
+
+        <div className="grid grid-cols-[1fr_1.4fr] gap-3 pt-1">
+          <button type="button" onClick={onClose} className="classic-btn classic-btn-outline">Cancel</button>
+          <button type="button" onClick={handleSend} disabled={loading || !canSend} className="classic-btn classic-btn-ink">
+            {loading ? 'Sending…' : isPayout ? 'Cash out' : 'Send ICAN'}
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─── Receive Modal ────────────────────────────────────────────────────────────
-
-function ReceiveModal({ address, onClose }: { address: string; onClose: () => void }) {
-  return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md p-6 shadow-2xl text-center">
-        <div className="flex items-center justify-between mb-5">
-          <h2 className="font-bold text-lg text-slate-800">Receive ICAN</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
-        </div>
-        <p className="text-slate-500 text-sm mb-4">Share your wallet address to receive ICAN from any Icanera app.</p>
-        <div className="bg-slate-50 rounded-xl p-4 font-mono text-sm text-slate-700 break-all mb-5">{address}</div>
-        <button onClick={() => { navigator.clipboard.writeText(address); toast.success('Address copied!'); }}
-          className="w-full py-3 rounded-xl bg-orange-500 text-white font-semibold flex items-center justify-center gap-2">
-          <Copy className="w-4 h-4" /> Copy Address
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Buy/Sell Overlays (use ICAN app components directly) ────────────────────
-
-function TradeModal({ title, userId, onClose, onDone, children }: { title: string; userId: string; onClose: () => void; onDone: () => void; children: React.ReactNode }) {
-  return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl">
-        <div className="flex items-center justify-between px-6 pt-5 pb-3 border-b border-slate-100">
-          <h2 className="font-bold text-lg text-slate-800">{title}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 text-xl leading-none">×</button>
-        </div>
-        <div className="p-2">{children}</div>
-        <div className="px-6 pb-5">
-          <button onClick={onClose} className="w-full py-3 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm">Close</button>
-        </div>
-      </div>
-    </div>
+    </WalletSheet>
   );
 }
 
@@ -303,18 +305,31 @@ interface ICANWalletPageProps {
   user: any;
 }
 
+type TxTab = 'all' | 'in' | 'out' | 'tithe';
+
 export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const [balance, setBalance] = useState<ICANBalance>({ ican: 0, ugx: 0, address: null, totalEarned: 0, totalSpent: 0, totalTithe: 0 });
   const [transactions, setTransactions] = useState<ICANTransaction[]>([]);
+  const [local, setLocal] = useState<LocalValue | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'all' | 'in' | 'out' | 'tithe'>('all');
-  const [modal, setModal] = useState<'send' | 'pay' | 'receive' | 'buy' | 'sell' | 'sendout' | null>(null);
+  const [activeTab, setActiveTab] = useState<TxTab>('all');
+  const [historyOpen, setHistoryOpen] = useState(false); // collapsed until asked for
+  const [query, setQuery] = useState('');
+  const [modal, setModal] = useState<WalletAction | 'qr' | null>(null);
   const [selectedTx, setSelectedTx] = useState<ICANTransaction | null>(null);
   const [paymentReceipt, setPaymentReceipt] = useState<any>(null);
-  const [balanceHidden, setBalanceHidden] = useState(false);
+  const [balanceHidden, setBalanceHidden] = useState<boolean>(() => {
+    try { return localStorage.getItem(HIDE_KEY) === '1'; } catch { return false; }
+  });
   const [needsPin, setNeedsPin] = useState(false);
-  const [txHistoryExpanded, setTxHistoryExpanded] = useState(true);
+
+  const toggleHidden = () => {
+    setBalanceHidden((h) => {
+      try { localStorage.setItem(HIDE_KEY, h ? '0' : '1'); } catch { /* private mode — just don't remember it */ }
+      return !h;
+    });
+  };
 
   const loadData = useCallback(async () => {
     if (!user?.id) return;
@@ -327,6 +342,19 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
       setBalance(bal);
       setTransactions(txs);
       hasPinSet(user.id).then((has) => setNeedsPin(!has)).catch(() => {});
+      // The balance in the customer's own currency at the LIVE ICAN price —
+      // the floor-price figure stays as the fallback if the engine can't be reached.
+      supabase.rpc('ican_get_user_wallet_display', { p_user_id: user.id }).then(({ data, error }) => {
+        const row = data?.[0];
+        if (!error && row && Number(row.price_local) > 0) {
+          setLocal({
+            currency: row.currency_code || 'UGX',
+            priceLocal: Number(row.price_local),
+            balanceLocal: Number(row.balance_local),
+            appreciationPct: Number(row.appreciation_pct || 0),
+          });
+        }
+      });
     } catch (e: any) {
       toast.error('Wallet error: ' + e.message);
     }
@@ -396,243 +424,269 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
     URL.revokeObjectURL(url);
   };
 
-  const filteredTx = transactions.filter(tx => {
+  const filteredTx = useMemo(() => transactions.filter((tx) => {
     if (activeTab === 'in') return tx.direction === 'in';
     if (activeTab === 'out') return tx.direction === 'out';
     if (activeTab === 'tithe') return tx.transaction_type === 'tithe';
     return true;
-  });
+  }).filter((tx) => matchesQuery(tx, query)), [transactions, activeTab, query]);
+
+  // History grouped by day, newest first (the query already returns it that way).
+  const groups = useMemo(() => {
+    const out: Array<{ label: string; items: ICANTransaction[] }> = [];
+    for (const tx of filteredTx) {
+      const label = dayLabel(tx.created_at);
+      const last = out[out.length - 1];
+      if (last && last.label === label) last.items.push(tx);
+      else out.push({ label, items: [tx] });
+    }
+    return out;
+  }, [filteredTx]);
+
+  // Money in / out for each of the last 7 days.
+  const week: DayFlow[] = useMemo(() => {
+    const days: DayFlow[] = [];
+    const keyOf = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const index = new Map<string, DayFlow>();
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const flow: DayFlow = { label: d.toLocaleDateString([], { weekday: 'short' }).slice(0, 3), in: 0, out: 0 };
+      days.push(flow);
+      index.set(keyOf(d), flow);
+    }
+    for (const tx of transactions) {
+      const flow = index.get(keyOf(new Date(tx.created_at)));
+      if (!flow) continue;
+      if (tx.direction === 'in') flow.in += Number(tx.ican_amount);
+      else flow.out += Number(tx.ican_amount);
+    }
+    return days;
+  }, [transactions]);
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-64">
-        <div className="w-10 h-10 border-4 border-orange-500 border-t-transparent rounded-full animate-spin" />
+      <div className="mx-auto max-w-2xl space-y-4 px-4 py-6" role="status" aria-label="Loading your wallet">
+        <div className="h-[250px] animate-pulse rounded-[26px] bg-gradient-to-br from-[#2f2415] to-[#4a3418] opacity-80" />
+        <div className="classic-card h-32 animate-pulse" />
+        <div className="classic-card h-40 animate-pulse" />
       </div>
     );
   }
 
+  const valueOf = (ican: number) => (local ? formatLocalMoney(ican * local.priceLocal, local.currency) : `UGX ${(ican * ICAN_TO_UGX).toLocaleString()}`);
+
+  const onAction = (a: WalletAction) => setModal(a);
+
   return (
-    <div className="max-w-2xl mx-auto px-4 py-6 space-y-5">
+    <div className="mx-auto max-w-2xl space-y-4 px-4 py-5 sm:py-6">
+      <BalanceCard
+        balanceText={formatICAN(balance.ican)}
+        hidden={balanceHidden}
+        onToggleHidden={toggleHidden}
+        onRefresh={handleRefresh}
+        refreshing={refreshing}
+        local={local}
+        fallbackUgx={Number(balance.ugx)}
+        address={balance.address}
+        onCopyAddress={() => { if (balance.address) navigator.clipboard.writeText(balance.address).then(() => toast.success('Address copied')); }}
+        onShowQr={() => setModal('qr')}
+      />
 
-      {/* Balance Card */}
-      <div className="rounded-2xl overflow-hidden shadow-xl" style={{
-        background: 'linear-gradient(135deg, #431407 0%, #9a3412 50%, #b45309 100%)',
-      }}>
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-2">
-              <Bike className="w-6 h-6 text-orange-300" />
-              <span className="text-white font-semibold text-sm">BodaGoEra — IcanEra Wallet</span>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={() => setBalanceHidden(h => !h)}
-                className="text-white/60 hover:text-white text-xs px-2 py-1 rounded bg-white/10">
-                {balanceHidden ? 'Show' : 'Hide'}
-              </button>
-              <button onClick={handleRefresh} disabled={refreshing}
-                className="text-white/60 hover:text-white p-1 rounded bg-white/10">
-                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-              </button>
-            </div>
-          </div>
+      <QuickActions onAction={onAction} />
 
-          <p className="text-orange-200/70 text-xs uppercase tracking-widest mb-1">ICAN Balance</p>
-          <p className="text-4xl font-bold text-white mb-1">
-            {balanceHidden ? '••••••' : `${formatICAN(balance.ican)} ICAN`}
-          </p>
-          <p className="text-orange-200/80 text-sm mb-4">
-            {balanceHidden ? '••••' : `≈ UGX ${Number(balance.ugx).toLocaleString()}`}
-          </p>
+      <ActivityStrip
+        days={week}
+        earned={formatICAN(balance.totalEarned)}
+        spent={formatICAN(balance.totalSpent)}
+        tithe={formatICAN(balance.totalTithe)}
+        hidden={balanceHidden}
+        format={(n) => formatICAN(n)}
+      />
 
-          {balance.address && (
-            <button
-              onClick={() => { navigator.clipboard.writeText(balance.address!); toast.success('Address copied'); }}
-              className="flex items-center gap-2 bg-white/10 rounded-lg px-3 py-2 w-full text-left mb-4">
-              <span className="text-orange-200/60 text-xs shrink-0">Wallet:</span>
-              <span className="text-white/80 text-xs font-mono truncate flex-1">{balance.address}</span>
-              <Copy className="w-3 h-3 text-orange-200/60 shrink-0" />
-            </button>
-          )}
+      {/* How the wallet earns — collapsed by default; it is a note, not a headline. */}
+      <details className="classic-card group p-4">
+        <summary className="flex cursor-pointer list-none items-center gap-3">
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/50 dark:bg-[#c4a052]/15"><Wallet size={16} /></span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800 dark:text-slate-100">Earn ICAN on every delivery</span>
+            <span className="block text-[11.5px] text-slate-500">How earnings and tithe work</span>
+          </span>
+          <ChevronDown size={18} className="shrink-0 text-[#a17c28] transition-transform group-open:rotate-180" />
+        </summary>
+        <ul className="mt-3 space-y-2 border-t border-[#c4a052]/25 pt-3 text-[13px] leading-snug text-slate-600 dark:text-slate-300">
+          {[
+            'Riders earn ICAN per completed delivery (minimum UGX 5,000).',
+            'Chairpersons earn a group bonus in ICAN each month.',
+            'A 10% tithe is deducted automatically from all earnings.',
+          ].map((item) => (
+            <li key={item} className="flex gap-2"><span aria-hidden className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#c4a052]" />{item}</li>
+          ))}
+        </ul>
+      </details>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
-            {[
-              { label: 'Pay', icon: <span className="text-lg">⌕</span>, onClick: () => setModal('pay') },
-              { label: 'Send', icon: <ArrowUp className="w-4 h-4" />, onClick: () => setModal('send') },
-              { label: 'Receive', icon: <ArrowDown className="w-4 h-4" />, onClick: () => setModal('receive') },
-              { label: 'Buy', icon: <ShoppingCart className="w-4 h-4" />, onClick: () => setModal('buy') },
-              { label: 'Sell', icon: <Banknote className="w-4 h-4" />, onClick: () => setModal('sell') },
-              { label: 'History', icon: <TrendingUp className="w-4 h-4" />, onClick: () => document.getElementById('tx-list')?.scrollIntoView({ behavior: 'smooth' }) },
-            ].map(btn => (
-              <button key={btn.label} onClick={btn.onClick}
-                className="flex flex-col items-center gap-1 py-3 rounded-xl bg-white/15 hover:bg-white/25 text-white transition-colors">
-                {btn.icon}
-                <span className="text-xs font-medium">{btn.label}</span>
-              </button>
-            ))}
-          </div>
-
-          <button onClick={() => setModal('sendout')}
-            className="w-full mt-3 py-3 rounded-xl bg-white/15 hover:bg-white/25 text-white text-sm font-medium flex items-center justify-center gap-2 transition-colors">
-            📤 Send Out to Mobile Money / Bank
-          </button>
-        </div>
-      </div>
-
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: 'Total Earned', value: `${formatICAN(balance.totalEarned)} ICAN` },
-          { label: 'Total Tithe', value: `${formatICAN(balance.totalTithe)} ICAN` },
-          { label: 'Floor Price', value: `1 ICAN = UGX 5K` },
-        ].map(s => (
-          <div key={s.label} className="bg-white rounded-xl p-3 text-center shadow-sm border border-slate-100">
-            <p className="text-slate-400 text-xs mb-1">{s.label}</p>
-            <p className="text-slate-700 font-bold text-xs">{s.value}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Earn-more banner */}
-      <div className="bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-2xl p-4">
-        <div className="flex items-start gap-3">
-          <Wallet className="w-5 h-5 text-orange-500 shrink-0 mt-0.5" />
-          <div>
-            <p className="font-semibold text-orange-800 text-sm mb-1">Earn ICAN on every delivery</p>
-            <ul className="space-y-1">
-              {[
-                'Riders: earn ICAN per completed delivery (min UGX 5,000)',
-                'Chairpersons: earn group bonus ICAN monthly',
-                '10% tithe is auto-deducted from all earnings',
-              ].map(item => (
-                <li key={item} className="flex items-start gap-1.5">
-                  <ChevronRight className="w-3.5 h-3.5 text-orange-400 shrink-0 mt-0.5" />
-                  <span className="text-orange-700 text-xs">{item}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </div>
-
-      {/* Transaction history */}
-      <div id="tx-list">
-        <div className="flex items-center justify-between mb-3">
+      {/* Transaction history — collapsed by default, searchable once open */}
+      <section id="tx-list" aria-label="Transaction history">
+        <h2 className="m-0">
           <button
             type="button"
-            onClick={() => setTxHistoryExpanded(v => !v)}
-            className="flex items-center gap-1.5"
+            onClick={() => setHistoryOpen((o) => !o)}
+            aria-expanded={historyOpen}
+            aria-controls="tx-panel"
+            className="classic-card flex w-full items-center gap-3 px-4 py-3.5 text-left"
           >
-            <ChevronRight
-              className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-300 ease-in-out ${txHistoryExpanded ? 'rotate-90' : ''}`}
-            />
-            <h2 className="font-bold text-slate-800">Transaction History</h2>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2">
+                <span className="font-classic-display text-[20px] font-bold leading-none text-slate-800 dark:text-slate-100">Activity</span>
+                <span className="rounded-full bg-[#fbf3dc] px-2 py-0.5 text-[11px] font-semibold text-[#7a5a12] dark:bg-[#c4a052]/15 dark:text-[#e6c980]">{transactions.length}</span>
+              </span>
+              {!historyOpen && (
+                <span className="mt-1 block truncate text-[12px] font-normal text-slate-500">
+                  {transactions[0]
+                    ? `Latest: ${TX_LABELS[transactions[0].transaction_type] ?? transactions[0].transaction_type} · ${dayLabel(transactions[0].created_at)}, ${timeOf(transactions[0].created_at)}`
+                    : 'No transactions yet'}
+                </span>
+              )}
+            </span>
+            <span className="flex shrink-0 items-center gap-1.5 text-[12px] font-semibold text-[#8a6a1f] dark:text-[#e6c980]">
+              {historyOpen ? 'Hide' : 'Show'}
+              <ChevronDown size={18} className={`transition-transform ${historyOpen ? 'rotate-180' : ''}`} />
+            </span>
           </button>
-          <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-            {(['all', 'in', 'out', 'tithe'] as const).map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`text-xs px-3 py-1.5 rounded-md capitalize transition-colors ${activeTab === tab ? 'bg-orange-500 text-white' : 'text-slate-500 hover:text-slate-700'}`}>
-                {tab}
-              </button>
+        </h2>
+
+        {historyOpen && (
+          <div id="tx-panel" className="animate-step-in mt-3 space-y-3">
+            <div className="relative">
+              <Search size={16} aria-hidden className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[#a17c28]" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name, app, note, amount, date…"
+                aria-label="Search transactions"
+                className="classic-input !pl-10 !pr-10"
+              />
+              {query && (
+                <button type="button" onClick={() => setQuery('')} aria-label="Clear search" className="absolute right-2 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-full text-slate-500 hover:bg-[#c4a052]/15">
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex gap-1 rounded-full border border-[#c4a052]/40 bg-white/80 p-1 dark:bg-slate-800" role="tablist" aria-label="Filter transactions">
+                {(['all', 'in', 'out', 'tithe'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`rounded-full px-3.5 py-1.5 text-[12px] font-semibold capitalize transition-colors ${
+                      activeTab === tab ? 'bg-gradient-to-br from-[#231b12] to-[#3d2e18] text-[#f6e7bd] shadow-sm' : 'text-slate-500 hover:text-[#7a5a12]'
+                    }`}
+                  >
+                    {tab}
+                  </button>
+                ))}
+              </div>
+              {(query || activeTab !== 'all') && (
+                <p className="text-[12px] text-slate-500" aria-live="polite">{filteredTx.length} {filteredTx.length === 1 ? 'result' : 'results'}</p>
+              )}
+            </div>
+
+        {groups.length === 0 ? (
+          <div className="classic-card px-6 py-10 text-center">
+            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/50 dark:bg-[#c4a052]/15"><Receipt size={22} /></span>
+            <p className="mt-3 font-classic-display text-[16px] font-semibold text-slate-800 dark:text-slate-100">{query ? 'No matches' : 'Nothing here yet'}</p>
+            <p className="mt-1 text-[13px] text-slate-500">
+              {query
+                ? `Nothing matches “${query}”. Try a name, an amount or a date.`
+                : activeTab === 'all' ? 'Complete a delivery or a ride to earn your first ICAN.' : 'No transactions match this filter.'}
+            </p>
+            {query && <button type="button" onClick={() => setQuery('')} className="classic-btn classic-btn-outline mx-auto mt-4 !w-auto !min-h-[40px] !px-5 !text-[13px]">Clear search</button>}
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {groups.map((g) => (
+              <div key={g.label}>
+                <p className="classic-eyebrow mb-1.5 px-1">{g.label}</p>
+                <ul className="classic-card divide-y divide-[#c4a052]/20 overflow-hidden !rounded-2xl">
+                  {g.items.map((tx) => {
+                    const isIn = tx.direction === 'in';
+                    const tone = txTone(tx);
+                    return (
+                      <li key={tx.id}>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTx(tx)}
+                          className="flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-[#fbf3dc]/60 focus-visible:bg-[#fbf3dc]/60 focus-visible:outline-none dark:hover:bg-white/5"
+                        >
+                          <TxIcon tx={tx} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[14px] font-semibold text-slate-800 dark:text-slate-100">{TX_LABELS[tx.transaction_type] ?? tx.transaction_type}</span>
+                            <span className="mt-0.5 block truncate text-[11.5px] text-slate-500">
+                              {APP_LABELS[tx.source_app] ?? tx.source_app} · {timeOf(tx.created_at)}{tx.note ? ` · ${tx.note}` : ''}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-right">
+                            <span className={`block font-classic-display text-[15px] font-bold tabular-nums lining-nums ${tone.text}`}>
+                              {balanceHidden ? '••••' : `${isIn ? '+' : '−'}${formatICAN(tx.ican_amount)}`}
+                            </span>
+                            <span className="block text-[10.5px] text-slate-400">{balanceHidden ? ' ' : valueOf(tx.ican_amount)}</span>
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
             ))}
           </div>
-        </div>
-
-        <div
-          className={`grid transition-all duration-300 ease-in-out ${
-            txHistoryExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
-          }`}
-        >
-          <div className="overflow-hidden">
-            {filteredTx.length === 0 ? (
-              <div className="bg-slate-50 rounded-2xl p-10 text-center">
-                <Bike className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                <p className="text-slate-400 text-sm">No transactions yet. Complete a delivery to earn your first ICAN.</p>
-              </div>
-            ) : (
-              <div className="space-y-0.5">
-                {filteredTx.map(tx => {
-                  const isIn = tx.direction === 'in';
-                  const isTithe = tx.transaction_type === 'tithe';
-                  return (
-                    <button
-                      key={tx.id}
-                      type="button"
-                      onClick={() => setSelectedTx(tx)}
-                      className="w-full flex items-center justify-between py-1.5 px-2 rounded-lg text-left hover:bg-slate-100 transition-colors"
-                    >
-                      <p className="text-slate-700 text-xs truncate pr-2">
-                        {TX_LABELS[tx.transaction_type] ?? tx.transaction_type}
-                      </p>
-                      <p className={`text-xs font-semibold shrink-0 ${
-                        isTithe ? 'text-amber-500' : isIn ? 'text-emerald-600' : 'text-rose-500'
-                      }`}>
-                        {isIn ? '+' : '-'}{formatICAN(tx.ican_amount)} ICAN
-                      </p>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+        )}
           </div>
-        </div>
-      </div>
+        )}
+      </section>
 
-      {/* Transaction detail modal */}
+      {/* Transaction detail */}
       {selectedTx && (() => {
         const tx = selectedTx;
         const isIn = tx.direction === 'in';
-        const isTithe = tx.transaction_type === 'tithe';
+        const tone = txTone(tx);
+        const rows: Array<[string, string]> = [
+          ['Value today', valueOf(tx.ican_amount)],
+          ['App', APP_LABELS[tx.source_app] ?? tx.source_app],
+          ['Date', formatDate(tx.created_at)],
+          ['Status', String(tx.status || 'completed')],
+          ['Note', tx.note || '—'],
+        ];
         return (
-          <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4" onClick={() => setSelectedTx(null)}>
-            <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-slate-800" onClick={(e) => e.stopPropagation()}>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold">Transaction Details</h3>
-                <button onClick={() => setSelectedTx(null)} className="text-slate-400 hover:text-slate-700 text-xl leading-none">&times;</button>
-              </div>
-              <div className="flex items-center gap-3 mb-4">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                  isTithe ? 'bg-amber-100' : isIn ? 'bg-emerald-100' : 'bg-rose-100'
-                }`}>
-                  {isTithe
-                    ? <span className="text-amber-600 text-sm font-bold">10%</span>
-                    : isIn
-                      ? <ArrowDown className="w-5 h-5 text-emerald-600" />
-                      : <ArrowUp className="w-5 h-5 text-rose-600" />}
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold">{TX_LABELS[tx.transaction_type] ?? tx.transaction_type}</span>
-                    <span className="text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
-                      {APP_LABELS[tx.source_app] ?? tx.source_app}
-                    </span>
-                  </div>
-                  <p className="text-slate-300 text-xs">{formatDate(tx.created_at)}</p>
-                </div>
-              </div>
-              <div className="bg-slate-50 rounded-xl p-4 space-y-2 text-sm">
-                <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">Amount</span>
-                  <strong className={isTithe ? 'text-amber-500' : isIn ? 'text-emerald-600' : 'text-rose-500'}>
-                    {isIn ? '+' : '-'}{formatICAN(tx.ican_amount)} ICAN
-                  </strong>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">Local value</span>
-                  <strong>UGX {(tx.ican_amount * ICAN_TO_UGX).toLocaleString()}</strong>
-                </div>
-                <div className="flex justify-between gap-4">
-                  <span className="text-slate-500">Note</span>
-                  <strong className="truncate max-w-[60%]">{tx.note || '—'}</strong>
-                </div>
-                {tx.id && (
-                  <div className="flex justify-between gap-4">
-                    <span className="text-slate-500">ID</span>
-                    <strong className="truncate max-w-[60%] text-xs">{tx.id}</strong>
-                  </div>
-                )}
-              </div>
+          <WalletSheet title="Transaction" onClose={() => setSelectedTx(null)} z={60}>
+            <div className="text-center">
+              <div className="mx-auto w-fit"><TxIcon tx={tx} /></div>
+              <p className="mt-2 text-[13px] font-semibold text-slate-600 dark:text-slate-300">{TX_LABELS[tx.transaction_type] ?? tx.transaction_type}</p>
+              <p className={`mt-1 font-classic-display text-[34px] font-bold leading-none tabular-nums lining-nums ${tone.text}`}>
+                {isIn ? '+' : '−'}{formatICAN(tx.ican_amount)}
+              </p>
+              <p className="mt-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#a17c28]">ICAN</p>
             </div>
-          </div>
+            <div className="mt-5 rounded-2xl border border-[#c4a052]/30 bg-white/70 p-4 text-[13px] dark:bg-slate-800/60">
+              {rows.map(([k, v]) => (
+                <div key={k} className="flex items-baseline py-1.5">
+                  <span className="text-slate-500">{k}</span>
+                  <span className="classic-leader" />
+                  <span className="max-w-[55%] truncate text-right font-semibold text-slate-800 dark:text-slate-100">{v}</span>
+                </div>
+              ))}
+            </div>
+            {tx.id && (
+              <div className="mt-4 flex items-center gap-3">
+                <p className="min-w-0 flex-1 truncate font-mono text-[11px] text-slate-400" title={tx.id}>ID {tx.id}</p>
+                <div className="w-32 shrink-0"><CopyButton text={tx.id} label="Copy ID" /></div>
+              </div>
+            )}
+          </WalletSheet>
         );
       })()}
 
@@ -646,40 +700,50 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
       {modal === 'pay' && (
         <PayMoneyModal isOpen userId={user.id} onClose={() => setModal(null)} onPaymentScanned={handlePaymentScanned} />
       )}
+      {modal === 'qr' && balance.address && (
+        <WalletSheet title="Your wallet code" onClose={() => setModal(null)}>
+          <AddressQr address={balance.address} />
+        </WalletSheet>
+      )}
       {modal === 'buy' && (
-        <TradeModal title="💳 Buy ICAN Coins" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>
+        <WalletSheet title="Buy icaneracoins" onClose={() => setModal(null)}>
           <BuyIcan userId={user.id} onSuccess={() => { loadData(); setModal(null); }} />
-        </TradeModal>
+        </WalletSheet>
       )}
       {modal === 'sell' && (
-        <TradeModal title="💰 Sell ICAN Coins" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>
+        <WalletSheet title="Sell icaneracoins" onClose={() => setModal(null)}>
           <SellIcan userId={user.id} onSuccess={() => { loadData(); setModal(null); }} />
-        </TradeModal>
+        </WalletSheet>
       )}
       {modal === 'sendout' && (
-        <TradeModal title="📤 Send ICAN Out" userId={user.id} onClose={() => setModal(null)} onDone={loadData}>
+        <WalletSheet title="Cash out" onClose={() => setModal(null)}>
           <SendIcanOut userId={user.id} balance={balance.ican} onSuccess={() => { loadData(); setModal(null); }} />
-        </TradeModal>
+        </WalletSheet>
       )}
       {paymentReceipt && (
-        <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 text-slate-900">
-            <div className="text-center">
-              <div className="text-5xl mb-3">✅</div>
-              <h2 className="text-xl font-bold text-emerald-700">Payment successful</h2>
-              <p className="text-sm text-slate-600 mt-1">Your ICAN payment was sent and recorded.</p>
-            </div>
-            <div className="bg-slate-50 rounded-xl p-4 mt-5 space-y-2 text-sm">
-              <div className="flex justify-between gap-4"><span>Receipt</span><strong>{paymentReceipt.receiptNumber}</strong></div>
-              <div className="flex justify-between gap-4"><span>Amount</span><strong>{formatICAN(paymentReceipt.amount)} {paymentReceipt.currency}</strong></div>
-              <div className="flex justify-between gap-4"><span>Transaction</span><strong className="truncate">{paymentReceipt.transactionId || 'N/A'}</strong></div>
-            </div>
-            <div className="flex gap-3 mt-5">
-              <button onClick={downloadPaymentReceipt} className="flex-1 py-3 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-semibold">Download receipt</button>
-              <button onClick={() => setPaymentReceipt(null)} className="px-5 py-3 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold">Close</button>
-            </div>
+        <WalletSheet title="Payment successful" onClose={() => setPaymentReceipt(null)} z={60}>
+          <div className="text-center">
+            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-emerald-100 text-emerald-600"><CheckCircle2 size={28} /></span>
+            <p className="mt-2 text-[13px] text-slate-500">Your ICAN payment was sent and recorded.</p>
           </div>
-        </div>
+          <div className="mt-4 rounded-2xl border border-[#c4a052]/30 bg-white/70 p-4 text-[13px] dark:bg-slate-800/60">
+            {([
+              ['Receipt', paymentReceipt.receiptNumber],
+              ['Amount', `${formatICAN(paymentReceipt.amount)} ${paymentReceipt.currency}`],
+              ['Transaction', paymentReceipt.transactionId || 'N/A'],
+            ] as Array<[string, string]>).map(([k, v]) => (
+              <div key={k} className="flex items-baseline py-1.5">
+                <span className="text-slate-500">{k}</span>
+                <span className="classic-leader" />
+                <span className="max-w-[55%] truncate text-right font-semibold text-slate-800 dark:text-slate-100">{v}</span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 grid grid-cols-[1.4fr_1fr] gap-3">
+            <button type="button" onClick={downloadPaymentReceipt} className="classic-btn classic-btn-ink">Download receipt</button>
+            <button type="button" onClick={() => setPaymentReceipt(null)} className="classic-btn classic-btn-outline">Close</button>
+          </div>
+        </WalletSheet>
       )}
       {needsPin && (
         <SetPinPrompt userId={user.id} onDone={() => setNeedsPin(false)} />

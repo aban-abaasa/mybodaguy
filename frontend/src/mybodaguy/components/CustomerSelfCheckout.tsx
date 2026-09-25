@@ -884,7 +884,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                 }`}
               >
                 <Coins size={14} />
-                ICAN Coins
+                icaneracoins
                 {!canPayICAN && (
                   <span className="text-xs opacity-70 block">
                     (need ₡{formatICAN(icanNeeded)})

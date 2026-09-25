@@ -65,7 +65,7 @@ export function payWithFlutterwave(params: FlutterwavePayParams): Promise<Flutte
       },
       customizations: {
         title: params.title || 'ICAN Wallet',
-        description: params.description || 'Buy ICAN Coins',
+        description: params.description || 'Buy icaneracoins',
       },
       callback: (response: { status: string; transaction_id?: string }) => {
         resolve({

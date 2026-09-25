@@ -137,7 +137,7 @@ export default function RewardsHub({ user, role, onGoToWallet }: Props) {
       {/* Convert points to ICAN coins */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
         <h4 className="font-semibold text-slate-800 mb-1 flex items-center gap-2">
-          <Coins size={16} className="text-violet-500" /> Convert to ICAN Coins
+          <Coins size={16} className="text-violet-500" /> Convert to icaneracoins
         </h4>
         <p className="text-xs text-slate-500 mb-3">{POINTS_PER_ICAN} points = 1 ₡ ICAN — no tithe on point redemptions</p>
         <div className="flex items-center gap-2">

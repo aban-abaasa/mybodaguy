@@ -29,7 +29,7 @@ export default function IcanCoinCard({ userId, onGoToWallet, variant = 'compact'
         gradient="from-violet-600 via-purple-700 to-indigo-900"
         glow="rgba(91,33,182,0.55)"
         emblem="₡"
-        label="ICAN Coins"
+        label="icaneracoins"
         value={balance === null ? '…' : balance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
         caption="coins available"
         cta="Open wallet"
@@ -45,7 +45,7 @@ export default function IcanCoinCard({ userId, onGoToWallet, variant = 'compact'
     >
       <div className="flex flex-col items-center text-center">
         <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5 text-base select-none">₡</div>
-        <p className="text-white/80 text-[10px] font-medium">ICAN Coins</p>
+        <p className="text-white/80 text-[10px] font-medium">icaneracoins</p>
         <p className="text-2xl sm:text-3xl font-bold leading-none">
           {balance === null ? '…' : balance.toFixed(2)}
         </p>

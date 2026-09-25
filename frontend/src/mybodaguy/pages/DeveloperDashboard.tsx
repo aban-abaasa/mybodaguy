@@ -1376,7 +1376,7 @@ function RewardsTab({ users }: { users: any[] }) {
     <div>
       <div className="mb-6">
         <h2 className="text-2xl font-bold text-slate-800">Rewards</h2>
-        <p className="text-sm text-slate-600 mt-1">Loyalty points earned automatically from real ICAN ride activity — redeemable for gear or an instant ICAN coin conversion.</p>
+        <p className="text-sm text-slate-600 mt-1">Loyalty points earned automatically from real ICAN ride activity — redeemable for gear or an instant icaneracoin conversion.</p>
       </div>
 
       <div className="flex gap-2 mb-6 border-b border-slate-200">
@@ -1491,7 +1491,7 @@ function RewardsOverviewTab() {
         <StatCard title="Members earning points" value={String(stats.userCount)} icon={<Users size={20} className="text-orange-500" />} />
         <StatCard title="Points in circulation" value={stats.pointsInCirculation.toLocaleString()} icon={<TrendingUp size={20} className="text-orange-500" />} />
         <StatCard title="Lifetime points issued" value={stats.lifetimePointsIssued.toLocaleString()} icon={<Gift size={20} className="text-orange-500" />} />
-        <StatCard title="ICAN coin conversions" value={String(stats.coinConversions)} icon={<CheckCircle size={20} className="text-orange-500" />} />
+        <StatCard title="icaneracoin conversions" value={String(stats.coinConversions)} icon={<CheckCircle size={20} className="text-orange-500" />} />
       </div>
 
       <div>
@@ -1960,7 +1960,7 @@ function RewardRedemptionsTab() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <p className="text-sm text-slate-600">Points-for-gear requests from customers and riders — helmet, jacket, reflectors, home goods, or an instant ICAN coin conversion.</p>
+        <p className="text-sm text-slate-600">Points-for-gear requests from customers and riders — helmet, jacket, reflectors, home goods, or an instant icaneracoin conversion.</p>
         <button onClick={load} className="px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg hover:from-orange-600 hover:to-yellow-600 transition-all whitespace-nowrap">
           Refresh
         </button>

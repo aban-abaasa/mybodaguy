@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings } from 'lucide-react';
+import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import { chairpersonService, SubordinateChairperson, CommitteeMember, CommissionRecord } from '../services/chairpersonService';
 import { riderService, Rider } from '../services/riderService';
 import { supabase } from '../services/supabaseClient';
@@ -8,6 +9,7 @@ import { avatarService } from '../services/avatarService';
 import ProfileModal from '../components/ProfileModal';
 import IcanCoinCard from '../components/IcanCoinCard';
 import { ThemeMenuItem } from '../../components/ThemeToggle';
+import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { toast } from 'sonner';
 
 interface ChairpersonDashboardProps {
@@ -258,932 +260,529 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
     );
   }
 
+  const greeting = greetingForHour(new Date().getHours());
+  const displayName: string =
+    user?.user_metadata?.full_name || user?.user_metadata?.name || (user?.email ? String(user.email).split('@')[0] : 'Chairperson');
+  const hasStageRole = allAssignments.some(a => a.region_type === 'stage');
+  const activePct = stats.totalSubordinates > 0
+    ? `${((stats.activeSubordinates / stats.totalSubordinates) * 100).toFixed(0)}%`
+    : '0%';
+
+  const tabs: { id: TabType; label: string; icon: LucideIcon }[] = [
+    { id: 'overview', label: 'Overview', icon: TrendingUp },
+    { id: 'subordinates', label: 'Chairpersons', icon: Users },
+    ...(hasStageRole ? [{ id: 'riders' as TabType, label: 'Riders', icon: Bike }] : []),
+    { id: 'commission', label: 'Commission', icon: DollarSign },
+  ];
+  const activeTabMeta = tabs.find(t => t.id === activeTab) ?? tabs[0];
+  const ActiveTabIcon = activeTabMeta.icon;
+
+  // Picking a stage role jumps straight to its riders, as before.
+  const handleRoleChange = (assignmentId: string) => {
+    const assignment = allAssignments.find(a => a.id === assignmentId);
+    if (!assignment) return;
+    setSelectedAssignment(assignment);
+    setMyCommitteeInfo(assignment);
+    if (assignment.region_type === 'stage') setActiveTab('riders');
+  };
+
+  const roleCard = (
+    <div className="classic-card p-4">
+      <label htmlFor="chairperson-active-role" className="classic-label flex items-center gap-1.5">
+        <Settings size={12} /> Active role
+      </label>
+      <select
+        id="chairperson-active-role"
+        value={selectedAssignment?.id || ''}
+        onChange={(e) => handleRoleChange(e.target.value)}
+        className="classic-input"
+      >
+        {allAssignments.map((assignment, idx) => {
+          const prefix = idx === 0 ? '⭐ ' : '└ ';
+          const suffix = assignment.id.startsWith('virtual-') ? ' (access via top role)' : '';
+          return (
+            <option key={assignment.id} value={assignment.id}>
+              {prefix}{formatRole(assignment.role)}{suffix}
+            </option>
+          );
+        })}
+      </select>
+      <p className="mt-2 text-xs text-slate-500">Select a role to manage its subordinates and riders.</p>
+    </div>
+  );
+
+  const assignButtonClass = 'classic-btn classic-btn-primary !w-auto !min-h-[40px] !gap-1.5 !rounded-full !px-4 !py-2 !text-[13px] flex-shrink-0';
+
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
+    <div className="min-h-screen classic-page">
       {/* Content without header - header is in UnifiedDashboard */}
 
       {/* Navigation Tabs - Desktop Only */}
-      <div className="hidden md:block bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-12 xs:top-14 sm:top-16 z-40">
-        <div className="container mx-auto px-1 xs:px-2 sm:px-4">
-          <div className="flex gap-0.5 overflow-x-auto scrollbar-hide">
-            <TabButton
-              active={activeTab === 'overview'}
-              onClick={() => setActiveTab('overview')}
-              icon={<TrendingUp size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-              label="Overview"
-            />
-            <TabButton
-              active={activeTab === 'subordinates'}
-              onClick={() => setActiveTab('subordinates')}
-              icon={<Users size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-              label="Chairpersons"
-            />
-            {allAssignments.some(a => a.region_type === 'stage') && (
+      <div className="hidden md:block bg-white border-b border-[#c4a052]/25 dark:border-slate-700 sticky top-12 xs:top-14 sm:top-16 z-40">
+        <div className="container mx-auto px-4">
+          <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+            {tabs.map(t => (
               <TabButton
-                active={activeTab === 'riders'}
-                onClick={() => setActiveTab('riders')}
-                icon={<Bike size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-                label="Riders"
+                key={t.id}
+                active={activeTab === t.id}
+                onClick={() => setActiveTab(t.id)}
+                icon={<t.icon size={16} />}
+                label={t.label}
               />
-            )}
-            <TabButton
-              active={activeTab === 'commission'}
-              onClick={() => setActiveTab('commission')}
-              icon={<DollarSign size={14} className="xs:w-4 xs:h-4 sm:w-[18px] sm:h-[18px]" />}
-              label="Commission"
-            />
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Mobile: Current Tab Indicator with Dropdown — this dashboard is
-          always rendered inside UnifiedDashboard, which already shows the
-          real profile avatar above this header (the "Profile Avatar Menu"
-          at the top of the no-committee fallback screen is the exception,
-          untouched here), so this trigger is a plain chevron rather than a
-          second avatar-look button. */}
-      <div className="md:hidden bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 sticky top-12 xs:top-14 z-40">
-        <button
-          type="button"
-          onClick={() => setShowMobileMenu(!showMobileMenu)}
-          className="w-full container mx-auto px-2 xs:px-3 py-2 flex items-center justify-between"
-        >
-          <div className="flex items-center gap-2">
-            {activeTab === 'overview' && <><TrendingUp size={16} className="text-orange-500 dark:text-orange-400" /><span className="text-sm font-medium text-slate-800 dark:text-slate-100">Overview</span></>}
-            {activeTab === 'subordinates' && <><Users size={16} className="text-orange-500 dark:text-orange-400" /><span className="text-sm font-medium text-slate-800 dark:text-slate-100">Chairpersons</span></>}
-            {activeTab === 'riders' && <><Bike size={16} className="text-orange-500 dark:text-orange-400" /><span className="text-sm font-medium text-slate-800 dark:text-slate-100">Riders</span></>}
-            {activeTab === 'commission' && <><DollarSign size={16} className="text-orange-500 dark:text-orange-400" /><span className="text-sm font-medium text-slate-800 dark:text-slate-100">Commission</span></>}
+      {/* Mobile section bar — this dashboard is always rendered inside
+          UnifiedDashboard, which already shows the real profile avatar above,
+          so this is the current section in serif plus one Menu trigger (the
+          "Profile Avatar Menu" on the no-committee fallback screen is the
+          exception, untouched). */}
+      <div className="md:hidden bg-white border-b border-[#c4a052]/25 dark:border-slate-700 sticky top-12 xs:top-14 z-40">
+        <div className="px-4 h-12 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <ActiveTabIcon size={17} className="flex-shrink-0 text-orange-500" />
+            <h1 className="font-classic-display text-[18px] font-semibold leading-none text-slate-800 truncate">
+              {activeTabMeta.label}
+            </h1>
           </div>
-          <ChevronDown size={16} className={`text-orange-500 dark:text-orange-400 transition-transform flex-shrink-0 ${showMobileMenu ? 'rotate-180' : ''}`} />
-        </button>
+          <button
+            type="button"
+            onClick={() => setShowMobileMenu(!showMobileMenu)}
+            aria-label="Open menu"
+            aria-expanded={showMobileMenu}
+            className="flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full border border-[#c4a052]/40 bg-[#faf8f3] px-3.5 text-xs font-semibold text-slate-700 shadow-sm active:scale-95 transition-transform dark:border-slate-600 dark:bg-slate-800"
+          >
+            <LayoutGrid size={14} className="text-orange-500" /> Menu
+            <ChevronDown size={14} className={`text-slate-400 transition-transform ${showMobileMenu ? 'rotate-180' : ''}`} />
+          </button>
+        </div>
 
-        {/* Mobile Dropdown Menu */}
         {showMobileMenu && (
-          <div className="absolute right-2 xs:right-3 top-14 bg-white dark:bg-slate-800 rounded-lg shadow-xl py-2 min-w-[180px] xs:min-w-[200px] z-50">
-            {/* Navigation Items */}
-            <div className="py-1 border-b border-slate-200 dark:border-slate-700">
-              <button
-                onClick={() => {
-                  setActiveTab('overview');
-                  setShowMobileMenu(false);
-                }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'overview' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700'
-                }`}
-              >
-                <TrendingUp size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Overview</span>
-              </button>
-              <button
-                onClick={() => {
-                  setActiveTab('subordinates');
-                  setShowMobileMenu(false);
-                }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'subordinates' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700'
-                }`}
-              >
-                <Users size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Chairpersons</span>
-              </button>
-              {allAssignments.some(a => a.region_type === 'stage') && (
+          <>
+            {/* Tap anywhere outside to dismiss */}
+            <button
+              type="button"
+              aria-label="Close menu"
+              className="fixed inset-0 z-40 cursor-default"
+              onClick={() => setShowMobileMenu(false)}
+            />
+            <div className="classic-card absolute right-3 top-full z-50 mt-1 min-w-[210px] overflow-hidden !rounded-2xl py-1.5">
+              {tabs.map(t => (
                 <button
+                  key={t.id}
+                  type="button"
                   onClick={() => {
-                    setActiveTab('riders');
+                    setActiveTab(t.id);
                     setShowMobileMenu(false);
                   }}
-                  className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                    activeTab === 'riders' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700'
+                  className={`flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors ${
+                    activeTab === t.id
+                      ? 'bg-[#fbf3dc] text-[#7a5a12] dark:bg-[#c4a052]/15 dark:text-[#f0d68f]'
+                      : 'text-slate-700 hover:bg-[#faf8f3] dark:text-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
-                  <Bike size={14} className="xs:w-4 xs:h-4" />
-                  <span className="text-xs xs:text-sm font-medium">Riders</span>
+                  <t.icon size={16} className={activeTab === t.id ? '' : 'text-orange-500'} />
+                  <span className="font-classic-display text-[15px] font-semibold">{t.label}</span>
                 </button>
-              )}
+              ))}
+              <div className="landing-classic-divider my-1.5" />
               <button
+                type="button"
                 onClick={() => {
-                  setActiveTab('commission');
                   setShowMobileMenu(false);
+                  setShowProfileModal(true);
                 }}
-                className={`w-full px-3 xs:px-4 py-2 text-left flex items-center gap-2 transition-colors ${
-                  activeTab === 'commission' ? 'bg-orange-50 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400' : 'text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700'
-                }`}
+                className="flex w-full items-center gap-3 px-4 py-2.5 text-left text-slate-700 hover:bg-[#faf8f3] dark:text-slate-200 dark:hover:bg-slate-700"
               >
-                <DollarSign size={14} className="xs:w-4 xs:h-4" />
-                <span className="text-xs xs:text-sm font-medium">Commission</span>
+                <User size={16} className="text-orange-500" />
+                <span className="text-sm font-medium">My Profile</span>
               </button>
-            </div>
-
-            {/* Profile */}
-            <button
-              onClick={() => {
-                setShowMobileMenu(false);
-                setShowProfileModal(true);
-              }}
-              className="w-full px-3 xs:px-4 py-2 text-left text-slate-700 hover:bg-slate-50 dark:text-slate-200 dark:hover:bg-slate-700 flex items-center gap-2"
-            >
-              <User size={14} className="xs:w-4 xs:h-4" />
-              <span className="text-xs xs:text-sm font-medium">My Profile</span>
-            </button>
-            <ThemeMenuItem onClick={() => setShowMobileMenu(false)} />
-          </div>
-        )}
-      </div>
-
-      <div className="container mx-auto px-2 xs:px-3 sm:px-4 py-2 xs:py-3 sm:py-4">
-        {/* Tab Content */}
-        {activeTab === 'overview' && (
-          <>
-            {/* Enhanced Welcome Section with Gradient */}
-            <div className="bg-gradient-to-br from-orange-500 via-orange-400 to-yellow-400 rounded-2xl shadow-xl p-4 sm:p-5 mb-4 text-white overflow-hidden relative">
-              {/* Decorative Background Pattern */}
-              <div className="absolute top-0 right-0 opacity-10">
-                <Bike size={200} className="transform rotate-12" />
-              </div>
-              
-              <div className="relative z-10">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h2 className="text-xl sm:text-2xl font-bold mb-1">
-                      Welcome Back! 👋
-                    </h2>
-                    <p className="text-white/90 text-xs sm:text-sm">
-                      Here's your chairperson dashboard overview
-                    </p>
-                  </div>
-                  <div className="hidden sm:block bg-white/20 backdrop-blur-sm rounded-xl px-3 py-2">
-                    <Calendar size={18} />
-                  </div>
-                </div>
-
-                {/* Quick Stats Row */}
-                <div className="grid grid-cols-3 gap-2 sm:gap-3 mb-4">
-                  <div className="bg-white/20 backdrop-blur-sm rounded-xl p-2 sm:p-3">
-                    <MapPin size={16} className="mb-1" />
-                    <p className="text-lg sm:text-xl font-bold">{allAssignments.length}</p>
-                    <p className="text-[9px] sm:text-[10px] text-white/80">Active Role{allAssignments.length !== 1 ? 's' : ''}</p>
-                  </div>
-                  <div className="bg-white/20 backdrop-blur-sm rounded-xl p-2 sm:p-3">
-                    <Users size={16} className="mb-1" />
-                    <p className="text-lg sm:text-xl font-bold">{stats.totalSubordinates}</p>
-                    <p className="text-[9px] sm:text-[10px] text-white/80">Chairpersons</p>
-                  </div>
-                  {riders.length > 0 && (
-                    <div className="bg-white/20 backdrop-blur-sm rounded-xl p-2 sm:p-3">
-                      <Bike size={16} className="mb-1" />
-                      <p className="text-lg sm:text-xl font-bold">{riders.length}</p>
-                      <p className="text-[9px] sm:text-[10px] text-white/80">Riders</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Enhanced Role Selector */}
-                <div className="bg-white/15 backdrop-blur-md rounded-xl p-3 border border-white/20">
-                  <label className="block text-xs font-semibold text-white mb-1.5 flex items-center gap-2">
-                    <Settings size={14} />
-                    Active Role
-                  </label>
-                  <select
-                    value={selectedAssignment?.id || ''}
-                    onChange={(e) => {
-                      const assignment = allAssignments.find(a => a.id === e.target.value);
-                      if (assignment) {
-                        setSelectedAssignment(assignment);
-                        setMyCommitteeInfo(assignment);
-                        if (assignment.region_type === 'stage') {
-                          setActiveTab('riders');
-                        }
-                      }
-                    }}
-                    className="w-full px-3 py-2 border-0 rounded-xl focus:ring-2 focus:ring-white/50 bg-white/90 text-slate-800 font-medium shadow-sm backdrop-blur-sm text-sm"
-                  >
-                    {allAssignments.map((assignment, idx) => {
-                      const isTop     = idx === 0;
-                      const isVirtual = assignment.id.startsWith('virtual-');
-                      const prefix    = isTop ? '⭐ ' : '└ ';
-                      const suffix    = isVirtual ? ' (access via top role)' : '';
-                      return (
-                        <option key={assignment.id} value={assignment.id}>
-                          {prefix}{formatRole(assignment.role)}{suffix}
-                        </option>
-                      );
-                    })}
-                  </select>
-                  <p className="text-[10px] text-white/70 mt-1.5 flex items-center gap-1">
-                    <span>💡</span>
-                    Select a role to manage its subordinates and riders
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Enhanced Stats Grid with Modern Design */}
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3 mb-4">
-              {/* Total Assignments Card */}
-              <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
-                <div className="flex flex-col items-center text-center">
-                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
-                    <MapPin size={14} />
-                  </div>
-                  <p className="text-white/80 text-[10px] font-medium">My Roles</p>
-                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.totalAssignments}</p>
-                  <p className="text-[9px] text-white/70">Active</p>
-                </div>
-              </div>
-
-              {/* Total Subordinates Card */}
-              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
-                <div className="flex flex-col items-center text-center">
-                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
-                    <Users size={14} />
-                  </div>
-                  <p className="text-white/80 text-[10px] font-medium">Total</p>
-                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.totalSubordinates}</p>
-                  <div className="flex items-center gap-1 text-[9px] text-white/70">
-                    <span className="w-1 h-1 bg-green-300 rounded-full"></span>
-                    <span>{stats.activeSubordinates}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Commission Rate Card */}
-              <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
-                <div className="flex flex-col items-center text-center">
-                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
-                    <DollarSign size={14} />
-                  </div>
-                  <p className="text-white/80 text-[10px] font-medium">Commission</p>
-                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.totalCommission.toFixed(1)}%</p>
-                  <p className="text-[9px] text-white/70">Avg rate</p>
-                </div>
-              </div>
-
-              {/* Monthly Rides Card */}
-              <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
-                <div className="flex flex-col items-center text-center">
-                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
-                    <Bike size={14} />
-                  </div>
-                  <p className="text-white/80 text-[10px] font-medium">Rides</p>
-                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.monthlyRides}</p>
-                  <p className="text-[9px] text-white/70">Monthly</p>
-                </div>
-              </div>
-
-              {/* Active Status Card */}
-              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-1.5 text-white transform transition-all hover:scale-105 hover:shadow-xl">
-                <div className="flex flex-col items-center text-center">
-                  <div className="bg-white/20 backdrop-blur-sm p-1 rounded-lg mb-0.5">
-                    <TrendingUp size={14} />
-                  </div>
-                  <p className="text-white/80 text-[10px] font-medium">Active</p>
-                  <p className="text-2xl sm:text-3xl font-bold leading-none">{stats.activeSubordinates}</p>
-                  <p className="text-[9px] text-white/70">
-                    {stats.totalSubordinates > 0 
-                      ? `${((stats.activeSubordinates / stats.totalSubordinates) * 100).toFixed(0)}%`
-                      : '0%'}
-                  </p>
-                </div>
-              </div>
-
-              {/* ICAN Coins Card */}
-              <IcanCoinCard userId={user?.id} onGoToWallet={goToWallet} />
-            </div>
-
-            {/* Quick Actions Section */}
-            <div className="flex flex-col items-center gap-2 sm:gap-3 mb-4">
-              {/* Quick Action: Manage Subordinates */}
-              <div className="bg-white rounded-xl shadow-lg p-2 border-2 border-slate-100 hover:border-orange-300 transition-all inline-flex items-center gap-2">
-                <div className="bg-orange-100 p-1.5 rounded-lg flex-shrink-0">
-                  <Users className="text-orange-600" size={18} />
-                </div>
-                <div className="flex-shrink-0">
-                  <h3 className="text-sm font-bold text-slate-800 leading-none">Manage Chairpersons</h3>
-                  <p className="text-[10px] text-slate-600">View and assign</p>
-                </div>
-                <button
-                  onClick={() => setActiveTab('subordinates')}
-                  className="px-2.5 py-1 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center gap-1 text-xs flex-shrink-0"
-                >
-                  <span>Go</span>
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-
-              {/* Quick Action: Manage Riders */}
-              {allAssignments.some(a => a.region_type === 'stage') && (
-                <div className="bg-white rounded-xl shadow-lg p-2 border-2 border-slate-100 hover:border-green-300 transition-all inline-flex items-center gap-2">
-                  <div className="bg-green-100 p-1.5 rounded-lg flex-shrink-0">
-                    <Bike className="text-green-600" size={18} />
-                  </div>
-                  <div className="flex-shrink-0">
-                    <h3 className="text-sm font-bold text-slate-800 leading-none">Manage Riders</h3>
-                    <p className="text-[10px] text-slate-600">View and assign</p>
-                  </div>
-                  <button
-                    onClick={() => setActiveTab('riders')}
-                    className="px-2.5 py-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center gap-1 text-xs flex-shrink-0"
-                  >
-                    <span>Go</span>
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
-              )}
-
-              {/* Quick Action: Commission */}
-              <div className="bg-white rounded-xl shadow-lg p-2 border-2 border-slate-100 hover:border-purple-300 transition-all inline-flex items-center gap-2">
-                <div className="bg-purple-100 p-1.5 rounded-lg flex-shrink-0">
-                  <DollarSign className="text-purple-600" size={18} />
-                </div>
-                <div className="flex-shrink-0">
-                  <h3 className="text-sm font-bold text-slate-800 leading-none">Commission</h3>
-                  <p className="text-[10px] text-slate-600">Track earnings</p>
-                </div>
-                <button
-                  onClick={() => setActiveTab('commission')}
-                  className="px-2.5 py-1 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg font-medium hover:shadow-lg transition-all flex items-center gap-1 text-xs flex-shrink-0"
-                >
-                  <span>Go</span>
-                  <ChevronRight size={14} />
-                </button>
-              </div>
+              <ThemeMenuItem onClick={() => setShowMobileMenu(false)} />
             </div>
           </>
         )}
+      </div>
 
-        {activeTab === 'subordinates' && (
-          <>
-            {/* Enhanced Header Section with Gradient */}
-            <div className="bg-gradient-to-br from-blue-500 via-blue-400 to-indigo-500 rounded-xl shadow-xl p-3 mb-3 text-white relative overflow-hidden">
-              {/* Decorative Background */}
-              <div className="absolute top-0 right-0 opacity-10">
-                <Users size={120} className="transform rotate-12" />
-              </div>
-              
-              <div className="relative z-10">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-2">
-                    <Users size={24} />
-                    <div>
-                      <h2 className="text-lg sm:text-xl font-bold leading-none">Your Chairpersons</h2>
-                      <p className="text-white/90 text-[10px] sm:text-xs">
-                        {selectedAssignment ? `Managing ${formatRegionType(selectedAssignment.region_type)} level` : 'Select a role to manage'}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  {selectedAssignment?.region_type !== 'stage' && (
-                    <button
-                      onClick={() => setShowAssignModal(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-blue-600 rounded-lg hover:bg-blue-50 transition-all shadow-lg font-semibold text-xs flex-shrink-0"
-                    >
-                      <UserPlus size={16} />
-                      <span>Assign</span>
-                    </button>
-                  )}
-                </div>
+      {/* Generous bottom padding so the floating chat button never sits on
+          top of the last card when scrolled to the end. */}
+      <div className="container mx-auto px-4 pt-5 pb-28">
+        {/* Tab Content */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            {/* Greeting */}
+            <div>
+              <h2 className="font-classic-display leading-tight">
+                <span className="block text-[18px] font-medium text-slate-500">{greeting},</span>
+                <span className="block break-words text-[30px] font-bold tracking-tight text-slate-900">{displayName}</span>
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">Here's your chairperson dashboard overview.</p>
+              <div className="landing-classic-divider mt-4" />
+            </div>
 
-                {/* Quick Stats Row */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <Users size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">{stats.totalSubordinates}</p>
-                    <p className="text-[9px] text-white/80">Total</p>
-                  </div>
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <Check size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">{stats.activeSubordinates}</p>
-                    <p className="text-[9px] text-white/80">Active</p>
-                  </div>
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <TrendingUp size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">
-                      {stats.totalSubordinates > 0 ? `${((stats.activeSubordinates / stats.totalSubordinates) * 100).toFixed(0)}%` : '0%'}
-                    </p>
-                    <p className="text-[9px] text-white/80">Rate</p>
-                  </div>
-                </div>
+            {/* Standing at a glance */}
+            <LedgerStats
+              items={[
+                { label: `Active role${allAssignments.length !== 1 ? 's' : ''}`, value: allAssignments.length, icon: MapPin },
+                { label: 'Chairpersons', value: stats.totalSubordinates, icon: Users },
+                ...(riders.length > 0 ? [{ label: 'Riders', value: riders.length, icon: Bike }] : []),
+              ]}
+            />
 
-                {/* Role Selector */}
-                <div className="bg-white/15 backdrop-blur-md rounded-lg p-2 border border-white/20 mt-3">
-                  <label className="block text-[10px] font-semibold text-white mb-1 flex items-center gap-1">
-                    <Settings size={12} />
-                    Active Role
-                  </label>
-                  <select
-                    value={selectedAssignment?.id || ''}
-                    onChange={(e) => {
-                      const assignment = allAssignments.find(a => a.id === e.target.value);
-                      if (assignment) {
-                        setSelectedAssignment(assignment);
-                        setMyCommitteeInfo(assignment);
-                        if (assignment.region_type === 'stage') {
-                          setActiveTab('riders');
-                        }
-                      }
-                    }}
-                    className="w-full px-2 py-1.5 border-0 rounded-lg focus:ring-2 focus:ring-white/50 bg-white/90 text-slate-800 font-medium shadow-sm text-xs"
-                  >
-                    {allAssignments.map((assignment, idx) => {
-                      const isTop     = idx === 0;
-                      const isVirtual = assignment.id.startsWith('virtual-');
-                      const prefix    = isTop ? '⭐ ' : '└ ';
-                      const suffix    = isVirtual ? ' (access via top role)' : '';
-                      return (
-                        <option key={assignment.id} value={assignment.id}>
-                          {prefix}{formatRole(assignment.role)}{suffix}
-                        </option>
-                      );
-                    })}
-                  </select>
-                </div>
+            {roleCard}
+
+            <div className="space-y-3">
+              <SectionHeading>At a glance</SectionHeading>
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <StatTile icon={DollarSign} tone="bg-orange-50 text-orange-600" label="Commission" value={`${stats.totalCommission.toFixed(1)}%`} caption="Average rate" />
+                <StatTile icon={Bike} tone="bg-emerald-50 text-emerald-600" label="Rides" value={stats.monthlyRides} caption="Monthly" />
+                <StatTile icon={TrendingUp} tone="bg-sky-50 text-sky-600" label="Active" value={stats.activeSubordinates} caption={`${activePct} of your chairpersons`} />
+                <IcanCoinCard variant="premium" userId={user?.id} onGoToWallet={goToWallet} />
               </div>
             </div>
 
+            {/* Quick actions */}
+            <div className="space-y-3">
+              <SectionHeading>Manage</SectionHeading>
+              <div className="space-y-3">
+                {[
+                  { label: 'Manage Chairpersons', desc: 'View and assign', icon: Users, tile: 'bg-sky-50 text-sky-600', tab: 'subordinates' as TabType, show: true },
+                  { label: 'Manage Riders', desc: 'View and assign', icon: Bike, tile: 'bg-emerald-50 text-emerald-600', tab: 'riders' as TabType, show: hasStageRole },
+                  { label: 'Commission', desc: 'Track earnings', icon: DollarSign, tile: 'bg-amber-50 text-amber-600', tab: 'commission' as TabType, show: true },
+                ].filter(a => a.show).map(a => (
+                  <button
+                    key={a.tab}
+                    type="button"
+                    onClick={() => setActiveTab(a.tab)}
+                    className="classic-card group flex w-full items-center gap-3 p-4 text-left transition-all active:scale-[0.99] hover:border-orange-300"
+                  >
+                    <span className={`grid h-11 w-11 flex-shrink-0 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${a.tile}`}>
+                      <a.icon size={20} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-classic-display text-[17px] font-semibold leading-tight text-slate-800">{a.label}</span>
+                      <span className="mt-0.5 block text-xs text-slate-500">{a.desc}</span>
+                    </span>
+                    <ChevronRight size={18} className="flex-shrink-0 text-[#c4a052] transition-transform group-hover:translate-x-0.5" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'subordinates' && (
+          <div className="space-y-5">
+            <ClassicHeader
+              eyebrow="Your team"
+              title="Chairpersons"
+              subtitle={selectedAssignment ? `Managing ${formatRegionType(selectedAssignment.region_type)} level` : 'Select a role to manage'}
+              action={selectedAssignment?.region_type !== 'stage' && (
+                <button type="button" onClick={() => setShowAssignModal(true)} className={assignButtonClass}>
+                  <UserPlus size={16} /> Assign
+                </button>
+              )}
+            />
+
+            <LedgerStats
+              items={[
+                { label: 'Total', value: stats.totalSubordinates, icon: Users },
+                { label: 'Active', value: stats.activeSubordinates, icon: Check },
+                { label: 'Rate', value: activePct, icon: TrendingUp },
+              ]}
+            />
+
+            {roleCard}
+
             {/* Chairpersons List */}
             {selectedAssignment?.region_type === 'stage' ? (
-              <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-2xl shadow-lg p-12 text-center border-2 border-dashed border-slate-300">
-                <div className="bg-white rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4 shadow-md">
-                  <Bike className="w-10 h-10 text-blue-500" />
-                </div>
-                <h3 className="text-xl font-bold text-slate-800 mb-2">Switch to Riders</h3>
-                <p className="text-slate-600 mb-2">Stage chairpersons don't assign subordinate chairpersons</p>
-                <p className="text-sm text-slate-500 mb-6">As a stage chairperson, you manage riders instead</p>
-                <button
-                  onClick={() => setActiveTab('riders')}
-                  className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-xl hover:shadow-lg transition-all font-semibold"
-                >
-                  <Bike size={20} />
-                  Go to Riders
+              <EmptyState
+                icon={Bike}
+                title="Switch to Riders"
+                lines={["Stage chairpersons don't assign subordinate chairpersons", 'As a stage chairperson, you manage riders instead']}
+              >
+                <button type="button" onClick={() => setActiveTab('riders')} className="classic-btn classic-btn-primary !w-auto !rounded-full !px-6">
+                  <Bike size={18} /> Go to Riders
                 </button>
-              </div>
+              </EmptyState>
             ) : subordinates.length === 0 ? (
-              <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl shadow-lg p-8 text-center border-2 border-slate-200">
-                <div className="bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3 shadow-md">
-                  <Users className="w-8 h-8 text-blue-400" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-800 mb-1">No Chairpersons Yet</h3>
-                <p className="text-slate-600 mb-1 text-sm">Start building your team</p>
-                <p className="text-xs text-slate-500 mb-4">Click "Assign" to add your first subordinate chairperson</p>
-                <button
-                  onClick={() => setShowAssignModal(true)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-lg hover:shadow-lg transition-all font-semibold text-sm"
-                >
-                  <UserPlus size={16} />
-                  Assign First Chairperson
+              <EmptyState
+                icon={Users}
+                title="No Chairpersons Yet"
+                lines={['Start building your team', 'Click "Assign" to add your first subordinate chairperson']}
+              >
+                <button type="button" onClick={() => setShowAssignModal(true)} className="classic-btn classic-btn-primary !w-auto !rounded-full !px-6">
+                  <UserPlus size={16} /> Assign First Chairperson
                 </button>
-              </div>
+              </EmptyState>
             ) : (
-              <div className="space-y-2">
-                {subordinates.map((subordinate, index) => (
+              <div className="space-y-3">
+                {subordinates.map((subordinate) => (
                   <button
                     key={subordinate.id}
                     type="button"
                     onClick={() => setSelectedSubordinate(subordinate)}
-                    className="group w-full text-left bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border-2 border-slate-100 hover:border-blue-300"
+                    className="classic-card group flex w-full items-center gap-3 p-3.5 text-left transition-all active:scale-[0.99] hover:border-orange-300"
                   >
-                    <div className="flex items-center gap-2 p-2">
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        {/* Avatar with Gradient */}
-                        <div className="relative flex-shrink-0">
-                          <div className="w-10 h-10 bg-gradient-to-br from-blue-500 via-indigo-500 to-purple-500 rounded-lg flex items-center justify-center text-white font-bold text-base shadow-lg transform group-hover:scale-110 transition-transform">
-                            {subordinate.full_name.charAt(0).toUpperCase()}
-                          </div>
-                          {/* Status Indicator */}
-                          <div className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white ${
-                            subordinate.is_active ? 'bg-green-500' : 'bg-red-500'
-                          } shadow-md`}></div>
-                        </div>
+                    <ClassicAvatar name={subordinate.full_name} dot={subordinate.is_active ? 'bg-emerald-500' : 'bg-red-500'} />
 
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-bold text-slate-800 text-sm mb-0.5 truncate leading-none">
-                            {subordinate.full_name}
-                          </h4>
-                          <p className="text-xs text-slate-600 mb-1 truncate">{subordinate.email}</p>
-                          
-                          {/* Badges */}
-                          <div className="flex flex-wrap items-center gap-1">
-                            <span className="inline-flex items-center gap-0.5 text-[10px] bg-gradient-to-r from-blue-500 to-indigo-500 text-white px-2 py-0.5 rounded-full font-medium">
-                              <User size={10} />
-                              {formatRole(subordinate.role)}
-                            </span>
-                            <span className="inline-flex items-center gap-0.5 text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-medium">
-                              <MapPin size={10} />
-                              {subordinate.region_name}
-                            </span>
-                          </div>
-                        </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="font-classic-display text-base font-semibold leading-tight text-slate-800 truncate">
+                        {subordinate.full_name}
+                      </h4>
+                      <p className="mt-0.5 text-xs text-slate-500 truncate">{subordinate.email}</p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#fbf3dc] px-2 py-0.5 text-[10px] font-semibold text-[#7a5a12] ring-1 ring-inset ring-[#c4a052]/40">
+                          <User size={10} /> {formatRole(subordinate.role)}
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                          <MapPin size={10} /> {subordinate.region_name}
+                        </span>
                       </div>
+                    </div>
 
-                      {/* Commission & Arrow */}
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <div className="text-center bg-gradient-to-br from-orange-50 to-yellow-50 px-2 py-1 rounded-lg border border-orange-200">
-                          <p className="text-[9px] text-slate-600 font-medium">Rate</p>
-                          <p className="text-base font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent leading-none">
-                            {subordinate.commission_rate}%
-                          </p>
-                        </div>
-                        <ChevronRight className="text-slate-300 group-hover:text-blue-500 transition-colors" size={16} />
+                    <div className="flex flex-shrink-0 items-center gap-1.5">
+                      <div className="text-center">
+                        <p className="classic-eyebrow !text-[9px] !tracking-[0.16em]">Rate</p>
+                        <p className="font-classic-display text-xl font-bold leading-none text-slate-900">{subordinate.commission_rate}%</p>
                       </div>
+                      <ChevronRight size={16} className="text-[#c4a052] transition-transform group-hover:translate-x-0.5" />
                     </div>
                   </button>
                 ))}
               </div>
             )}
-          </>
+          </div>
         )}
 
-        {activeTab === 'riders' && allAssignments.some(a => a.region_type === 'stage') && (
-          <>
-            {/* Enhanced Header Section with Green Gradient */}
-            <div className="bg-gradient-to-br from-green-500 via-emerald-500 to-teal-500 rounded-xl shadow-xl p-3 mb-3 text-white relative overflow-hidden">
-              {/* Decorative Background */}
-              <div className="absolute top-0 right-0 opacity-10">
-                <Bike size={120} className="transform -rotate-12" />
-              </div>
-              
-              <div className="relative z-10">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-2">
-                    <Bike size={24} />
-                    <div>
-                      <h2 className="text-lg sm:text-xl font-bold leading-none">Your Riders</h2>
-                      <p className="text-white/90 text-[10px] sm:text-xs">
-                        From {allAssignments.filter(a => a.region_type === 'stage').length} stage assignment{allAssignments.filter(a => a.region_type === 'stage').length !== 1 ? 's' : ''}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  {selectedAssignment?.region_type === 'stage' && (
-                    <button 
-                      onClick={() => setShowAssignRiderModal(true)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-white text-green-600 rounded-lg hover:bg-green-50 transition-all shadow-lg font-semibold text-xs flex-shrink-0"
-                    >
-                      <UserPlus size={16} />
-                      <span>Assign</span>
-                    </button>
-                  )}
-                </div>
+        {activeTab === 'riders' && hasStageRole && (
+          <div className="space-y-5">
+            <ClassicHeader
+              eyebrow="Your stage"
+              title="Riders"
+              subtitle={`From ${allAssignments.filter(a => a.region_type === 'stage').length} stage assignment${allAssignments.filter(a => a.region_type === 'stage').length !== 1 ? 's' : ''}`}
+              action={selectedAssignment?.region_type === 'stage' && (
+                <button type="button" onClick={() => setShowAssignRiderModal(true)} className={assignButtonClass}>
+                  <UserPlus size={16} /> Assign
+                </button>
+              )}
+            />
 
-                {/* Quick Stats Row */}
-                <div className="grid grid-cols-4 gap-2">
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <Bike size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">{riders.length}</p>
-                    <p className="text-[9px] text-white/80">Total</p>
-                  </div>
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <Check size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">
-                      {riders.filter(r => r.status === 'active').length}
-                    </p>
-                    <p className="text-[9px] text-white/80">Active</p>
-                  </div>
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <Calendar size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">
-                      {riders.filter(r => r.status === 'pending').length}
-                    </p>
-                    <p className="text-[9px] text-white/80">Pending</p>
-                  </div>
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <TrendingUp size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">
-                      {riders.reduce((sum, r) => sum + (r.completed_rides || 0), 0)}
-                    </p>
-                    <p className="text-[9px] text-white/80">Rides</p>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <LedgerStats
+              items={[
+                { label: 'Total', value: riders.length, icon: Bike },
+                { label: 'Active', value: riders.filter(r => r.status === 'active').length, icon: Check },
+                { label: 'Pending', value: riders.filter(r => r.status === 'pending').length, icon: Calendar },
+                { label: 'Rides', value: riders.reduce((sum, r) => sum + (r.completed_rides || 0), 0), icon: TrendingUp },
+              ]}
+            />
 
             {/* Riders List */}
             {riders.length === 0 ? (
-              <div className="bg-gradient-to-br from-slate-50 to-slate-100 rounded-xl shadow-lg p-8 text-center border-2 border-slate-200">
-                <div className="bg-white rounded-full w-16 h-16 flex items-center justify-center mx-auto mb-3 shadow-md">
-                  <Bike className="w-8 h-8 text-green-400" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-800 mb-1">No Riders Yet</h3>
-                <p className="text-slate-600 mb-1 text-sm">
-                  {selectedAssignment?.region_type === 'stage' 
-                    ? 'Start building your rider network' 
-                    : 'Select a stage assignment to manage riders'}
-                </p>
-                <p className="text-xs text-slate-500 mb-4">
-                  {selectedAssignment?.region_type === 'stage' 
-                    ? 'Click "Assign" to add your first rider' 
-                    : 'Switch to a stage role to assign riders'}
-                </p>
+              <EmptyState
+                icon={Bike}
+                title="No Riders Yet"
+                lines={[
+                  selectedAssignment?.region_type === 'stage' ? 'Start building your rider network' : 'Select a stage assignment to manage riders',
+                  selectedAssignment?.region_type === 'stage' ? 'Click "Assign" to add your first rider' : 'Switch to a stage role to assign riders',
+                ]}
+              >
                 {selectedAssignment?.region_type === 'stage' && (
-                  <button
-                    onClick={() => setShowAssignRiderModal(true)}
-                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-gradient-to-r from-green-500 to-emerald-500 text-white rounded-lg hover:shadow-lg transition-all font-semibold text-sm"
-                  >
-                    <UserPlus size={16} />
-                    Assign First Rider
+                  <button type="button" onClick={() => setShowAssignRiderModal(true)} className="classic-btn classic-btn-primary !w-auto !rounded-full !px-6">
+                    <UserPlus size={16} /> Assign First Rider
                   </button>
                 )}
-              </div>
+              </EmptyState>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {riders.map((rider) => (
                   <button
                     key={rider.id}
                     type="button"
                     onClick={() => setSelectedRider(rider)}
-                    className="group w-full text-left bg-white rounded-xl shadow-md hover:shadow-xl transition-all duration-300 overflow-hidden border-2 border-slate-100 hover:border-green-300"
+                    className="classic-card group flex w-full items-center gap-3 p-3.5 text-left transition-all active:scale-[0.99] hover:border-orange-300"
                   >
-                    <div className="flex items-center gap-2 p-2">
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        {/* Avatar with Gradient */}
-                        <div className="relative flex-shrink-0">
-                          <div className="w-10 h-10 bg-gradient-to-br from-green-500 via-emerald-500 to-teal-500 rounded-lg flex items-center justify-center text-white font-bold text-base shadow-lg transform group-hover:scale-110 transition-transform">
-                            {rider.full_name.charAt(0).toUpperCase()}
-                          </div>
-                          {/* Status Indicator */}
-                          <div className={`absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white shadow-md ${
-                            rider.status === 'active' ? 'bg-green-500' : 
-                            rider.status === 'pending' ? 'bg-yellow-500' : 'bg-red-500'
-                          }`}></div>
-                        </div>
+                    <ClassicAvatar
+                      name={rider.full_name}
+                      dot={rider.status === 'active' ? 'bg-emerald-500' : rider.status === 'pending' ? 'bg-amber-400' : 'bg-red-500'}
+                    />
 
-                        {/* Info */}
-                        <div className="flex-1 min-w-0">
-                          <h4 className="font-bold text-slate-800 text-sm mb-0.5 truncate leading-none">
-                            {rider.full_name}
-                          </h4>
-                          <p className="text-xs text-slate-600 mb-1 truncate">{rider.email}</p>
-                          
-                          {/* Badges */}
-                          <div className="flex flex-wrap items-center gap-1">
-                            <span className="inline-flex items-center gap-0.5 text-[10px] bg-gradient-to-r from-green-500 to-emerald-500 text-white px-2 py-0.5 rounded-full font-medium capitalize">
-                              <Bike size={10} />
-                              {rider.vehicle_type}
-                            </span>
-                            <span className="inline-flex items-center text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-full font-medium uppercase">
-                              {rider.plate_number}
-                            </span>
-                          </div>
-                        </div>
+                    <div className="min-w-0 flex-1">
+                      <h4 className="font-classic-display text-base font-semibold leading-tight text-slate-800 truncate">
+                        {rider.full_name}
+                      </h4>
+                      <p className="mt-0.5 text-xs text-slate-500 truncate">{rider.email}</p>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#fbf3dc] px-2 py-0.5 text-[10px] font-semibold capitalize text-[#7a5a12] ring-1 ring-inset ring-[#c4a052]/40">
+                          <Bike size={10} /> {rider.vehicle_type}
+                        </span>
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase text-slate-600">
+                          {rider.plate_number}
+                        </span>
                       </div>
+                    </div>
 
-                      {/* Rating & Rides */}
-                      <div className="flex items-center gap-1.5 flex-shrink-0">
-                        <div className="text-center bg-gradient-to-br from-yellow-50 to-orange-50 px-2 py-1 rounded-lg border border-yellow-200">
-                          <p className="text-xs font-bold text-orange-600 leading-none">⭐ {rider.rating.toFixed(1)}</p>
-                          <p className="text-[9px] text-slate-600">{rider.completed_rides}</p>
-                        </div>
-                        <ChevronRight className="text-slate-300 group-hover:text-green-500 transition-colors" size={16} />
+                    <div className="flex flex-shrink-0 items-center gap-1.5">
+                      <div className="text-center">
+                        <p className="font-classic-display text-sm font-bold leading-none text-slate-900">⭐ {rider.rating.toFixed(1)}</p>
+                        <p className="mt-1 text-[10px] text-slate-500">{rider.completed_rides} rides</p>
                       </div>
+                      <ChevronRight size={16} className="text-[#c4a052] transition-transform group-hover:translate-x-0.5" />
                     </div>
                   </button>
                 ))}
               </div>
             )}
-          </>
+          </div>
         )}
 
         {activeTab === 'commission' && (
-          <>
-            {/* Enhanced Header with Purple Gradient */}
-            <div className="bg-gradient-to-br from-purple-500 via-purple-400 to-pink-500 dark:from-purple-700 dark:via-purple-600 dark:to-pink-700 rounded-xl shadow-xl p-3 mb-3 text-white relative overflow-hidden">
-              {/* Decorative Background */}
-              <div className="absolute top-0 right-0 opacity-10">
-                <DollarSign size={120} className="transform rotate-12" />
-              </div>
+          <div className="space-y-5">
+            <ClassicHeader eyebrow="Earnings" title="Commission" subtitle="Track your earnings and rates" />
 
-              <div className="relative z-10">
-                <div className="flex items-center justify-between gap-3 mb-3">
-                  <div className="flex items-center gap-2">
-                    <DollarSign size={24} />
-                    <div>
-                      <h2 className="text-lg sm:text-xl font-bold leading-none">Commission Overview</h2>
-                      <p className="text-white/90 text-[10px] sm:text-xs">Track your earnings and rates</p>
-                    </div>
-                  </div>
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 flex-shrink-0">
-                    <CreditCard size={18} />
-                  </div>
-                </div>
-
-                {/* Quick Stats Row */}
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <DollarSign size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">{stats.totalCommission.toFixed(1)}%</p>
-                    <p className="text-[9px] text-white/80">Avg Rate</p>
-                  </div>
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <Calendar size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">{stats.monthlyRides}</p>
-                    <p className="text-[9px] text-white/80">Rides</p>
-                  </div>
-                  <div className="bg-white/20 backdrop-blur-sm rounded-lg p-2 text-center">
-                    <TrendingUp size={14} className="mx-auto mb-0.5" />
-                    <p className="text-base sm:text-lg font-bold leading-none">{formatUGX(totalEarned)}</p>
-                    <p className="text-[9px] text-white/80">Earned</p>
-                  </div>
+            {/* Total earned — the one number this tab exists for */}
+            <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-5 text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40">
+              <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full border border-[#c4a052]/25" />
+              <span aria-hidden className="pointer-events-none absolute -right-5 -top-5 h-28 w-28 rounded-full border border-[#c4a052]/20" />
+              <span aria-hidden className="pointer-events-none absolute -bottom-14 -left-10 h-40 w-40 rounded-full bg-orange-500/20 blur-2xl" />
+              <div className="relative">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]">Total earned</p>
+                <p className="mt-1 break-words font-classic-display text-[30px] font-bold leading-tight">{formatUGX(totalEarned)}</p>
+                <div className="mt-4 flex items-center gap-4 border-t border-[#c4a052]/30 pt-3 text-xs text-white/75">
+                  <span className="flex items-center gap-1.5"><DollarSign size={13} className="text-[#e6c980]" /> {stats.totalCommission.toFixed(1)}% avg rate</span>
+                  <span className="flex items-center gap-1.5"><Bike size={13} className="text-[#e6c980]" /> {stats.monthlyRides} rides</span>
                 </div>
               </div>
             </div>
 
             {/* Commission Cards — collapsible on mobile (tap header to open), always expanded side-by-side from lg up */}
-            <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:gap-6 mb-4 lg:mb-6">
-              {/* Commission Summary Card */}
-              <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border-2 border-slate-100 dark:border-slate-700 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setOpenCommissionSection(openCommissionSection === 'summary' ? null : 'summary')}
-                  className="w-full flex items-center justify-between gap-3 p-4 sm:p-6 text-left lg:cursor-default"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="bg-gradient-to-br from-purple-100 to-pink-100 dark:from-purple-900/40 dark:to-pink-900/40 p-3 rounded-xl flex-shrink-0">
-                      <BarChart3 className="text-purple-600 dark:text-purple-400" size={28} />
+            <div className="flex flex-col gap-4 lg:grid lg:grid-cols-2 lg:gap-6">
+              <CommissionSection
+                open={openCommissionSection === 'summary'}
+                onToggle={() => setOpenCommissionSection(openCommissionSection === 'summary' ? null : 'summary')}
+                icon={BarChart3}
+                tone="bg-orange-50 text-orange-600 ring-orange-100"
+                title="Commission Summary"
+                subtitle="Your earnings breakdown"
+              >
+                <div className="space-y-3.5">
+                  {[
+                    { label: 'This month', amount: thisMonthEarned, strong: false },
+                    { label: 'Last month', amount: lastMonthEarned, strong: false },
+                    { label: 'Total earned', amount: totalEarned, strong: true },
+                  ].map(line => (
+                    <div key={line.label} className={`flex items-end ${line.strong ? 'border-t border-[#c4a052]/40 pt-3.5' : ''}`}>
+                      <span className={`whitespace-nowrap ${line.strong ? 'font-classic-display text-base font-bold text-slate-900' : 'text-sm text-slate-600'}`}>{line.label}</span>
+                      <span className="classic-leader" />
+                      <span className={`whitespace-nowrap ${line.strong ? 'font-classic-display text-lg font-bold text-[#7a5a12]' : 'text-sm font-semibold text-slate-800'}`}>{formatUGX(line.amount)}</span>
                     </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Commission Summary</h3>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">Your earnings breakdown</p>
-                    </div>
-                  </div>
-                  <ChevronDown
-                    size={20}
-                    className={`text-slate-400 dark:text-slate-500 transition-transform flex-shrink-0 lg:hidden ${openCommissionSection === 'summary' ? 'rotate-180' : ''}`}
-                  />
-                </button>
+                  ))}
+                </div>
 
-                <div className={`${openCommissionSection === 'summary' ? 'block' : 'hidden'} lg:block px-4 sm:px-6 pb-4 sm:pb-6`}>
-                  <div className="space-y-4">
-                    <div className="flex justify-between items-center p-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-100 dark:border-blue-800/50">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-blue-500 rounded-lg p-2">
-                          <Calendar className="text-white" size={20} />
-                        </div>
-                        <span className="text-slate-700 dark:text-slate-200 font-medium">This Month</span>
-                      </div>
-                      <span className="font-bold text-slate-800 dark:text-slate-100 text-lg">{formatUGX(thisMonthEarned)}</span>
-                    </div>
+                <div className="mt-5 rounded-xl border border-[#c4a052]/40 bg-[#fbf3dc] p-3.5 dark:bg-[#c4a052]/10">
+                  <p className="flex items-start gap-2 text-[13px] leading-snug text-[#7a5a12] dark:text-[#f0d68f]">
+                    <span aria-hidden>💡</span>
+                    <span className="font-medium">Commission credits automatically when a rider completes a ride or settles cash owed.</span>
+                  </p>
+                </div>
+              </CommissionSection>
 
-                    <div className="flex justify-between items-center p-4 bg-gradient-to-r from-purple-50 to-pink-50 dark:from-purple-900/20 dark:to-pink-900/20 rounded-xl border border-purple-100 dark:border-purple-800/50">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-purple-500 rounded-lg p-2">
-                          <Calendar className="text-white" size={20} />
-                        </div>
-                        <span className="text-slate-700 dark:text-slate-200 font-medium">Last Month</span>
-                      </div>
-                      <span className="font-bold text-slate-800 dark:text-slate-100 text-lg">{formatUGX(lastMonthEarned)}</span>
-                    </div>
-
-                    <div className="flex justify-between items-center p-4 bg-gradient-to-r from-orange-50 to-yellow-50 dark:from-orange-900/20 dark:to-yellow-900/20 rounded-xl border-2 border-orange-200 dark:border-orange-800/50">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-gradient-to-r from-orange-500 to-yellow-500 rounded-lg p-2">
-                          <DollarSign className="text-white" size={20} />
-                        </div>
-                        <span className="text-slate-700 dark:text-slate-200 font-bold">Total Earned</span>
-                      </div>
-                      <span className="font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent text-xl">
-                        {formatUGX(totalEarned)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-xl">
-                    <p className="text-sm text-amber-800 dark:text-amber-300 flex items-center gap-2">
-                      <span>💡</span>
-                      <span className="font-medium">Commission credits automatically when a rider completes a ride or settles cash owed.</span>
+              <CommissionSection
+                open={openCommissionSection === 'activity'}
+                onToggle={() => setOpenCommissionSection(openCommissionSection === 'activity' ? null : 'activity')}
+                icon={TrendingUp}
+                tone="bg-emerald-50 text-emerald-600 ring-emerald-100"
+                title="Recent Activity"
+                subtitle="Latest transactions"
+              >
+                {commissions.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-8 text-center">
+                    <span className="grid h-14 w-14 place-items-center rounded-full bg-[#faf8f3] ring-1 ring-[#c4a052]/40 dark:bg-slate-700">
+                      <BarChart3 className="text-[#c4a052]" size={26} />
+                    </span>
+                    <p className="mt-3 font-classic-display text-base font-semibold text-slate-800">No activity yet</p>
+                    <p className="mt-1 max-w-xs text-sm text-slate-500">
+                      Your commission activity will appear here once rides start generating earnings
                     </p>
                   </div>
-                </div>
-              </div>
-
-              {/* Recent Activity Card */}
-              <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border-2 border-slate-100 dark:border-slate-700 overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => setOpenCommissionSection(openCommissionSection === 'activity' ? null : 'activity')}
-                  className="w-full flex items-center justify-between gap-3 p-4 sm:p-6 text-left lg:cursor-default"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="bg-gradient-to-br from-green-100 to-emerald-100 dark:from-green-900/40 dark:to-emerald-900/40 p-3 rounded-xl flex-shrink-0">
-                      <TrendingUp className="text-green-600 dark:text-green-400" size={28} />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Recent Activity</h3>
-                      <p className="text-sm text-slate-600 dark:text-slate-400">Latest transactions</p>
-                    </div>
-                  </div>
-                  <ChevronDown
-                    size={20}
-                    className={`text-slate-400 dark:text-slate-500 transition-transform flex-shrink-0 lg:hidden ${openCommissionSection === 'activity' ? 'rotate-180' : ''}`}
-                  />
-                </button>
-
-                <div className={`${openCommissionSection === 'activity' ? 'block' : 'hidden'} lg:block px-4 sm:px-6 pb-4 sm:pb-6`}>
-                  {commissions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center py-12">
-                      <div className="bg-slate-100 dark:bg-slate-700 rounded-full w-16 h-16 flex items-center justify-center mb-4">
-                        <BarChart3 className="text-slate-400 dark:text-slate-500" size={32} />
-                      </div>
-                      <p className="text-slate-600 dark:text-slate-300 font-medium mb-2">No activity yet</p>
-                      <p className="text-sm text-slate-500 dark:text-slate-400 text-center max-w-xs">
-                        Your commission activity will appear here once rides start generating earnings
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                      {commissions.slice(0, 10).map((c) => (
-                        <div
-                          key={c.id}
-                          className="flex items-center justify-between gap-2 p-3 bg-slate-50 dark:bg-slate-900/40 rounded-lg border border-slate-100 dark:border-slate-700"
-                        >
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                              {formatUGX(c.commission_amount)}
-                              <span className="text-xs font-normal text-slate-500 dark:text-slate-400"> ({c.commission_percentage}% of {formatUGX(c.ride_fare)})</span>
-                            </p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">
-                              {new Date(c.paid_at || c.created_at).toLocaleDateString('en-UG', { day: 'numeric', month: 'short', year: 'numeric' })}
-                            </p>
-                          </div>
-                          <span className={`flex-shrink-0 text-[10px] px-2 py-0.5 rounded-full font-medium capitalize ${
-                            c.status === 'paid' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                            c.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                          }`}>
-                            {c.status}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Commission Rates by Assignment */}
-            <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-lg border-2 border-slate-100 dark:border-slate-700 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setOpenCommissionSection(openCommissionSection === 'rates' ? null : 'rates')}
-                className="w-full flex items-center justify-between gap-3 p-4 sm:p-6 text-left lg:cursor-default"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="bg-gradient-to-br from-orange-100 to-yellow-100 dark:from-orange-900/40 dark:to-yellow-900/40 p-3 rounded-xl flex-shrink-0">
-                    <MapPin className="text-orange-600 dark:text-orange-400" size={28} />
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Commission Rates by Role</h3>
-                    <p className="text-sm text-slate-600 dark:text-slate-400">Your rates across different assignments</p>
-                  </div>
-                </div>
-                <ChevronDown
-                  size={20}
-                  className={`text-slate-400 dark:text-slate-500 transition-transform flex-shrink-0 lg:hidden ${openCommissionSection === 'rates' ? 'rotate-180' : ''}`}
-                />
-              </button>
-
-              <div className={`${openCommissionSection === 'rates' ? 'block' : 'hidden'} lg:block px-4 sm:px-6 pb-4 sm:pb-6`}>
-                {allAssignments.length === 0 ? (
-                  <div className="text-center py-8">
-                    <p className="text-slate-500 dark:text-slate-400">No assignments found</p>
-                  </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {allAssignments.map((assignment, index) => (
+                  <div className="max-h-80 overflow-y-auto pr-1">
+                    {commissions.slice(0, 10).map((c, i) => (
                       <div
-                        key={assignment.id}
-                        className="group bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-700/60 dark:to-slate-800 rounded-xl p-5 border-2 border-slate-200 dark:border-slate-600 hover:border-orange-300 dark:hover:border-orange-500 hover:shadow-lg transition-all"
+                        key={c.id}
+                        className={`flex items-center justify-between gap-3 py-3 ${i > 0 ? 'border-t border-[#c4a052]/20' : ''}`}
                       >
-                        <div className="flex items-start justify-between mb-3">
-                          <div className="bg-white dark:bg-slate-800 rounded-lg p-2 shadow-sm">
-                            <MapPin className="text-orange-500 dark:text-orange-400" size={20} />
-                          </div>
-                          <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                            index === 0
-                              ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                              : 'bg-slate-200 text-slate-700 dark:bg-slate-600 dark:text-slate-200'
-                          }`}>
-                            {index === 0 ? '⭐ Primary' : 'Secondary'}
-                          </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-slate-800">
+                            {formatUGX(c.commission_amount)}
+                            <span className="text-xs font-normal text-slate-500"> ({c.commission_percentage}% of {formatUGX(c.ride_fare)})</span>
+                          </p>
+                          <p className="mt-0.5 text-xs text-slate-500">
+                            {new Date(c.paid_at || c.created_at).toLocaleDateString('en-UG', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </p>
                         </div>
-                        <h4 className="font-bold text-slate-800 dark:text-slate-100 mb-1 capitalize">
-                          {formatRole(assignment.role)}
-                        </h4>
-                        <p className="text-sm text-slate-600 dark:text-slate-400 mb-3 capitalize">
-                          {formatRegionType(assignment.region_type)}
-                        </p>
-                        <div className="flex items-center justify-between pt-3 border-t border-slate-300 dark:border-slate-600">
-                          <span className="text-sm text-slate-600 dark:text-slate-400 font-medium">Commission</span>
-                          <span className="text-2xl font-bold bg-gradient-to-r from-orange-500 to-yellow-500 bg-clip-text text-transparent">
-                            {assignment.commission_rate}%
-                          </span>
-                        </div>
+                        <span className={`flex-shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold capitalize ${
+                          c.status === 'paid' ? 'bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:ring-emerald-800' :
+                          c.status === 'pending' ? 'bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:ring-amber-800' :
+                          'bg-red-50 text-red-700 ring-1 ring-inset ring-red-200 dark:bg-red-900/30 dark:text-red-400 dark:ring-red-800'
+                        }`}>
+                          {c.status}
+                        </span>
                       </div>
                     ))}
                   </div>
                 )}
-              </div>
+              </CommissionSection>
             </div>
-          </>
+
+            {/* Commission Rates by Assignment */}
+            <CommissionSection
+              open={openCommissionSection === 'rates'}
+              onToggle={() => setOpenCommissionSection(openCommissionSection === 'rates' ? null : 'rates')}
+              icon={MapPin}
+              tone="bg-amber-50 text-amber-600 ring-amber-100"
+              title="Commission Rates by Role"
+              subtitle="Your rates across different assignments"
+            >
+              {allAssignments.length === 0 ? (
+                <p className="py-6 text-center text-sm text-slate-500">No assignments found</p>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {allAssignments.map((assignment, index) => (
+                    <div
+                      key={assignment.id}
+                      className={`classic-tile p-4 ${index === 0 ? 'is-active' : ''}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="grid h-9 w-9 place-items-center rounded-full bg-[#faf8f3] ring-1 ring-[#c4a052]/40 dark:bg-slate-700">
+                          <MapPin className="text-orange-500" size={16} />
+                        </span>
+                        <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${
+                          index === 0
+                            ? 'bg-[#c4a052] text-white'
+                            : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
+                        }`}>
+                          {index === 0 ? '⭐ Primary' : 'Secondary'}
+                        </span>
+                      </div>
+                      <h4 className="mt-3 font-classic-display text-base font-semibold capitalize text-slate-800">
+                        {formatRole(assignment.role)}
+                      </h4>
+                      <p className="text-xs capitalize text-slate-500">
+                        {formatRegionType(assignment.region_type)}
+                      </p>
+                      <div className="mt-3 flex items-end border-t border-[#c4a052]/30 pt-3">
+                        <span className="classic-eyebrow !tracking-[0.16em]">Commission</span>
+                        <span className="classic-leader" />
+                        <span className="font-classic-display text-2xl font-bold leading-none text-slate-900">{assignment.commission_rate}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CommissionSection>
+          </div>
         )}
       </div>
 
@@ -1253,31 +852,162 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   );
 }
 
+// ── Classic-look building blocks for this page (ivory / ink / gold — see index.css `classic-*`) ──
+
+// Gold eyebrow, serif title, hairline; optional action (e.g. Assign) on the right.
+function ClassicHeader({ eyebrow, title, subtitle, action }: {
+  eyebrow: string;
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="flex items-end justify-between gap-3">
+        <div className="min-w-0">
+          <p className="classic-eyebrow">{eyebrow}</p>
+          <h2 className="mt-1 font-classic-display text-[28px] font-bold leading-tight tracking-tight text-slate-900">{title}</h2>
+          {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
+        </div>
+        {action || null}
+      </div>
+      <div className="landing-classic-divider mt-4" />
+    </div>
+  );
+}
+
+// A row of headline figures in one card, split by gold hairlines.
+function LedgerStats({ items }: { items: { label: string; value: React.ReactNode; icon: LucideIcon }[] }) {
+  return (
+    <div
+      className="classic-card grid divide-x divide-[#c4a052]/25 dark:divide-slate-700"
+      style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
+    >
+      {items.map(item => (
+        <div key={item.label} className="min-w-0 px-2 py-4 text-center">
+          <item.icon size={16} className="mx-auto text-orange-500" />
+          <p className="mt-2 truncate font-classic-display text-[22px] font-bold leading-none text-slate-900 sm:text-[26px]">{item.value}</p>
+          <p className="classic-eyebrow mt-2 truncate !tracking-[0.14em]">{item.label}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatTile({ icon: Icon, tone, label, value, caption }: {
+  icon: LucideIcon;
+  tone: string;
+  label: string;
+  value: React.ReactNode;
+  caption: string;
+}) {
+  return (
+    <div className="classic-card p-4">
+      <span className={`grid h-10 w-10 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${tone}`}>
+        <Icon size={18} />
+      </span>
+      <p className="mt-3 font-classic-display text-[28px] font-bold leading-none text-slate-900">{value}</p>
+      <p className="mt-1.5 text-[13px] font-semibold text-slate-700">{label}</p>
+      <p className="text-xs text-slate-400">{caption}</p>
+    </div>
+  );
+}
+
+// Initial in a gold-ringed circle, with a status dot (green / amber / red).
+function ClassicAvatar({ name, dot }: { name: string; dot: string }) {
+  return (
+    <div className="relative flex-shrink-0">
+      <span className="grid h-12 w-12 place-items-center rounded-full bg-gradient-to-br from-orange-400 to-amber-500 font-classic-display text-xl font-bold text-white ring-2 ring-[#e6c980] ring-offset-2 ring-offset-white dark:ring-offset-slate-800">
+        {name.charAt(0).toUpperCase()}
+      </span>
+      <span className={`absolute -right-0.5 -top-0.5 h-3.5 w-3.5 rounded-full border-2 border-white dark:border-slate-800 ${dot}`} />
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon, title, lines, children }: {
+  icon: LucideIcon;
+  title: string;
+  lines: string[];
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="classic-card px-6 py-9 text-center">
+      <span className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-[#faf8f3] ring-1 ring-[#c4a052]/50 dark:bg-slate-700">
+        <Icon className="text-[#c4a052]" size={28} strokeWidth={1.6} />
+      </span>
+      <h3 className="mt-4 font-classic-display text-xl font-semibold text-slate-800">{title}</h3>
+      <div className="landing-classic-divider mx-auto my-3 max-w-[140px]" />
+      {lines.map(line => (
+        <p key={line} className="text-sm text-slate-500">{line}</p>
+      ))}
+      {children && <div className="mt-5 flex justify-center">{children}</div>}
+    </div>
+  );
+}
+
+// Collapsible on mobile (tap the header), always open from lg up.
+function CommissionSection({ open, onToggle, icon: Icon, tone, title, subtitle, children }: {
+  open: boolean;
+  onToggle: () => void;
+  icon: LucideIcon;
+  tone: string;
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="classic-card overflow-hidden">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="flex w-full items-center justify-between gap-3 p-4 text-left lg:cursor-default"
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <span className={`grid h-10 w-10 flex-shrink-0 place-items-center rounded-full ring-1 ring-inset ${tone}`}>
+            <Icon size={17} />
+          </span>
+          <span className="min-w-0">
+            <span className="block font-classic-display text-lg font-semibold leading-tight text-slate-800">{title}</span>
+            <span className="block text-xs text-slate-500">{subtitle}</span>
+          </span>
+        </span>
+        <ChevronDown size={18} className={`flex-shrink-0 text-slate-400 transition-transform lg:hidden ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div className={`${open ? 'block' : 'hidden'} lg:block px-4 pb-4`}>
+        <div className="landing-classic-divider mb-4" />
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // Tab Button Component
-function TabButton({ 
-  active, 
-  onClick, 
-  icon, 
-  label 
-}: { 
-  active: boolean; 
-  onClick: () => void; 
-  icon: React.ReactNode; 
-  label: string; 
+function TabButton({
+  active,
+  onClick,
+  icon,
+  label
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-1 sm:gap-2 px-2 xs:px-2.5 sm:px-4 py-1.5 xs:py-2 sm:py-3 font-medium transition-all relative whitespace-nowrap text-[10px] xs:text-xs sm:text-sm ${
+      className={`flex items-center gap-2 px-4 py-3 font-classic-display font-semibold transition-all relative whitespace-nowrap text-[15px] ${
         active
-          ? 'text-orange-500 dark:text-orange-400'
-          : 'text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
+          ? 'text-[#7a5a12] dark:text-[#f0d68f]'
+          : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
       }`}
     >
-      {icon}
-      <span className="hidden xs:inline">{label}</span>
+      <span className={active ? 'text-orange-500' : ''}>{icon}</span>
+      {label}
       {active && (
-        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
+        <div className="absolute bottom-0 left-3 right-3 h-0.5 rounded-full bg-[#c4a052]" />
       )}
     </button>
   );
