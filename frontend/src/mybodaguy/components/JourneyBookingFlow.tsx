@@ -22,6 +22,24 @@ import { COUNTRIES } from '../data/countries';
 
 const SHIP_BOOKING_TIMEOUT_MS = 60_000;
 
+/** Most travellers on one booking (the airline's own limit per order). */
+const MAX_PARTY_SIZE = 9;
+/** One BodaGoEra car carries this many; a bigger party keeps the flight but makes its own way to/from the airport. */
+const CAR_SEATS = 4;
+
+type PassengerTitle = 'mr' | 'mrs' | 'ms' | 'miss' | 'dr';
+
+interface PassengerForm {
+  title: PassengerTitle;
+  gender: 'm' | 'f';
+  givenName: string;
+  familyName: string;
+  dob: string;
+  phone: string;
+}
+
+const blankPassenger = (): PassengerForm => ({ title: 'mr', gender: 'm', givenName: '', familyName: '', dob: '', phone: '' });
+
 interface JourneyPrefillPoint {
   lat: number;
   lng: number;
@@ -192,6 +210,16 @@ export default function JourneyBookingFlow({
   const [searchingPickup, setSearchingPickup] = useState(false);
   const [geocoding, setGeocoding] = useState(false);
   const [pickupVehicleType, setPickupVehicleType] = useState<'motorcycle' | 'car'>('motorcycle');
+  // Either airport ride can be left out — the customer has their own car, or a
+  // friend drives them / collects them. A ride left out isn't charged or booked.
+  const [wantPickupRide, setWantPickupRide] = useState(true);
+  const [wantDropoffRide, setWantDropoffRide] = useState(true);
+  // How many people are travelling on this one booking. It sizes the flight
+  // search and decides what the ground rides can be (see CAR_SEATS).
+  const [partySize, setPartySize] = useState(1);
+  const ridesAvailable = partySize <= CAR_SEATS;
+  // A bike carries one traveller, so any party goes by car.
+  const effectiveVehicleType: 'motorcycle' | 'car' = partySize > 1 ? 'car' : pickupVehicleType;
   const [pickupPreferences, setPickupPreferences] = useState<PickupPreferences>(DEFAULT_PICKUP_PREFERENCES);
   // Which country the journey actually STARTS in — was hardcoded to
   // 'Uganda' throughout (geocoding, quote, and the leg mbg_dispatch_journey_leg
@@ -240,20 +268,23 @@ export default function JourneyBookingFlow({
   const [journey, setJourney] = useState<Journey | null>(null);
   const [customerName, setCustomerName] = useState('Customer');
 
-  // Real traveler details — must match the passenger's ID/passport, since
-  // this books an actual seat with a real airline via Duffel.
-  const [passengerTitle, setPassengerTitle] = useState<'mr' | 'mrs' | 'ms' | 'miss' | 'dr'>('mr');
-  const [passengerGender, setPassengerGender] = useState<'m' | 'f'>('m');
-  const [passengerGivenName, setPassengerGivenName] = useState('');
-  const [passengerFamilyName, setPassengerFamilyName] = useState('');
-  const [passengerDob, setPassengerDob] = useState('');
-  const [passengerPhone, setPassengerPhone] = useState('');
-  const passengerDetailsValid =
-    passengerGivenName.trim().length > 0 &&
-    passengerFamilyName.trim().length > 0 &&
-    !!passengerDob &&
-    !!toInternationalPhone(passengerPhone, pickupCountry.iso2);
-  const passengerPhoneIntl = toInternationalPhone(passengerPhone, pickupCountry.iso2);
+  // Real traveler details — must match each passenger's ID/passport, since
+  // this books actual seats with a real airline via Duffel. One entry per
+  // traveller; the first is the lead traveller (the account holder, usually).
+  const [passengers, setPassengers] = useState<PassengerForm[]>(() => [blankPassenger()]);
+  const updatePassenger = (index: number, patch: Partial<PassengerForm>) =>
+    setPassengers((prev) => prev.map((p, i) => (i === index ? { ...p, ...patch } : p)));
+  // Everyone else's phone number may be left blank: the airline needs one per
+  // ticket, so they fall back to the lead traveller's.
+  const leadPhone = passengers[0]?.phone ?? '';
+  const phoneFor = (index: number) => toInternationalPhone(passengers[index]?.phone.trim() ? passengers[index].phone : leadPhone, pickupCountry.iso2);
+  const passengerDetailsValid = passengers.length === partySize && passengers.every((p, i) =>
+    p.givenName.trim().length > 0 &&
+    p.familyName.trim().length > 0 &&
+    !!p.dob &&
+    !!phoneFor(i)
+  );
+  const passengerPhoneIntl = phoneFor(0);
 
   // Real ICAN wallet balance, checked against the quote before letting the
   // customer confirm — avoids creating a doomed mbg_journeys row (confirm.js
@@ -307,8 +338,8 @@ export default function JourneyBookingFlow({
         amount: ugxAmount,
         currency: 'UGX',
         customerEmail: email,
-        customerPhone: passengerPhone.trim() || undefined,
-        customerName: `${passengerGivenName} ${passengerFamilyName}`.trim() || customerName,
+        customerPhone: leadPhone.trim() || undefined,
+        customerName: `${passengers[0]?.givenName ?? ''} ${passengers[0]?.familyName ?? ''}`.trim() || customerName,
         title: 'BodaGoEra Journey — Top up ICAN',
         description: `Top up ${formatICAN(icanAmount)} ICAN to complete your journey booking`,
         txRef,
@@ -375,9 +406,26 @@ export default function JourneyBookingFlow({
   useEffect(() => {
     if (!customerName || customerName === 'Customer') return;
     const parts = customerName.trim().split(/\s+/);
-    setPassengerGivenName((prev) => prev || parts[0] || '');
-    setPassengerFamilyName((prev) => prev || parts.slice(1).join(' '));
+    setPassengers((prev) => prev.map((p, i) => (i === 0
+      ? { ...p, givenName: p.givenName || parts[0] || '', familyName: p.familyName || parts.slice(1).join(' ') }
+      : p)));
   }, [customerName]);
+
+  useEffect(() => {
+    setPassengers((prev) => (prev.length === partySize
+      ? prev
+      : partySize > prev.length
+        ? [...prev, ...Array.from({ length: partySize - prev.length }, blankPassenger)]
+        : prev.slice(0, partySize)));
+  }, [partySize]);
+
+  // Bigger than one car can carry: airport rides can't be booked for the party.
+  useEffect(() => {
+    if (!ridesAvailable) {
+      setWantPickupRide(false);
+      setWantDropoffRide(false);
+    }
+  }, [ridesAvailable]);
 
   const isFirstPickupCountryRender = useRef(true);
   useEffect(() => {
@@ -472,6 +520,11 @@ export default function JourneyBookingFlow({
   };
 
   const goToFlightStep = async () => {
+    // No pickup ride: nothing to locate, the customer makes their own way.
+    if (!wantPickupRide) {
+      setStep('flight');
+      return;
+    }
     // A saved area or a map pin already carries real coordinates — only a
     // freshly typed address (never geocoded yet) needs looking up here.
     if (selectedArea || manualPickup) {
@@ -514,7 +567,7 @@ export default function JourneyBookingFlow({
     setSearchingFlights(true);
     setSelectedOffer(null);
     try {
-      const { offers } = await searchFlights({ originIata, destinationIata, departureDate, passengerCount: 1, cabinClass: cabin });
+      const { offers } = await searchFlights({ originIata, destinationIata, departureDate, passengerCount: partySize, cabinClass: cabin });
       setOffers(offers);
       setHasSearched(true);
       if (offers.length === 0) setError(`No ${cabin.replace('_', ' ')} flights found for that route/date — try another date or cabin.`);
@@ -526,16 +579,24 @@ export default function JourneyBookingFlow({
   };
 
   const buildQuote = async () => {
-    if (!pickup || !selectedOffer) return;
+    if (!selectedOffer || (wantPickupRide && !pickup)) return;
     setError(null);
     setQuoting(true);
     try {
       const { quote } = await getJourneyQuote({
         customerUserId: customerId,
-        pickup: { ...pickup, country: pickupCountry.name, vehicleType: pickupVehicleType, preferences: preferencesForApi(pickupPreferences, pickupVehicleType) },
+        pickup: wantPickupRide && pickup
+          ? { ...pickup, country: pickupCountry.name, vehicleType: effectiveVehicleType, preferences: preferencesForApi(pickupPreferences, effectiveVehicleType) }
+          : { lat: null, lng: null, address: '', country: pickupCountry.name },
         offer: selectedOffer,
-        destination: { address: destAddress, country: destCountry, city: destCity, lat: destPin?.lat ?? null, lng: destPin?.lng ?? null },
+        // With no arrival ride there is no address to collect: the server records
+        // the airport the flight lands at.
+        destination: wantDropoffRide
+          ? { address: destAddress, country: destCountry, city: destCity, lat: destPin?.lat ?? null, lng: destPin?.lng ?? null }
+          : { address: '', country: destCountry, city: destCity || undefined, lat: null, lng: null },
         cargoWeightKg: flightCargoWeightKg ? Number(flightCargoWeightKg) : undefined,
+        pickupRide: wantPickupRide,
+        dropoffRide: wantDropoffRide,
       });
       setQuote(quote);
       setStep('review');
@@ -548,13 +609,13 @@ export default function JourneyBookingFlow({
 
   const doConfirm = async () => {
     if (!quote) return;
-    const passengerId = quote.offer.passengers?.[0]?.id;
-    if (!passengerId) {
+    const offerPassengers = quote.offer.passengers ?? [];
+    if (offerPassengers.length === 0 || offerPassengers.length !== passengers.length) {
       setError('This flight offer has expired — please search flights again.');
       return;
     }
     if (!passengerDetailsValid) {
-      setError("Please fill in the passenger's full name, date of birth and a phone number with its country code (e.g. +256 7XX XXX XXX).");
+      setError(`Please fill in ${partySize > 1 ? "every traveller's" : "the passenger's"} full name, date of birth and a phone number with its country code (e.g. +256 7XX XXX XXX).`);
       return;
     }
     if (!hasEnoughBalance) {
@@ -570,11 +631,12 @@ export default function JourneyBookingFlow({
       const { journeyId } = await confirmJourney({
         customerUserId: customerId,
         quote,
-        passengers: [{
-          id: passengerId, type: 'adult', title: passengerTitle,
-          given_name: passengerGivenName.trim(), family_name: passengerFamilyName.trim(),
-          born_on: passengerDob, gender: passengerGender, email, phone_number: passengerPhoneIntl || passengerPhone.trim(),
-        }],
+        passengers: passengers.map((p, i) => ({
+          // Each traveller is matched to the airline's own passenger id, in order.
+          id: offerPassengers[i].id, type: 'adult' as const, title: p.title,
+          given_name: p.givenName.trim(), family_name: p.familyName.trim(),
+          born_on: p.dob, gender: p.gender, email, phone_number: phoneFor(i) || (p.phone.trim() || leadPhone.trim()),
+        })),
       });
       startTracking(journeyId);
     } catch (err: any) {
@@ -603,15 +665,15 @@ export default function JourneyBookingFlow({
   const showStepper = bookingKind === 'fly' && flowIndex >= 0;
   const selectedSummary = selectedOffer ? summarizeOffer(selectedOffer) : null;
   const destinationLine = [destAddress, destCity, destCountry].filter(Boolean).join(', ');
-  const PickupVehicleIcon = pickupVehicleType === 'car' ? Car : Bike;
+  const PickupVehicleIcon = effectiveVehicleType === 'car' ? Car : Bike;
   const flightLine = selectedSummary
     ? `${selectedSummary.departClock} ${selectedSummary.originIata} → ${selectedSummary.arriveClock}${selectedSummary.arriveDayOffset > 0 ? ` (+${selectedSummary.arriveDayOffset})` : ''} ${selectedSummary.destinationIata}`
     : '';
 
   // What's already been decided, kept in view while working on the next step.
   const tripItems: Array<{ icon: ReactNode; label: string; value: string }> = [];
-  if (bookingKind === 'fly' && (step === 'flight' || step === 'destination') && pickup) {
-    tripItems.push({ icon: <PickupVehicleIcon size={15} />, label: 'Pickup', value: pickup.address });
+  if (bookingKind === 'fly' && (step === 'flight' || step === 'destination') && (pickup || !wantPickupRide)) {
+    tripItems.push({ icon: <PickupVehicleIcon size={15} />, label: 'To the airport', value: wantPickupRide && pickup ? pickup.address : 'Own way (no BodaGoEra ride)' });
   }
   if (step === 'destination' && selectedSummary) {
     tripItems.push({ icon: <Plane size={15} />, label: 'Flight', value: `${selectedSummary.airline} · ${selectedSummary.departDayLabel} · ${flightLine}` });
@@ -766,8 +828,38 @@ export default function JourneyBookingFlow({
         <StepCard
           eyebrow="Step 1 of 4"
           title="Where should we collect you?"
-          description="Your ride to the airport starts here."
+          description="Your ride to the airport starts here — or skip it if someone else is taking you."
         >
+          <Field
+            label="How many people are travelling?"
+            htmlFor="jb-party-size"
+            hint={partySize > 1
+              ? (ridesAvailable
+                ? 'One car takes the whole party to the airport, and everyone is booked on the same flight.'
+                : `A BodaGoEra car seats up to ${CAR_SEATS}, so for ${partySize} travellers only the flights are booked — you make your own way to and from the airport.`)
+              : 'Booking for a family or group? Everyone is booked on the same flight and you pay once.'}
+          >
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                aria-label="Fewer travellers"
+                disabled={partySize <= 1}
+                onClick={() => { setPartySize((n) => Math.max(1, n - 1)); clearFlightResults(); }}
+                className="classic-btn classic-btn-outline !min-h-[44px] !w-12 !px-0 text-lg"
+              >−</button>
+              <output id="jb-party-size" className="min-w-[4.5rem] text-center font-classic-display text-lg font-semibold text-slate-800">
+                {partySize} {partySize === 1 ? 'traveller' : 'travellers'}
+              </output>
+              <button
+                type="button"
+                aria-label="More travellers"
+                disabled={partySize >= MAX_PARTY_SIZE}
+                onClick={() => { setPartySize((n) => Math.min(MAX_PARTY_SIZE, n + 1)); clearFlightResults(); }}
+                className="classic-btn classic-btn-outline !min-h-[44px] !w-12 !px-0 text-lg"
+              >+</button>
+            </div>
+          </Field>
+
           <Field label="Starting country" htmlFor="jb-country">
             <select
               id="jb-country"
@@ -790,18 +882,45 @@ export default function JourneyBookingFlow({
           </Field>
 
           <div>
+            <span className="classic-label">How will you get to the airport?</span>
+            <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="How you get to the airport">
+              {([
+                { on: true, label: 'BodaGoEra ride', desc: partySize > 1 ? 'A car collects everyone' : 'A driver collects you' },
+                { on: false, label: 'My own way', desc: 'Own car or a friend drives me' },
+              ] as const).map(({ on, label, desc }) => (
+                <button
+                  key={label}
+                  type="button"
+                  aria-pressed={wantPickupRide === on}
+                  disabled={on && !ridesAvailable}
+                  onClick={() => { setWantPickupRide(on); setError(null); }}
+                  className={`classic-tile p-3 text-left disabled:cursor-not-allowed disabled:opacity-50 ${wantPickupRide === on ? 'is-active' : ''}`}
+                >
+                  <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{label}</span>
+                  <span className="block text-[11px] leading-tight text-slate-500">{desc}</span>
+                </button>
+              ))}
+            </div>
+            {!wantPickupRide && (
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">No ride is booked or charged for this part. You only pay for what you choose.</p>
+            )}
+          </div>
+
+          {wantPickupRide && (<>
+          <div>
             <span className="classic-label">Ride to the airport</span>
             <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="Ride to the airport">
               {([
-                { value: 'motorcycle', label: 'Bike', desc: 'Quickest through traffic', Icon: Bike },
+                { value: 'motorcycle', label: 'Bike', desc: partySize > 1 ? 'Carries one traveller' : 'Quickest through traffic', Icon: Bike },
                 { value: 'car', label: 'Car', desc: 'Room for luggage', Icon: Car },
               ] as const).map(({ value, label, desc, Icon }) => (
                 <button
                   key={value}
                   type="button"
-                  aria-pressed={pickupVehicleType === value}
+                  aria-pressed={effectiveVehicleType === value}
+                  disabled={partySize > 1 && value === 'motorcycle'}
                   onClick={() => setPickupVehicleType(value)}
-                  className={`classic-tile flex items-center gap-3 p-3 ${pickupVehicleType === value ? 'is-active' : ''}`}
+                  className={`classic-tile flex items-center gap-3 p-3 disabled:cursor-not-allowed disabled:opacity-50 ${effectiveVehicleType === value ? 'is-active' : ''}`}
                 >
                   <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40">
                     <Icon size={20} />
@@ -815,7 +934,7 @@ export default function JourneyBookingFlow({
             </div>
           </div>
 
-          <JourneyRideOptions vehicleType={pickupVehicleType} country={pickupCountry.name} value={pickupPreferences} onChange={setPickupPreferences} />
+          <JourneyRideOptions vehicleType={effectiveVehicleType} country={pickupCountry.name} value={pickupPreferences} onChange={setPickupPreferences} />
 
           {areas.length > 0 && (
             <Field label="Saved places" htmlFor="jb-saved-area">
@@ -888,17 +1007,18 @@ export default function JourneyBookingFlow({
               />
             </div>
           </Field>
+          </>)}
 
           <div className="space-y-2">
             <button
-              disabled={(!selectedAreaId && !manualAddress.trim()) || geocoding}
+              disabled={wantPickupRide && ((!selectedAreaId && !manualAddress.trim()) || geocoding)}
               onClick={goToFlightStep}
               className="classic-btn classic-btn-primary"
             >
               {geocoding ? <Loader2 className="animate-spin" size={18} /> : null}
               {geocoding ? 'Finding your location…' : <>Continue to flights <ArrowRight size={18} /></>}
             </button>
-            {!selectedAreaId && !manualAddress.trim() && (
+            {wantPickupRide && !selectedAreaId && !manualAddress.trim() && (
               <p className="text-center text-xs text-slate-500">Choose or enter a pickup location to continue.</p>
             )}
           </div>
@@ -1012,6 +1132,34 @@ export default function JourneyBookingFlow({
           onBack={() => goToStep('flight')}
           backLabel="Flight"
         >
+          <div>
+            <span className="classic-label">When you land</span>
+            <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="What happens when you land">
+              {([
+                { on: true, label: 'BodaGoEra ride', desc: partySize > 1 ? 'A car is waiting for everyone' : 'A driver is waiting for you' },
+                { on: false, label: partySize > 1 ? 'Someone collects us' : 'Someone collects me', desc: 'Own car or a friend picks us up'.replace('us', partySize > 1 ? 'us' : 'me') },
+              ] as const).map(({ on, label, desc }) => (
+                <button
+                  key={label}
+                  type="button"
+                  aria-pressed={wantDropoffRide === on}
+                  disabled={on && !ridesAvailable}
+                  onClick={() => { setWantDropoffRide(on); setError(null); }}
+                  className={`classic-tile p-3 text-left disabled:cursor-not-allowed disabled:opacity-50 ${wantDropoffRide === on ? 'is-active' : ''}`}
+                >
+                  <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{label}</span>
+                  <span className="block text-[11px] leading-tight text-slate-500">{desc}</span>
+                </button>
+              ))}
+            </div>
+            {!wantDropoffRide && (
+              <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                Your flight is booked to {destinationLabel || 'your arrival airport'} and no ride is booked or charged on arrival.
+              </p>
+            )}
+          </div>
+
+          {wantDropoffRide && (<>
           <Field label="Country" htmlFor="jb-dest-country">
             <select
               id="jb-dest-country"
@@ -1078,17 +1226,18 @@ export default function JourneyBookingFlow({
               </p>
             </div>
           )}
+          </>)}
 
           <div className="space-y-2">
             <button
-              disabled={!destCountry || !destAddress || quoting}
+              disabled={(wantDropoffRide && (!destCountry || !destAddress)) || quoting}
               onClick={buildQuote}
               className="classic-btn classic-btn-primary"
             >
               {quoting ? <Loader2 className="animate-spin" size={18} /> : null}
               {quoting ? 'Pricing your journey…' : <>See my price <ArrowRight size={18} /></>}
             </button>
-            {(!destCountry || !destAddress) && (
+            {wantDropoffRide && (!destCountry || !destAddress) && (
               <p className="text-center text-xs text-slate-500">Choose a country and enter where you'll be staying.</p>
             )}
           </div>
@@ -1105,7 +1254,9 @@ export default function JourneyBookingFlow({
         >
           <ol>
             {[
-              { key: 'pickup', icon: <PickupVehicleIcon size={16} />, title: 'Ride to the airport', detail: [pickup?.address, quote.pickupAirport?.name && `→ ${quote.pickupAirport.name}${quote.pickupKm ? ` (${quote.pickupKm} km)` : ''}`, describePreferences(pickupPreferences, pickupVehicleType).join(', '), 'Driver is sent shortly before you need to leave'].filter(Boolean).join(' · '), ican: quote.pickupIcan, local: quote.local?.pickup, ugx: quote.pickupFareUgx },
+              ...(quote.pickupRide !== false
+                ? [{ key: 'pickup', icon: <PickupVehicleIcon size={16} />, title: 'Ride to the airport', detail: [pickup?.address, quote.pickupAirport?.name && `→ ${quote.pickupAirport.name}${quote.pickupKm ? ` (${quote.pickupKm} km)` : ''}`, describePreferences(pickupPreferences, effectiveVehicleType).join(', '), 'Driver is sent shortly before you need to leave'].filter(Boolean).join(' · '), ican: quote.pickupIcan, local: quote.local?.pickup, ugx: quote.pickupFareUgx }]
+                : []),
               {
                 key: 'flight',
                 icon: <Plane size={16} />,
@@ -1122,7 +1273,9 @@ export default function JourneyBookingFlow({
               ...(quote.cargoFareUgx > 0
                 ? [{ key: 'bag', icon: <Package size={16} />, title: 'Extra baggage', detail: `${quote.cargoWeightKg} kg`, ican: quote.cargoIcan, local: quote.local?.cargo, ugx: quote.cargoFareUgx }]
                 : []),
-              { key: 'dropoff', icon: <Home size={16} />, title: 'Driver on arrival', detail: destinationLine, ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx },
+              ...(quote.dropoffRide !== false
+                ? [{ key: 'dropoff', icon: <Home size={16} />, title: 'Driver on arrival', detail: destinationLine, ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx }]
+                : []),
             ].map((leg, i, all) => (
               <li key={leg.key} className="relative flex gap-3 pb-5 last:pb-0">
                 {i < all.length - 1 && <span aria-hidden className="absolute bottom-0 left-4 top-9 w-px bg-[#c4a052]/40" />}

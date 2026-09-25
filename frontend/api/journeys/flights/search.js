@@ -1,6 +1,7 @@
 import { searchOffers } from '../../_lib/duffel.js';
 import { applyCors } from '../../_lib/cors.js';
 import { fiatToIcan, getUserCurrency } from '../../_lib/pricing.js';
+import { MAX_PARTY_SIZE } from '../../_lib/journeyQuote.js';
 
 const CABIN_CLASSES = ['economy', 'premium_economy', 'business', 'first'];
 
@@ -25,7 +26,11 @@ export default async function handler(req, res) {
     if (cabinClass !== undefined && !CABIN_CLASSES.includes(cabinClass)) {
       return res.status(400).json({ success: false, error: `cabinClass must be one of: ${CABIN_CLASSES.join(', ')}` });
     }
-    const passengers = Array.from({ length: passengerCount }, () => ({ type: 'adult' }));
+    const travellers = Number(passengerCount);
+    if (!Number.isInteger(travellers) || travellers < 1 || travellers > MAX_PARTY_SIZE) {
+      return res.status(400).json({ success: false, error: `passengerCount must be a whole number from 1 to ${MAX_PARTY_SIZE}` });
+    }
+    const passengers = Array.from({ length: travellers }, () => ({ type: 'adult' }));
     const result = await searchOffers({ originIata, destinationIata, departureDate, passengers, cabinClass });
     res.status(200).json({ success: true, ...(await priceInIcan(req, result)) });
   } catch (error) {

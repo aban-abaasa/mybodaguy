@@ -39,8 +39,9 @@ export interface FlightOffer {
 }
 
 export interface JourneyPickup {
-  lat: number;
-  lng: number;
+  /** Null when the customer skipped the airport pickup (own car / a friend drives them). */
+  lat: number | null;
+  lng: number | null;
   address: string;
   country?: string;
   city?: string;
@@ -95,6 +96,9 @@ export interface JourneyQuote {
   destination: JourneyDestination;
   offer: FlightOffer;
   cargoWeightKg: number;
+  /** Whether a BodaGoEra ride to the departure airport / from the arrival airport is part of (and charged in) this journey. */
+  pickupRide?: boolean;
+  dropoffRide?: boolean;
 }
 
 /** Thrown when the server says the customer's wallet was already debited but
@@ -169,6 +173,9 @@ export async function getJourneyQuote(params: {
    * beyond the free allowance — a straightforward per-kg platform
    * surcharge, not a real airline ancillary-baggage booking. */
   cargoWeightKg?: number;
+  /** Each airport ride is optional — leave one out when the customer has their own car or a friend drives them. Default: both. */
+  pickupRide?: boolean;
+  dropoffRide?: boolean;
 }): Promise<{ quote: JourneyQuote }> {
   return postJson('/api/journeys/quote', params);
 }
@@ -299,10 +306,18 @@ export async function getJourney(journeyId: string): Promise<Journey> {
     const { data: { session } } = await supabase.auth.getSession();
     const headers: Record<string, string> = {};
     if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-    const res = await fetch(`${MBG_API_BASE_URL}/api/journeys/${journeyId}`, { headers });
-    const data = await res.json();
-    if (!res.ok || !data.success) throw new Error(data.error || 'Failed to fetch journey');
-    return data.journey as Journey;
+    // Never wait on the journey service forever — if it is slow or the route
+    // isn't deployed, fall through to the direct database read below.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const res = await fetch(`${MBG_API_BASE_URL}/api/journeys/${journeyId}`, { headers, signal: controller.signal });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.error || 'Failed to fetch journey');
+      return data.journey as Journey;
+    } finally {
+      clearTimeout(timer);
+    }
   } catch (apiError) {
     // The booking is already made and paid at this point, so if the journey
     // service can't be reached fall back to reading it straight from the

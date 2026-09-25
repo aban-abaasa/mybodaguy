@@ -208,7 +208,10 @@ export async function getOfferStatus(offerId) {
     return {
       available: !offer.expires_at || new Date(offer.expires_at).getTime() > Date.now(),
       totalAmount: offer.total_amount,
-      totalCurrency: offer.total_currency
+      totalCurrency: offer.total_currency,
+      // total_amount covers every traveller the search was made for; this is
+      // how many of them there are, so the ground rides can be sized to match.
+      passengerCount: Array.isArray(offer.passengers) && offer.passengers.length > 0 ? offer.passengers.length : 1
     };
   } catch (err) {
     if (err.status === 404 || err.status === 410) return { available: false };

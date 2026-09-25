@@ -1,6 +1,6 @@
 import { applyCors } from '../_lib/cors.js';
 import { loadServer, sendMisconfigured } from '../_lib/loadServer.js';
-import { computeQuoteAmounts } from '../_lib/journeyQuote.js';
+import { computeQuoteAmounts, RideCapacityError } from '../_lib/journeyQuote.js';
 import { UnsupportedCurrencyError, PriceUnavailableError } from '../_lib/pricing.js';
 
 export default async function handler(req, res) {
@@ -20,6 +20,9 @@ export default async function handler(req, res) {
 
   try {
     const { customerUserId, pickup, offer, destination, cargoWeightKg } = req.body;
+    // The customer can leave either airport ride out (own car / a friend drives them).
+    const pickupRide = req.body.pickupRide !== false;
+    const dropoffRide = req.body.dropoffRide !== false;
     if (!requireMatchingUser(user, customerUserId, res)) return;
 
     const { data: customer } = await supabaseAdmin
@@ -31,8 +34,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'No BodaGoEra customer profile for this user yet' });
     }
 
-    const { airport, pickupFareUgx, pickupKm, dropoffFareUgx, cargoFareUgx, weightKg, priced } =
-      await computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoWeightKg, userId: customerUserId });
+    const { airport, pickupFareUgx, pickupKm, dropoffFareUgx, cargoFareUgx, weightKg, priced, partySize } =
+      await computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide });
 
     res.status(200).json({
       success: true,
@@ -43,10 +46,14 @@ export default async function handler(req, res) {
         icanPriceUgx: priced.icanPriceUgx,
         local: priced.local,
         pickupKm, pickupAirport: airport,
-        pickup, destination, offer, cargoWeightKg: weightKg
+        pickup, destination, offer, cargoWeightKg: weightKg,
+        pickupRide, dropoffRide, partySize
       }
     });
   } catch (error) {
+    if (error instanceof RideCapacityError) {
+      return res.status(422).json({ success: false, error: error.message, code: 'ride_capacity' });
+    }
     if (error instanceof UnsupportedCurrencyError) {
       return res.status(422).json({ success: false, error: `${error.message} — please choose a different flight.`, code: 'unsupported_currency' });
     }

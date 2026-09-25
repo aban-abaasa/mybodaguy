@@ -109,8 +109,12 @@ BEGIN
 
   SELECT * INTO v_journey FROM public.mbg_journeys WHERE id = v_leg.journey_id;
 
+  -- A vehicle type recorded on the leg is honoured on BOTH ground legs: the
+  -- customer's bike/car choice for the airport pickup, and 'car' for either leg
+  -- of a party of two or more (a bike carries one traveller). A solo traveller's
+  -- arrival leg has none, so it still matches any available passenger vehicle.
   v_vehicle_types := CASE
-    WHEN v_leg.leg_type = 'local_pickup' AND v_leg.preferred_vehicle_type IS NOT NULL
+    WHEN v_leg.preferred_vehicle_type IS NOT NULL
       THEN ARRAY[v_leg.preferred_vehicle_type]
     ELSE ARRAY['motorcycle', 'car', 'tuktuk']
   END;

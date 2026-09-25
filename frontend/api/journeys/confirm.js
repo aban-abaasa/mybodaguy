@@ -1,6 +1,6 @@
 import { createOrder, getOfferStatus, DUFFEL_TEST_MODE } from '../_lib/duffel.js';
 import { planPickupDispatch, haversineKm } from '../_lib/transfer.js';
-import { computeQuoteAmounts } from '../_lib/journeyQuote.js';
+import { computeQuoteAmounts, RideCapacityError, MAX_PARTY_SIZE } from '../_lib/journeyQuote.js';
 import { UnsupportedCurrencyError, PriceUnavailableError } from '../_lib/pricing.js';
 import { validatePassengers, describeDuffelFailure, testModeDetail } from '../_lib/bookingChecks.js';
 
@@ -34,6 +34,12 @@ export default async function handler(req, res) {
   const { customerUserId, quote, passengers } = req.body;
   if (!requireMatchingUser(user, customerUserId, res)) return;
 
+  // Either airport ride is optional (own car / a friend drives or collects the
+  // customer). A ride that is left out is neither charged nor created; the
+  // flight is always booked. Older clients send neither flag = both rides.
+  const pickupRide = quote?.pickupRide !== false;
+  const dropoffRide = quote?.dropoffRide !== false;
+
   // Set once the wallet debit succeeds, so any later failure can tell the
   // customer their money is held and point them at support for a refund.
   let paidJourneyId = null;
@@ -54,9 +60,22 @@ export default async function handler(req, res) {
     if (!quote?.offer?.offerId || !quote?.pickup || !quote?.destination) {
       return res.status(400).json({ success: false, error: 'This flight offer has expired — please search flights again.' });
     }
-    const passengerProblem = validatePassengers(passengers);
-    if (passengerProblem) {
-      return res.status(400).json({ success: false, error: passengerProblem });
+    if (!Array.isArray(passengers) || passengers.length < 1 || passengers.length > MAX_PARTY_SIZE) {
+      return res.status(400).json({ success: false, error: `Please enter the details of every traveller (up to ${MAX_PARTY_SIZE}).` });
+    }
+    if (pickupRide && !(Number.isFinite(Number(quote.pickup.lat)) && Number.isFinite(Number(quote.pickup.lng)))) {
+      return res.status(400).json({ success: false, error: 'Choose where the driver should collect you, or turn the airport pickup off. You have not been charged.' });
+    }
+    // Where the flight lands: used for the journey record when there is no
+    // arrival ride (so no address was asked for).
+    const landing = quote.offer.slices?.[0]?.segments?.at(-1)?.destination;
+    const destinationCountry = quote.destination.country || landing?.iata_country_code || '';
+    const destinationCity = quote.destination.city || landing?.city_name || landing?.name || null;
+    if (!destinationCountry) {
+      return res.status(400).json({ success: false, error: 'Please choose the country you are flying to. You have not been charged.' });
+    }
+    if (dropoffRide && !quote.destination.address) {
+      return res.status(400).json({ success: false, error: 'Enter where the driver should take you on arrival, or turn the arrival ride off. You have not been charged.' });
     }
 
     let live;
@@ -70,13 +89,24 @@ export default async function handler(req, res) {
       return res.status(409).json({ success: false, error: 'This flight is no longer available. You have not been charged — please search flights again.', code: 'offer_expired' });
     }
 
+    // One set of details per traveller the airline's offer was searched for — the
+    // airline's own count, not the browser's.
+    const partySize = live.passengerCount;
+    const passengerProblem = validatePassengers(passengers, partySize);
+    if (passengerProblem) {
+      return res.status(400).json({ success: false, error: passengerProblem });
+    }
+
     // Charge what the airline's CURRENT price works out to, never figures sent by
     // the browser (which could be stale or edited).
     const liveOffer = { ...quote.offer, totalAmount: live.totalAmount, totalCurrency: live.totalCurrency };
     let amounts;
     try {
-      amounts = await computeQuoteAmounts(supabaseAdmin, { pickup: quote.pickup, offer: liveOffer, cargoWeightKg: quote.cargoWeightKg, userId: customerUserId });
+      amounts = await computeQuoteAmounts(supabaseAdmin, { pickup: quote.pickup, offer: liveOffer, cargoWeightKg: quote.cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide, partySize });
     } catch (err) {
+      if (err instanceof RideCapacityError) {
+        return res.status(422).json({ success: false, error: `${err.message} You have not been charged.`, code: 'ride_capacity' });
+      }
       if (err instanceof UnsupportedCurrencyError) {
         return res.status(422).json({ success: false, error: `${err.message} — please choose a different flight. You have not been charged.`, code: 'unsupported_currency' });
       }
@@ -96,23 +126,30 @@ export default async function handler(req, res) {
       });
     }
 
-    const { data: journey, error: journeyError } = await supabaseAdmin
-      .from('mbg_journeys')
-      .insert({
-        customer_id: customer.id,
-        status: 'pending_payment',
-        origin_country: quote.pickup.country || 'Uganda',
-        origin_city: quote.pickup.city,
-        destination_country: quote.destination.country,
-        destination_city: quote.destination.city,
-        destination_address: quote.destination.address,
-        destination_lat: quote.destination.lat ?? null,
-        destination_lng: quote.destination.lng ?? null,
-        total_fare_ugx: amounts.priced.totalUgx,
-        total_fare_ican: chargeIcan
-      })
-      .select()
-      .single();
+    const journeyRow = {
+      customer_id: customer.id,
+      status: 'pending_payment',
+      origin_country: quote.pickup.country || 'Uganda',
+      origin_city: quote.pickup.city,
+      destination_country: destinationCountry,
+      destination_city: destinationCity,
+      destination_address: dropoffRide ? quote.destination.address : null,
+      destination_lat: dropoffRide ? (quote.destination.lat ?? null) : null,
+      destination_lng: dropoffRide ? (quote.destination.lng ?? null) : null,
+      total_fare_ugx: amounts.priced.totalUgx,
+      total_fare_ican: chargeIcan,
+      // Only sent for a party: a solo booking works even where
+      // ADD_JOURNEY_MULTI_PASSENGER.sql hasn't been run yet.
+      ...(partySize > 1 ? { passenger_count: partySize } : {})
+    };
+    let { data: journey, error: journeyError } = await supabaseAdmin.from('mbg_journeys').insert(journeyRow).select().single();
+    if (journeyError && /passenger_count/.test(journeyError.message || '')) {
+      // Nothing has been charged yet, so booking without the count is harmless — the
+      // passenger list itself is stored with the flight booking.
+      console.error('mbg_journeys.passenger_count is missing — run ADD_JOURNEY_MULTI_PASSENGER.sql. Booking without it for now.');
+      const { passenger_count: _dropped, ...withoutCount } = journeyRow;
+      ({ data: journey, error: journeyError } = await supabaseAdmin.from('mbg_journeys').insert(withoutCount).select().single());
+    }
     if (journeyError) throw journeyError;
 
     // Tithe-free debit — see ICAN/backend/CREATE_JOURNEY_ESCROW_FUNCTION.sql.
@@ -183,15 +220,17 @@ export default async function handler(req, res) {
     // days early: the leg is scheduled for shortly before the customer has to
     // leave, and the dispatch job sends it out then.
     const airport = amounts.airport;
-    const airportKm = airport?.lat != null && airport?.lng != null && Number.isFinite(Number(quote.pickup.lat)) && Number.isFinite(Number(quote.pickup.lng))
+    const airportKm = pickupRide && airport?.lat != null && airport?.lng != null
       ? haversineKm(Number(quote.pickup.lat), Number(quote.pickup.lng), airport.lat, airport.lng)
       : NaN;
-    const plan = planPickupDispatch(liveOffer, airportKm);
+    const plan = pickupRide ? planPickupDispatch(liveOffer, airportKm) : null;
     const prefs = quote.pickup.preferences || {};
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+    // The flight is always a leg; each airport ride is a leg only when the customer
+    // asked for it. leg_order stays 1 / 2 / 3 so the tracker's ordering is unchanged.
     const legs = [
-      {
+      ...(pickupRide ? [{
         journey_id: journey.id, leg_order: 1, leg_type: 'local_pickup',
         status: plan.immediate ? 'ready_to_dispatch' : 'pending',
         origin_country: quote.pickup.country || 'Uganda', origin_city: quote.pickup.city,
@@ -199,24 +238,26 @@ export default async function handler(req, res) {
         destination_country: quote.pickup.country || 'Uganda',
         destination_city: airport?.name || null,
         destination_lat: airport?.lat ?? null, destination_lng: airport?.lng ?? null,
-        preferred_vehicle_type: quote.pickup.vehicleType || null,
+        // A bike carries one traveller, so any party goes by car.
+        preferred_vehicle_type: partySize > 1 ? 'car' : (quote.pickup.vehicleType || null),
         power_type_requested: ['electric', 'fuel'].includes(prefs.powerType) ? prefs.powerType : null,
         umbrella_requested: prefs.umbrella === true,
         preferred_business_profile_id: uuid.test(prefs.companyId || '') ? prefs.companyId : null,
         fare_ugx: amounts.pickupFareUgx,
         dispatch_after: plan.dispatchAt.toISOString()
-      },
+      }] : []),
       // A bulk insert sends every column named on ANY row as null on the rest, so
       // umbrella_requested (NOT NULL) must be spelled out on every leg.
       { journey_id: journey.id, leg_order: 2, leg_type: 'flight', status: 'dispatched', dispatched_at: new Date().toISOString(), umbrella_requested: false },
-      {
+      ...(dropoffRide ? [{
         journey_id: journey.id, leg_order: 3, leg_type: 'local_dropoff', status: 'pending', umbrella_requested: false,
-        origin_country: quote.destination.country, origin_city: quote.destination.city,
-        destination_country: quote.destination.country, destination_city: quote.destination.city,
+        preferred_vehicle_type: partySize > 1 ? 'car' : null,
+        origin_country: destinationCountry, origin_city: destinationCity,
+        destination_country: destinationCountry, destination_city: destinationCity,
         destination_lat: quote.destination.lat ?? null, destination_lng: quote.destination.lng ?? null,
         fare_ugx: amounts.dropoffFareUgx,
         dispatch_after: bookedFlight.arrivalAt
-      }
+      }] : [])
     ];
     // The customer has already paid and the airline ticket exists, so if a
     // journey SQL hasn't been run yet (a column missing on mbg_journey_legs) drop
@@ -262,13 +303,15 @@ export default async function handler(req, res) {
 
     await supabaseAdmin.from('mbg_journey_legs').update({ flight_booking_id: flightBooking.id }).eq('id', flightLeg.id);
     const dropoffLeg = insertedLegs.find((l) => l.leg_type === 'local_dropoff');
-    await supabaseAdmin.from('mbg_journey_legs').update({ flight_booking_id: flightBooking.id }).eq('id', dropoffLeg.id);
+    if (dropoffLeg) {
+      await supabaseAdmin.from('mbg_journey_legs').update({ flight_booking_id: flightBooking.id }).eq('id', dropoffLeg.id);
+    }
 
     await supabaseAdmin.from('mbg_journeys').update({ status: 'confirmed', ican_journey_tx_id: debitResult.tx_id }).eq('id', journey.id);
 
     // A ride that is due now goes out immediately rather than waiting for the
     // next pg_cron tick; a scheduled one is picked up by that job when due.
-    if (plan.immediate) {
+    if (plan?.immediate) {
       await supabaseAdmin.rpc('mbg_dispatch_journey_leg', { p_journey_leg_id: insertedLegs.find((l) => l.leg_type === 'local_pickup').id });
     }
 
@@ -276,8 +319,8 @@ export default async function handler(req, res) {
       success: true,
       journeyId: journey.id,
       pnr: bookedFlight.pnr,
-      pickupDispatchAt: plan.immediate ? null : plan.dispatchAt.toISOString(),
-      leaveBy: plan.leaveBy ? plan.leaveBy.toISOString() : null
+      pickupDispatchAt: plan && !plan.immediate ? plan.dispatchAt.toISOString() : null,
+      leaveBy: plan?.leaveBy ? plan.leaveBy.toISOString() : null
     });
   } catch (error) {
     console.error('Journey confirm error:', error, paidJourneyId ? { journeyId: paidJourneyId, bookedOrderRef } : '');
