@@ -23,7 +23,7 @@ async function readRawBody(req) {
 }
 
 /**
- * Duffel-Signature header format: "t=<timestamp>,v1=<hex hmac>"
+ * X-Duffel-Signature header format: "t=<timestamp>,v1=<hex hmac>"
  * hmac is computed over "<timestamp>.<raw body>" with the webhook secret.
  */
 function verifyWebhookSignature(header, rawBody) {
@@ -51,7 +51,7 @@ export default async function handler(req, res) {
 
   const rawBody = await readRawBody(req);
 
-  if (!verifyWebhookSignature(req.headers['duffel-signature'], rawBody)) {
+  if (!verifyWebhookSignature(req.headers['x-duffel-signature'] || req.headers['duffel-signature'], rawBody)) {
     return res.status(401).json({ success: false, error: 'Invalid signature' });
   }
 

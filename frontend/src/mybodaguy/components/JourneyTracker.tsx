@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Car, Phone, Star, Ship, Plane } from 'lucide-react';
+import { Car, Phone, Star, Ship, Plane, AlertTriangle } from 'lucide-react';
 import { getMyJourneys, type Journey, type JourneyLeg } from '../services/journeyService';
 import { legLabel } from './JourneyBookingFlow';
+import AirTicketButton from './AirTicketButton';
+import JourneyLegRideActions from './JourneyLegRideActions';
 
 // A customer's past-booking view of getMyJourneys — it already existed
 // (real query, nested legs + rider info) but was never wired into any
@@ -31,7 +33,18 @@ export default function JourneyTracker({ customerId }: { customerId: string }) {
     };
   }, [customerId]);
 
-  const activeJourneys = journeys.filter((j) => j.status !== 'completed' && j.status !== 'cancelled' && j.status !== 'failed');
+  // A booked flight stays listed after the trip so its air ticket can still be
+  // downloaded, and a failed booking stays listed when money was taken for it
+  // (ican_journey_tx_id is only set once the wallet was actually debited) so the
+  // customer is told to ask support for a refund instead of it silently vanishing.
+  const hasTicket = (j: Journey) => j.legs.some((l) => l.leg_type === 'flight' && l.flight_booking);
+  // Auto-refunded bookings (refunded_at set) need no action, so they drop off the list.
+  const paidButFailed = (j: Journey) => j.status === 'failed' && !!j.ican_journey_tx_id && !j.refunded_at;
+  const activeJourneys = journeys.filter((j) => {
+    if (paidButFailed(j)) return true;
+    if (j.status === 'cancelled' || j.status === 'failed') return false;
+    return j.status !== 'completed' || hasTicket(j);
+  });
 
   if (loading) return null;
   if (activeJourneys.length === 0) return null;
@@ -48,9 +61,24 @@ export default function JourneyTracker({ customerId }: { customerId: string }) {
             </div>
             <span className="text-xs font-semibold uppercase text-orange-600">{journey.status.replace(/_/g, ' ')}</span>
           </div>
+          {paidButFailed(journey) && (
+            <div role="alert" className="flex items-start gap-2.5 rounded-lg border-2 border-amber-400 bg-amber-50 p-3 text-sm text-amber-900">
+              <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600" />
+              <div className="space-y-1">
+                <p className="font-bold">Your payment was taken but this booking did not complete — no ticket was issued.</p>
+                <p>Please contact the support team to be refunded. Quote this reference: <span className="select-all font-mono font-semibold">{journey.id}</span></p>
+              </div>
+            </div>
+          )}
+          {hasTicket(journey) && (
+            <AirTicketButton
+              journeyId={journey.id}
+              className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-orange-500 px-4 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-60"
+            />
+          )}
           <div className="space-y-2">
-            {journey.legs.sort((a, b) => a.leg_order - b.leg_order).map((leg) => (
-              <JourneyLegRow key={leg.id} leg={leg} />
+            {[...journey.legs].sort((a, b) => a.leg_order - b.leg_order).map((leg) => (
+              <JourneyLegRow key={leg.id} leg={leg} customerId={customerId} />
             ))}
           </div>
         </div>
@@ -59,7 +87,7 @@ export default function JourneyTracker({ customerId }: { customerId: string }) {
   );
 }
 
-function JourneyLegRow({ leg }: { leg: JourneyLeg }) {
+function JourneyLegRow({ leg, customerId }: { leg: JourneyLeg; customerId: string }) {
   const rider = leg.ride?.rider;
   // A flight or sea crossing underway has no live position to show — no
   // phone signal mid-ocean/mid-flight, and a flight leg isn't fulfilled by
@@ -107,6 +135,8 @@ function JourneyLegRow({ leg }: { leg: JourneyLeg }) {
           </div>
         </div>
       )}
+
+      <JourneyLegRideActions leg={leg} customerId={customerId} />
     </div>
   );
 }

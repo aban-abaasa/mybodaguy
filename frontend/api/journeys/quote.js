@@ -1,6 +1,7 @@
 import { applyCors } from '../_lib/cors.js';
 import { loadServer, sendMisconfigured } from '../_lib/loadServer.js';
-import { priceJourney, UnsupportedCurrencyError, PriceUnavailableError } from '../_lib/pricing.js';
+import { computeQuoteAmounts } from '../_lib/journeyQuote.js';
+import { UnsupportedCurrencyError, PriceUnavailableError } from '../_lib/pricing.js';
 
 export default async function handler(req, res) {
   if (applyCors(req, res)) return;
@@ -30,33 +31,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'No BodaGoEra customer profile for this user yet' });
     }
 
-    // Local pickup fare: real haversine estimate to the airport isn't known
-    // yet at quote time (airport lat/lng not chosen), so Phase 1 uses the
-    // platform's minimum fare as the pickup-leg estimate.
-    const { data: pickupEstimate } = await supabaseAdmin.rpc('mbg_get_setting_numeric', { p_key: 'ride.minimum_fare', p_default: 2000 });
-    const pickupFareUgx = Number(pickupEstimate) || 2000;
-
-    // Local dropoff: Phase 1 flat estimate (real per-country fare models are
-    // Phase 2 — see the approved plan's roadmap).
-    const dropoffFareUgx = 20000;
-
-    // Extra baggage/cargo the passenger is bringing along on the flight,
-    // beyond a free allowance — a straightforward per-kg platform surcharge,
-    // not a real Duffel ancillary-baggage booking (no such integration
-    // exists yet).
-    const weightKg = Number(cargoWeightKg) || 0;
-    const { data: freeAllowanceSetting } = await supabaseAdmin.rpc('mbg_get_setting_numeric', { p_key: 'journey.free_baggage_kg', p_default: 23 });
-    const { data: perKgSetting } = await supabaseAdmin.rpc('mbg_get_setting_numeric', { p_key: 'journey.excess_baggage_per_kg_ugx', p_default: 5000 });
-    const freeAllowanceKg = Number(freeAllowanceSetting) || 23;
-    const perKgRate = Number(perKgSetting) || 5000;
-    const chargeableKg = Math.max(0, weightKg - freeAllowanceKg);
-    const cargoFareUgx = Math.round(chargeableKg * perKgRate);
-
-    // Everything is priced in ICAN at its live value (the airline's fare from
-    // its own currency), then shown in the customer's own currency — see
-    // _lib/pricing.js. Fares in a currency the price engine doesn't know are
-    // refused, and so is any quote while the live price is unreachable.
-    const priced = await priceJourney(supabaseAdmin, { pickupFareUgx, dropoffFareUgx, cargoFareUgx, offer, userId: customerUserId });
+    const { airport, pickupFareUgx, pickupKm, dropoffFareUgx, cargoFareUgx, weightKg, priced } =
+      await computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoWeightKg, userId: customerUserId });
 
     res.status(200).json({
       success: true,
@@ -66,6 +42,7 @@ export default async function handler(req, res) {
         totalIcan: priced.totalIcan,
         icanPriceUgx: priced.icanPriceUgx,
         local: priced.local,
+        pickupKm, pickupAirport: airport,
         pickup, destination, offer, cargoWeightKg: weightKg
       }
     });

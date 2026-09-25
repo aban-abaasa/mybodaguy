@@ -47,6 +47,8 @@ export interface JourneyPickup {
   /** Customer's choice for the first leg — 'motorcycle' or 'car'. Falls
    * back to matching any available passenger vehicle when omitted. */
   vehicleType?: 'motorcycle' | 'car';
+  /** Same ride preferences as Book a Ride (electric/petrol bike, umbrella, a specific transport company). */
+  preferences?: { powerType?: 'electric' | 'fuel'; umbrella?: boolean; companyId?: string };
 }
 
 export interface JourneyDestination {
@@ -72,6 +74,9 @@ export interface QuoteLocalView {
 
 export interface JourneyQuote {
   pickupFareUgx: number;
+  /** Distance to the departure airport the ride fare was priced on (null = unknown, minimum fare applied). */
+  pickupKm?: number | null;
+  pickupAirport?: { iataCode: string | null; name: string } | null;
   flightFareUgx: number;
   cargoFareUgx: number;
   dropoffFareUgx: number;
@@ -92,6 +97,17 @@ export interface JourneyQuote {
   cargoWeightKg: number;
 }
 
+/** Thrown when the server says the customer's wallet was already debited but
+ * the booking didn't complete — the UI must tell them to contact support. */
+export class PaymentTakenError extends Error {
+  journeyId: string | null;
+  constructor(message: string, journeyId: string | null) {
+    super(message);
+    this.name = 'PaymentTakenError';
+    this.journeyId = journeyId;
+  }
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const { data: { session } } = await supabase.auth.getSession();
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -110,7 +126,10 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     if (!data.error && (res.status === 502 || res.status === 504)) {
       throw new Error('The server took too long to respond — please try again.');
     }
-    throw new Error(data.error || `Request to ${path} failed (${res.status})`);
+    if (data.paymentTaken) throw new PaymentTakenError(data.error, data.journeyId ?? null);
+    const failure: Error & { code?: string } = new Error(data.error || `Request to ${path} failed (${res.status})`);
+    failure.code = data.code;
+    throw failure;
   }
   return data as T;
 }
@@ -156,7 +175,17 @@ export async function confirmJourney(params: {
   quote: JourneyQuote;
   passengers: Array<{ id: string; type: 'adult'; given_name: string; family_name: string; born_on: string; gender: 'm' | 'f'; email: string; phone_number: string; title?: string }>;
 }): Promise<{ journeyId: string; pnr: string }> {
-  return postJson('/api/journeys/confirm', params);
+  try {
+    return await postJson('/api/journeys/confirm', params);
+  } catch (err: any) {
+    // A timeout / dropped connection can happen after the wallet was debited,
+    // so never tell the customer to just retry without checking first.
+    const noAnswer = err instanceof TypeError || /took too long/i.test(err?.message || '');
+    if (noAnswer) {
+      throw new PaymentTakenError('We could not confirm whether your booking went through.', null);
+    }
+    throw err;
+  }
 }
 
 export interface JourneyLeg {
@@ -195,26 +224,95 @@ export interface JourneyLeg {
 export interface Journey {
   id: string;
   status: string;
+  created_at?: string;
   destination_country: string;
   destination_city: string | null;
   destination_address: string | null;
   total_fare_ugx: number;
   total_fare_ican: number;
+  /** Set once the wallet was debited — even when the booking then failed, which is what tells "money taken, no ticket" from "never charged". */
+  ican_journey_tx_id?: string | null;
+  /** Set when a failed booking's payment was automatically returned to the wallet. */
+  refunded_at?: string | null;
   legs: JourneyLeg[];
 }
 
-export async function getJourney(journeyId: string): Promise<Journey> {
+export interface AirTicketSegment {
+  carrier: string | null;
+  carrierIata: string | null;
+  flightNumber: string | null;
+  operatedBy: string | null;
+  aircraft: string | null;
+  origin: { iata: string | null; name: string | null; city: string | null; terminal: string | null };
+  destination: { iata: string | null; name: string | null; city: string | null; terminal: string | null };
+  departingAt: string | null;
+  arrivingAt: string | null;
+  cabin: string | null;
+  baggages: Array<{ type: string; quantity: number }>;
+}
+
+export interface AirTicket {
+  journeyId: string;
+  orderId: string;
+  bookingReference: string;
+  airline: string | null;
+  passengers: Array<{ id: string; title: string | null; givenName: string; familyName: string; type: string }>;
+  segments: AirTicketSegment[];
+  /** Empty until the airline has issued the e-ticket number(s) — usually within minutes. */
+  eTickets: string[];
+  totalAmount: string;
+  totalCurrency: string;
+  totalPaidIcan: number | null;
+  totalPaidUgx: number | null;
+  bookedAt: string | null;
+}
+
+/** The customer's air ticket for a booked journey, read live from the airline order. */
+export async function getAirTicket(journeyId: string): Promise<AirTicket> {
   const { data: { session } } = await supabase.auth.getSession();
   const headers: Record<string, string> = {};
   if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
-  const res = await fetch(`${MBG_API_BASE_URL}/api/journeys/${journeyId}`, { headers });
-  const data = await res.json();
-  if (!res.ok || !data.success) throw new Error(data.error || 'Failed to fetch journey');
-  return data.journey as Journey;
+  const res = await fetch(`${MBG_API_BASE_URL}/api/journeys/${journeyId}?ticket=1`, { headers });
+  const data = await res.json().catch(() => ({} as any));
+  if (!res.ok || !data.success) throw new Error(data.error || 'Could not load your air ticket right now — please try again.');
+  return data.ticket as AirTicket;
+}
+
+const JOURNEY_SELECT = `*, legs:mbg_journey_legs(
+      *,
+      flight_booking:mbg_flight_bookings(*),
+      ride:mbg_rides(
+        id, status, fare,
+        rider:mbg_riders(
+          plate_number, vehicle_type, vehicle_color, vehicle_model, rating,
+          current_lat, current_lng, location_updated_at,
+          user:mbg_users(phone, profile:mbg_user_profiles(full_name))
+        )
+      )
+    )`;
+
+export async function getJourney(journeyId: string): Promise<Journey> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const headers: Record<string, string> = {};
+    if (session?.access_token) headers.Authorization = `Bearer ${session.access_token}`;
+    const res = await fetch(`${MBG_API_BASE_URL}/api/journeys/${journeyId}`, { headers });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || 'Failed to fetch journey');
+    return data.journey as Journey;
+  } catch (apiError) {
+    // The booking is already made and paid at this point, so if the journey
+    // service can't be reached fall back to reading it straight from the
+    // database (the same read the My Journeys list uses) instead of leaving the
+    // customer on a spinner.
+    const { data, error } = await supabase.from('mbg_journeys').select(JOURNEY_SELECT).eq('id', journeyId).maybeSingle();
+    if (error || !data) throw apiError;
+    return data as Journey;
+  }
 }
 
 /** Live-ish polling helper for the journey status screen (no realtime channel yet in Phase 1). */
-export function pollJourney(journeyId: string, onUpdate: (journey: Journey) => void, intervalMs = 10000): () => void {
+export function pollJourney(journeyId: string, onUpdate: (journey: Journey) => void, intervalMs = 10000, onError?: (err: unknown) => void): () => void {
   let cancelled = false;
   const tick = async () => {
     if (cancelled) return;
@@ -222,6 +320,7 @@ export function pollJourney(journeyId: string, onUpdate: (journey: Journey) => v
       onUpdate(await getJourney(journeyId));
     } catch (err) {
       console.error('pollJourney error:', err);
+      onError?.(err);
     }
   };
   tick();
@@ -265,18 +364,7 @@ export async function getMyJourneys(customerUserId: string): Promise<Journey[]> 
   if (!customer) return [];
   const { data, error } = await supabase
     .from('mbg_journeys')
-    .select(`*, legs:mbg_journey_legs(
-      *,
-      flight_booking:mbg_flight_bookings(*),
-      ride:mbg_rides(
-        id, status, fare,
-        rider:mbg_riders(
-          plate_number, vehicle_type, vehicle_color, vehicle_model, rating,
-          current_lat, current_lng, location_updated_at,
-          user:mbg_users(phone, profile:mbg_user_profiles(full_name))
-        )
-      )
-    )`)
+    .select(JOURNEY_SELECT)
     .eq('customer_id', customer.id)
     .order('created_at', { ascending: false });
   if (error) throw error;

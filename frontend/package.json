@@ -19,6 +19,7 @@
   "dependencies": {
     "@supabase/supabase-js": "^2.89.0",
     "clsx": "^2.1.1",
+    "jspdf": "^4.2.1",
     "jsqr": "^1.4.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.8.0",

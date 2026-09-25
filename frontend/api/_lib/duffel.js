@@ -7,6 +7,9 @@ const DUFFEL_API_BASE = process.env.DUFFEL_API_BASE || 'https://api.duffel.com';
 // every Duffel call would 401.
 const DUFFEL_ACCESS_TOKEN = process.env.DUFFEL_ACCESS_TOKEN?.replace(/^\uFEFF/, '').trim();
 
+/** True while running on a Duffel TEST token — safe to show the airline's raw error text to the person booking. */
+export const DUFFEL_TEST_MODE = !!DUFFEL_ACCESS_TOKEN && DUFFEL_ACCESS_TOKEN.startsWith('duffel_test');
+
 async function duffelRequest(path, options = {}) {
   const res = await fetch(`${DUFFEL_API_BASE}${path}`, {
     ...options,
@@ -123,4 +126,92 @@ export async function getOrder(orderId) {
     arrivalAt: firstSlice?.segments?.[firstSlice.segments.length - 1]?.arriving_at,
     raw: order
   };
+}
+
+/**
+ * The booked order as a customer-facing air ticket (itinerary). Read live from
+ * Duffel so it always shows the airline's own confirmed details — including the
+ * e-ticket numbers, which the airline issues shortly after the booking and so
+ * can be missing right after checkout (`eTickets` is then empty and the ticket
+ * says the number is still being issued).
+ */
+export async function getOrderTicket(orderId) {
+  const data = await duffelRequest(`/air/orders/${orderId}`, { method: 'GET' });
+  const order = data.data;
+
+  const passengers = (order.passengers || []).map((p) => ({
+    id: p.id,
+    title: p.title || null,
+    givenName: p.given_name,
+    familyName: p.family_name,
+    type: p.type || 'adult'
+  }));
+
+  const segments = [];
+  (order.slices || []).forEach((slice) => {
+    (slice.segments || []).forEach((seg) => {
+      const paxInfo = seg.passengers?.[0];
+      segments.push({
+        carrier: seg.marketing_carrier?.name || null,
+        carrierIata: seg.marketing_carrier?.iata_code || null,
+        flightNumber: seg.marketing_carrier
+          ? `${seg.marketing_carrier.iata_code}${seg.marketing_carrier_flight_number}`
+          : null,
+        operatedBy: seg.operating_carrier?.name && seg.operating_carrier.name !== seg.marketing_carrier?.name
+          ? seg.operating_carrier.name
+          : null,
+        aircraft: seg.aircraft?.name || null,
+        origin: {
+          iata: seg.origin?.iata_code || null,
+          name: seg.origin?.name || null,
+          city: seg.origin?.city_name || null,
+          terminal: seg.origin_terminal || null
+        },
+        destination: {
+          iata: seg.destination?.iata_code || null,
+          name: seg.destination?.name || null,
+          city: seg.destination?.city_name || null,
+          terminal: seg.destination_terminal || null
+        },
+        departingAt: seg.departing_at || null,
+        arrivingAt: seg.arriving_at || null,
+        cabin: paxInfo?.cabin_class_marketing_name || paxInfo?.cabin_class || null,
+        baggages: (paxInfo?.baggages || []).map((b) => ({ type: b.type, quantity: b.quantity }))
+      });
+    });
+  });
+
+  return {
+    orderId: order.id,
+    bookingReference: order.booking_reference,
+    airline: order.owner?.name || segments[0]?.carrier || null,
+    passengers,
+    segments,
+    eTickets: (order.documents || [])
+      .filter((d) => d.type === 'electronic_ticket')
+      .map((d) => d.unique_identifier),
+    totalAmount: order.total_amount,
+    totalCurrency: order.total_currency,
+    bookedAt: order.created_at || null
+  };
+}
+
+/**
+ * The offer as the airline currently holds it — used just before charging the
+ * customer, to be sure it can still be booked at the quoted price. Returns
+ * { available: false } for an offer the airline no longer has.
+ */
+export async function getOfferStatus(offerId) {
+  try {
+    const data = await duffelRequest(`/air/offers/${offerId}`, { method: 'GET' });
+    const offer = data.data;
+    return {
+      available: !offer.expires_at || new Date(offer.expires_at).getTime() > Date.now(),
+      totalAmount: offer.total_amount,
+      totalCurrency: offer.total_currency
+    };
+  } catch (err) {
+    if (err.status === 404 || err.status === 410) return { available: false };
+    throw err;
+  }
 }
