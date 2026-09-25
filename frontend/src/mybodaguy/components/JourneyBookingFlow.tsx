@@ -1494,7 +1494,7 @@ export default function JourneyBookingFlow({
             trackingError ? (
               <div className="classic-card space-y-2 p-5 text-center text-sm text-slate-600" role="alert">
                 <p className="font-semibold text-slate-800">Your booking is placed — we just can't load its status right now.</p>
-                <p>It is safe to leave this page; you'll find it under My Journeys on your dashboard.</p>
+                <p>It is safe to leave this page; you'll find it under My Journeys in the Orders tab of your dashboard.</p>
               </div>
             ) : (
               <div className="classic-card flex items-center justify-center gap-2 p-6 text-sm text-slate-500" role="status">

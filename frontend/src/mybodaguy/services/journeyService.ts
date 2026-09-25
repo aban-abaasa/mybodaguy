@@ -294,13 +294,13 @@ export async function getAirTicket(journeyId: string): Promise<AirTicket> {
 
 const JOURNEY_SELECT = `*, legs:mbg_journey_legs(
       *,
-      flight_booking:mbg_flight_bookings(*),
+      flight_booking:mbg_flight_bookings!mbg_journey_legs_flight_booking_fkey(*),
       ride:mbg_rides(
         id, status, fare,
         rider:mbg_riders(
           plate_number, vehicle_type, vehicle_color, vehicle_model, rating,
           current_lat, current_lng, location_updated_at,
-          user:mbg_users(phone, profile:mbg_user_profiles(full_name))
+          user:mbg_users!user_id(phone, profile:mbg_user_profiles(full_name))
         )
       )
     )`;

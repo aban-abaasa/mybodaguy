@@ -12,15 +12,22 @@ import JourneyLegRideActions from './JourneyLegRideActions';
 export default function JourneyTracker({ customerId }: { customerId: string }) {
   const [journeys, setJourneys] = useState<Journey[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
         const rows = await getMyJourneys(customerId);
-        if (!cancelled) setJourneys(rows);
-      } catch {
-        // Best-effort — an empty list here just means "nothing to show yet".
+        if (!cancelled) {
+          setJourneys(rows);
+          setLoadError(false);
+        }
+      } catch (err) {
+        // Say so instead of rendering nothing — a booking that exists but
+        // cannot be read must not look like a booking that was never made.
+        console.error('JourneyTracker load error:', err);
+        if (!cancelled) setLoadError(true);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -47,6 +54,13 @@ export default function JourneyTracker({ customerId }: { customerId: string }) {
   });
 
   if (loading) return null;
+  if (loadError && journeys.length === 0) {
+    return (
+      <div role="alert" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+        We couldn't load your journeys right now. Your bookings are safe — please refresh in a moment.
+      </div>
+    );
+  }
   if (activeJourneys.length === 0) return null;
 
   return (

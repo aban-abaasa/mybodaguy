@@ -34,12 +34,12 @@ export default async function handler(req, res) {
         customer:mbg_customers(user_id),
         legs:mbg_journey_legs(
           *,
-          flight_booking:mbg_flight_bookings(*),
+          flight_booking:mbg_flight_bookings!mbg_journey_legs_flight_booking_fkey(*),
           ride:mbg_rides(
             id, status, fare, distance_km, duration_minutes,
             rider:mbg_riders(
               id, plate_number, vehicle_type, vehicle_color, vehicle_model, rating,
-              user:mbg_users(phone, profile:mbg_user_profiles(full_name))
+              user:mbg_users!user_id(phone, profile:mbg_user_profiles(full_name))
             )
           )
         )
