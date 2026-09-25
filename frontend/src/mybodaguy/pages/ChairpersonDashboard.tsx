@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { chairpersonService, SubordinateChairperson, CommitteeMember, CommissionRecord } from '../services/chairpersonService';
@@ -1533,14 +1534,24 @@ function AssignRiderModal({ stageId, stageName, onClose, onSuccess }: AssignRide
     { value: 'tuktuk', label: 'Tuktuk', emoji: '🛺' },
   ];
 
-  return (
+  // Lock background scroll while the sheet is open so the page behind it
+  // can't drift and push the sheet's top out of view on small phones.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // Portal to <body> so no transformed/sticky ancestor or the z-50 header can
+  // clip or cover the top of the sheet.
+  return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 sm:items-center sm:p-4"
+      className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/50 sm:items-center sm:p-4"
       onClick={(e) => { if (e.target === e.currentTarget && !assigning) onClose(); }}
     >
       <form
         onSubmit={handleSubmit}
-        className="classic-card flex w-full max-h-[92dvh] flex-col overflow-hidden !rounded-b-none sm:max-w-2xl sm:max-h-[90dvh] sm:!rounded-b-[20px]"
+        className="classic-card flex w-full max-h-[92vh] max-h-[92dvh] flex-col overflow-hidden !rounded-b-none sm:max-w-2xl sm:max-h-[90vh] sm:max-h-[90dvh] sm:!rounded-b-[20px]"
       >
         {/* Header — stays put while the form scrolls */}
         <div className="shrink-0 border-b border-slate-200 px-4 pb-3 pt-2 sm:px-6 sm:pt-5">
@@ -1604,7 +1615,7 @@ function AssignRiderModal({ stageId, stageName, onClose, onSuccess }: AssignRide
                   />
                 </div>
 
-                <div className="max-h-[38dvh] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 sm:max-h-56">
+                <div className="max-h-[38vh] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 sm:max-h-56">
                   {filteredUsers.length === 0 ? (
                     <div className="p-4 text-center text-sm text-slate-500">
                       {searchQuery ? 'No users found' : 'No users available'}
@@ -1771,7 +1782,8 @@ function AssignRiderModal({ stageId, stageName, onClose, onSuccess }: AssignRide
           </button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body
   );
 }
 
