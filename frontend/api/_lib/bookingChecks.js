@@ -6,12 +6,27 @@ const E164 = /^\+[1-9]\d{6,14}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const TITLE_GENDER = { mr: 'm', mrs: 'f', ms: 'f', miss: 'f' }; // 'dr' fits either
 
+// Airlines only take Latin letters in a name (plus space, hyphen, apostrophe).
+const NAME_OK = /^[A-Za-z][A-Za-z '-]*$/;
+
+/** Tidies a typed name for the airline: accents dropped (José → Jose), stray spaces collapsed. */
+export function cleanName(value) {
+  return String(value || '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[’‘`]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /** Returns a customer-facing message for the first problem found, or null when the passengers are fine. */
 export function validatePassengers(passengers, expectedCount = 1) {
   if (!Array.isArray(passengers) || passengers.length !== expectedCount) return 'Please enter the passenger details.';
   for (const p of passengers) {
     if (!p?.id) return 'This flight offer has expired — please search flights again.';
-    if (!String(p.given_name || '').trim() || !String(p.family_name || '').trim()) return "Please enter the passenger's full name exactly as on their passport.";
+    if (p.given_name != null) p.given_name = cleanName(p.given_name);
+    if (p.family_name != null) p.family_name = cleanName(p.family_name);
+    if (!p.given_name || !p.family_name) return "Please enter the passenger's full name exactly as on their passport.";
+    if (!NAME_OK.test(p.given_name) || !NAME_OK.test(p.family_name)) return "The passenger's name can only contain letters (no numbers, dots or symbols) — please enter it exactly as on their passport.";
     if (!/^\d{4}-\d{2}-\d{2}$/.test(p.born_on || '') || Number.isNaN(Date.parse(p.born_on)) || Date.parse(p.born_on) > Date.now()) {
       return "Please enter the passenger's date of birth.";
     }

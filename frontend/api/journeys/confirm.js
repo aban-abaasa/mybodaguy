@@ -216,15 +216,19 @@ export default async function handler(req, res) {
         dispatch_after: bookedFlight.arrivalAt
       }
     ];
-    let { data: insertedLegs, error: legsError } = await supabaseAdmin.from('mbg_journey_legs').insert(legs).select();
-    // The customer has already paid, so if the journey SQL hasn't been run yet
-    // (missing columns) book the legs the old way rather than strand them.
-    if (legsError && /fare_ugx|power_type_requested|umbrella_requested|preferred_business_profile_id/.test(legsError.message || '')) {
-      console.error('mbg_journey_legs columns missing — run ADD_JOURNEY_PREPAID_LEG_FARES.sql and ADD_JOURNEY_RIDE_BENEFITS.sql:', legsError.message);
-      ({ data: insertedLegs, error: legsError } = await supabaseAdmin
-        .from('mbg_journey_legs')
-        .insert(legs.map(({ fare_ugx, power_type_requested, umbrella_requested, preferred_business_profile_id, ...rest }) => rest))
-        .select());
+    // The customer has already paid and the airline ticket exists, so if a
+    // journey SQL hasn't been run yet (a column missing on mbg_journey_legs) drop
+    // just that optional column and book the legs without it, rather than strand
+    // a paid, ticketed customer. The core columns are never dropped.
+    const REQUIRED_LEG_COLUMNS = new Set(['journey_id', 'leg_order', 'leg_type', 'status']);
+    let legRows = legs;
+    let { data: insertedLegs, error: legsError } = await supabaseAdmin.from('mbg_journey_legs').insert(legRows).select();
+    for (let attempt = 0; legsError && attempt < 6; attempt++) {
+      const missing = /Could not find the '([^']+)' column of 'mbg_journey_legs'/.exec(legsError.message || '')?.[1];
+      if (!missing || REQUIRED_LEG_COLUMNS.has(missing)) break;
+      console.error(`mbg_journey_legs.${missing} is missing — run the journey SQL that adds it. Booking the legs without it for now.`);
+      legRows = legRows.map(({ [missing]: _dropped, ...rest }) => rest);
+      ({ data: insertedLegs, error: legsError } = await supabaseAdmin.from('mbg_journey_legs').insert(legRows).select());
     }
     if (legsError) throw legsError;
 
@@ -275,6 +279,17 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('Journey confirm error:', error, paidJourneyId ? { journeyId: paidJourneyId, bookedOrderRef } : '');
+    if (paidJourneyId && bookedOrderRef) {
+      // The airline ticket exists — a refund would be wrong; support must finish the setup.
+      return res.status(500).json({
+        success: false,
+        error: `Your ticket was booked (reference ${bookedOrderRef.pnr}) but we could not finish setting up your journey. Contact support with the reference below — do not pay again.`,
+        paymentTaken: true,
+        ticketIssued: true,
+        pnr: bookedOrderRef.pnr,
+        journeyId: paidJourneyId
+      });
+    }
     if (paidJourneyId) {
       return res.status(500).json({
         success: false,

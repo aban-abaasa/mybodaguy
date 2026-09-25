@@ -101,10 +101,13 @@ export interface JourneyQuote {
  * the booking didn't complete — the UI must tell them to contact support. */
 export class PaymentTakenError extends Error {
   journeyId: string | null;
-  constructor(message: string, journeyId: string | null) {
+  /** The airline ticket WAS issued — only the journey set-up failed, so no refund is due. */
+  ticketIssued: boolean;
+  constructor(message: string, journeyId: string | null, ticketIssued = false) {
     super(message);
     this.name = 'PaymentTakenError';
     this.journeyId = journeyId;
+    this.ticketIssued = ticketIssued;
   }
 }
 
@@ -126,7 +129,7 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
     if (!data.error && (res.status === 502 || res.status === 504)) {
       throw new Error('The server took too long to respond — please try again.');
     }
-    if (data.paymentTaken) throw new PaymentTakenError(data.error, data.journeyId ?? null);
+    if (data.paymentTaken) throw new PaymentTakenError(data.error, data.journeyId ?? null, data.ticketIssued === true);
     const failure: Error & { code?: string } = new Error(data.error || `Request to ${path} failed (${res.status})`);
     failure.code = data.code;
     throw failure;

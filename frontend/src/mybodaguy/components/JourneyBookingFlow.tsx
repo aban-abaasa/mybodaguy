@@ -236,7 +236,7 @@ export default function JourneyBookingFlow({
   const [confirming, setConfirming] = useState(false);
   // Set when the wallet may have been debited but no ticket was issued — kept
   // separate from `error` so it can't be dismissed or cleared by navigating.
-  const [paymentIssue, setPaymentIssue] = useState<{ journeyId: string | null; certain: boolean } | null>(null);
+  const [paymentIssue, setPaymentIssue] = useState<{ journeyId: string | null; certain: boolean; ticketIssued?: boolean } | null>(null);
   const [journey, setJourney] = useState<Journey | null>(null);
   const [customerName, setCustomerName] = useState('Customer');
 
@@ -579,7 +579,7 @@ export default function JourneyBookingFlow({
       startTracking(journeyId);
     } catch (err: any) {
       if (err instanceof PaymentTakenError) {
-        setPaymentIssue({ journeyId: err.journeyId, certain: !!err.journeyId });
+        setPaymentIssue({ journeyId: err.journeyId, certain: !!err.journeyId, ticketIssued: err.ticketIssued });
       } else if (err?.code === 'price_changed') {
         // Nothing was charged. Show the fresh price so the customer can confirm it.
         await buildQuote();
@@ -678,12 +678,16 @@ export default function JourneyBookingFlow({
             <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-600" />
             <div className="space-y-2 leading-snug">
               <p className="font-bold">
-                {paymentIssue.certain
-                  ? 'Your payment was taken but your air ticket was NOT issued.'
-                  : 'We could not confirm your booking — your money may have been deducted.'}
+                {paymentIssue.ticketIssued
+                  ? 'Your air ticket was booked, but we could not finish setting up your journey.'
+                  : paymentIssue.certain
+                    ? 'Your payment was taken but your air ticket was NOT issued.'
+                    : 'We could not confirm your booking — your money may have been deducted.'}
               </p>
               <p>
-                {paymentIssue.certain
+                {paymentIssue.ticketIssued
+                  ? 'Please contact the support team to complete it. You do not need a refund and should not pay again.'
+                  : paymentIssue.certain
                   ? 'Please contact the support team to be refunded. Do not pay again until this is sorted out.'
                   : 'Check your wallet balance and My Journeys before trying again. If money was deducted and you have no ticket, contact the support team to be refunded.'}
               </p>
