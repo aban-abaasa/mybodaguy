@@ -197,11 +197,13 @@ function FlightCard({
  * Preferences are remembered between bookings; the chosen airline is not.
  */
 export default function FlightResultsPicker({
-  offers, selectedOffer, onSelect,
+  offers, selectedOffer, onSelect, travellers = 1,
 }: {
   offers: FlightOffer[];
   selectedOffer: FlightOffer | null;
   onSelect: (offer: FlightOffer) => void;
+  /** How many people the search was for — the airline's price covers all of them. */
+  travellers?: number;
 }) {
   const [prefs, setPrefsState] = useState<FlightPrefs>(loadPrefs);
   const [airlineKey, setAirlineKey] = useState<string | null>(null);
@@ -258,6 +260,7 @@ export default function FlightResultsPicker({
         </div>
         <p className="mt-1 text-xs text-slate-500">
           {all.length} flight{all.length !== 1 ? 's' : ''} on {allAirlineCount} airline{allAirlineCount !== 1 ? 's' : ''} for your date
+          {travellers > 1 && ` · prices are the total for all ${travellers} travellers`}
         </p>
       </div>
 

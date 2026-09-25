@@ -99,6 +99,8 @@ export interface JourneyQuote {
   /** Whether a BodaGoEra ride to the departure airport / from the arrival airport is part of (and charged in) this journey. */
   pickupRide?: boolean;
   dropoffRide?: boolean;
+  /** How many travellers the offer (and so every price above) covers. */
+  partySize?: number;
 }
 
 /** Thrown when the server says the customer's wallet was already debited but
@@ -238,6 +240,8 @@ export interface Journey {
   destination_country: string;
   destination_city: string | null;
   destination_address: string | null;
+  /** Travellers on the booking (1 when the column doesn't exist yet or for a solo trip). */
+  passenger_count?: number;
   total_fare_ugx: number;
   total_fare_ican: number;
   /** Set once the wallet was debited — even when the booking then failed, which is what tells "money taken, no ticket" from "never charged". */

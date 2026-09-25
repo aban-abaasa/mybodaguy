@@ -284,7 +284,6 @@ export default function JourneyBookingFlow({
     !!p.dob &&
     !!phoneFor(i)
   );
-  const passengerPhoneIntl = phoneFor(0);
 
   // Real ICAN wallet balance, checked against the quote before letting the
   // customer confirm — avoids creating a doomed mbg_journeys row (confirm.js
@@ -672,6 +671,9 @@ export default function JourneyBookingFlow({
 
   // What's already been decided, kept in view while working on the next step.
   const tripItems: Array<{ icon: ReactNode; label: string; value: string }> = [];
+  if (bookingKind === 'fly' && partySize > 1 && (step === 'flight' || step === 'destination')) {
+    tripItems.push({ icon: <User size={15} />, label: 'Travellers', value: `${partySize} people on one booking` });
+  }
   if (bookingKind === 'fly' && (step === 'flight' || step === 'destination') && (pickup || !wantPickupRide)) {
     tripItems.push({ icon: <PickupVehicleIcon size={15} />, label: 'To the airport', value: wantPickupRide && pickup ? pickup.address : 'Own way (no BodaGoEra ride)' });
   }
@@ -1078,9 +1080,11 @@ export default function JourneyBookingFlow({
             }}
           />
           <Field
-            label="Extra baggage (kg) — optional"
+            label={partySize > 1 ? 'Extra baggage for everyone (kg) — optional' : 'Extra baggage (kg) — optional'}
             htmlFor="jb-flight-cargo"
-            hint="Anything beyond the free allowance. Charged as a per-kg platform surcharge, added to your total."
+            hint={partySize > 1
+              ? 'The total weight for the whole party. Each traveller has their own free allowance; only what is beyond all of them is charged, as a per-kg platform surcharge added to your total.'
+              : 'Anything beyond the free allowance. Charged as a per-kg platform surcharge, added to your total.'}
           >
             <input
               id="jb-flight-cargo"
@@ -1112,7 +1116,7 @@ export default function JourneyBookingFlow({
 
           {searchingFlights && offers.length === 0 && <FlightSkeleton />}
 
-          <FlightResultsPicker offers={offers} selectedOffer={selectedOffer} onSelect={setSelectedOffer} />
+          <FlightResultsPicker offers={offers} selectedOffer={selectedOffer} onSelect={setSelectedOffer} travellers={partySize} />
 
           <button
             disabled={!selectedOffer}
@@ -1137,7 +1141,7 @@ export default function JourneyBookingFlow({
             <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="What happens when you land">
               {([
                 { on: true, label: 'BodaGoEra ride', desc: partySize > 1 ? 'A car is waiting for everyone' : 'A driver is waiting for you' },
-                { on: false, label: partySize > 1 ? 'Someone collects us' : 'Someone collects me', desc: 'Own car or a friend picks us up'.replace('us', partySize > 1 ? 'us' : 'me') },
+                { on: false, label: partySize > 1 ? 'Someone collects us' : 'Someone collects me', desc: partySize > 1 ? 'Own car or a friend picks us up' : 'Own car or a friend picks me up' },
               ] as const).map(({ on, label, desc }) => (
                 <button
                   key={label}
@@ -1260,7 +1264,7 @@ export default function JourneyBookingFlow({
               {
                 key: 'flight',
                 icon: <Plane size={16} />,
-                title: `Flight · ${selectedOffer?.carrier || 'Airline'}`,
+                title: `Flight · ${selectedOffer?.carrier || 'Airline'}${partySize > 1 ? ` · ${partySize} travellers` : ''}`,
                 detail: [
                   selectedSummary ? `${selectedSummary.departDayLabel} · ${flightLine}` : '',
                   // The airline's own price, so the ICAN figure is traceable.
@@ -1274,7 +1278,7 @@ export default function JourneyBookingFlow({
                 ? [{ key: 'bag', icon: <Package size={16} />, title: 'Extra baggage', detail: `${quote.cargoWeightKg} kg`, ican: quote.cargoIcan, local: quote.local?.cargo, ugx: quote.cargoFareUgx }]
                 : []),
               ...(quote.dropoffRide !== false
-                ? [{ key: 'dropoff', icon: <Home size={16} />, title: 'Driver on arrival', detail: destinationLine, ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx }]
+                ? [{ key: 'dropoff', icon: <Home size={16} />, title: partySize > 1 ? 'Car on arrival' : 'Driver on arrival', detail: destinationLine, ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx }]
                 : []),
             ].map((leg, i, all) => (
               <li key={leg.key} className="relative flex gap-3 pb-5 last:pb-0">
@@ -1347,57 +1351,79 @@ export default function JourneyBookingFlow({
 
           <div className="space-y-3.5">
             <div className="flex items-center gap-3">
-              <h4 className="flex items-center gap-2 font-classic-display text-lg font-semibold text-slate-800"><User size={16} /> Passenger details</h4>
+              <h4 className="flex items-center gap-2 font-classic-display text-lg font-semibold text-slate-800"><User size={16} /> {partySize > 1 ? 'Traveller details' : 'Passenger details'}</h4>
               <div className="landing-classic-divider flex-1" />
             </div>
             <p className="text-xs leading-relaxed text-slate-500">
-              Must match the traveller's ID or passport exactly — this books a real seat with the airline.
+              {partySize > 1
+                ? "Each traveller's name must match their own ID or passport exactly — this books a real seat with the airline for every one of them."
+                : "Must match the traveller's ID or passport exactly — this books a real seat with the airline."}
             </p>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Title" htmlFor="jb-pax-title">
-                <select id="jb-pax-title" className="classic-input" value={passengerTitle} onChange={(e) => {
-                  const title = e.target.value as typeof passengerTitle;
-                  setPassengerTitle(title);
-                  // The airline rejects a title that contradicts the gender.
-                  const implied = genderForTitle(title);
-                  if (implied) setPassengerGender(implied);
-                }}>
-                  <option value="mr">Mr</option>
-                  <option value="mrs">Mrs</option>
-                  <option value="ms">Ms</option>
-                  <option value="miss">Miss</option>
-                  <option value="dr">Dr</option>
-                </select>
-              </Field>
-              <Field label="Gender" htmlFor="jb-pax-gender">
-                <select id="jb-pax-gender" className="classic-input" value={passengerGender} onChange={(e) => {
-                  const gender = e.target.value as 'm' | 'f';
-                  setPassengerGender(gender);
-                  const implied = genderForTitle(passengerTitle);
-                  if (implied && implied !== gender) setPassengerTitle(gender === 'm' ? 'mr' : 'ms');
-                }}>
-                  <option value="m">Male</option>
-                  <option value="f">Female</option>
-                </select>
-              </Field>
-              <Field label="Given name" htmlFor="jb-pax-given">
-                <input id="jb-pax-given" className="classic-input" autoComplete="given-name" placeholder="As on passport" value={passengerGivenName} onChange={(e) => setPassengerGivenName(e.target.value)} />
-              </Field>
-              <Field label="Family name" htmlFor="jb-pax-family">
-                <input id="jb-pax-family" className="classic-input" autoComplete="family-name" placeholder="As on passport" value={passengerFamilyName} onChange={(e) => setPassengerFamilyName(e.target.value)} />
-              </Field>
-            </div>
-            <Field label="Date of birth" htmlFor="jb-pax-dob">
-              <input id="jb-pax-dob" className="classic-input" type="date" autoComplete="bday" max={todayIsoDate()} value={passengerDob} onChange={(e) => setPassengerDob(e.target.value)} />
-            </Field>
-            <Field label="Phone number" htmlFor="jb-pax-phone">
-              <input id="jb-pax-phone" className="classic-input" type="tel" inputMode="tel" autoComplete="tel" placeholder="+2567XXXXXXXX" value={passengerPhone} onChange={(e) => setPassengerPhone(e.target.value)} />
-              {passengerPhone.trim() && (
-                <p className={`mt-1 text-xs ${passengerPhoneIntl ? 'text-emerald-700' : 'text-red-600'}`}>
-                  {passengerPhoneIntl ? `Will be sent to the airline as ${passengerPhoneIntl}` : 'Start with your country code, e.g. +256 7XX XXX XXX'}
-                </p>
-              )}
-            </Field>
+            {passengers.map((pax, i) => {
+              const id = `jb-pax-${i}`;
+              const phoneIntl = phoneFor(i);
+              return (
+                <fieldset key={i} className={partySize > 1 ? 'space-y-3.5 rounded-2xl border border-[#c4a052]/40 p-3.5' : 'space-y-3.5'}>
+                  {partySize > 1 && (
+                    <legend className="px-1.5 font-classic-display text-[15px] font-semibold text-slate-800">
+                      Traveller {i + 1}{i === 0 ? ' (you)' : ''}
+                    </legend>
+                  )}
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Title" htmlFor={`${id}-title`}>
+                      <select id={`${id}-title`} className="classic-input" value={pax.title} onChange={(e) => {
+                        const title = e.target.value as PassengerTitle;
+                        // The airline rejects a title that contradicts the gender.
+                        const implied = genderForTitle(title);
+                        updatePassenger(i, implied ? { title, gender: implied } : { title });
+                      }}>
+                        <option value="mr">Mr</option>
+                        <option value="mrs">Mrs</option>
+                        <option value="ms">Ms</option>
+                        <option value="miss">Miss</option>
+                        <option value="dr">Dr</option>
+                      </select>
+                    </Field>
+                    <Field label="Gender" htmlFor={`${id}-gender`}>
+                      <select id={`${id}-gender`} className="classic-input" value={pax.gender} onChange={(e) => {
+                        const gender = e.target.value as 'm' | 'f';
+                        const implied = genderForTitle(pax.title);
+                        updatePassenger(i, implied && implied !== gender ? { gender, title: gender === 'm' ? 'mr' : 'ms' } : { gender });
+                      }}>
+                        <option value="m">Male</option>
+                        <option value="f">Female</option>
+                      </select>
+                    </Field>
+                    <Field label="Given name" htmlFor={`${id}-given`}>
+                      <input id={`${id}-given`} className="classic-input" autoComplete={i === 0 ? 'given-name' : 'off'} placeholder="As on passport" value={pax.givenName} onChange={(e) => updatePassenger(i, { givenName: e.target.value })} />
+                    </Field>
+                    <Field label="Family name" htmlFor={`${id}-family`}>
+                      <input id={`${id}-family`} className="classic-input" autoComplete={i === 0 ? 'family-name' : 'off'} placeholder="As on passport" value={pax.familyName} onChange={(e) => updatePassenger(i, { familyName: e.target.value })} />
+                    </Field>
+                  </div>
+                  <Field label="Date of birth" htmlFor={`${id}-dob`}>
+                    <input id={`${id}-dob`} className="classic-input" type="date" autoComplete={i === 0 ? 'bday' : 'off'} max={todayIsoDate()} value={pax.dob} onChange={(e) => updatePassenger(i, { dob: e.target.value })} />
+                  </Field>
+                  <Field label={i === 0 ? 'Phone number' : 'Phone number (optional)'} htmlFor={`${id}-phone`}>
+                    <input
+                      id={`${id}-phone`}
+                      className="classic-input"
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete={i === 0 ? 'tel' : 'off'}
+                      placeholder={i === 0 ? '+2567XXXXXXXX' : "Leave blank to use traveller 1's number"}
+                      value={pax.phone}
+                      onChange={(e) => updatePassenger(i, { phone: e.target.value })}
+                    />
+                    {pax.phone.trim() && (
+                      <p className={`mt-1 text-xs ${phoneIntl ? 'text-emerald-700' : 'text-red-600'}`}>
+                        {phoneIntl ? `Will be sent to the airline as ${phoneIntl}` : 'Start with your country code, e.g. +256 7XX XXX XXX'}
+                      </p>
+                    )}
+                  </Field>
+                </fieldset>
+              );
+            })}
           </div>
 
           <div className="space-y-2">
@@ -1410,7 +1436,7 @@ export default function JourneyBookingFlow({
               {confirming ? 'Booking your journey…' : `Confirm & pay ${quote.totalIcan.toFixed(4)} ICAN`}
             </button>
             {!confirming && !passengerDetailsValid && (
-              <p className="text-center text-xs text-slate-500">Complete the passenger's name, date of birth and phone number to continue.</p>
+              <p className="text-center text-xs text-slate-500">Complete {partySize > 1 ? "every traveller's" : "the passenger's"} name, date of birth and phone number to continue.</p>
             )}
             {!confirming && passengerDetailsValid && !hasEnoughBalance && (
               <p className="text-center text-xs text-slate-500">Top up your wallet above to continue.</p>
