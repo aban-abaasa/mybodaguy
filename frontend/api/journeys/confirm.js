@@ -1,6 +1,6 @@
 import { createOrder, getOfferStatus, DUFFEL_TEST_MODE } from '../_lib/duffel.js';
 import { planPickupDispatch, haversineKm } from '../_lib/transfer.js';
-import { computeQuoteAmounts, RideCapacityError, MAX_PARTY_SIZE } from '../_lib/journeyQuote.js';
+import { computeQuoteAmounts, cleanParcel, loadStoreOrder, RideCapacityError, StoreOrderError, MAX_PARTY_SIZE } from '../_lib/journeyQuote.js';
 import { UnsupportedCurrencyError, PriceUnavailableError } from '../_lib/pricing.js';
 import { validatePassengers, describeDuffelFailure, testModeDetail } from '../_lib/bookingChecks.js';
 
@@ -39,6 +39,9 @@ export default async function handler(req, res) {
   // flight is always booked. Older clients send neither flag = both rides.
   const pickupRide = quote?.pickupRide !== false;
   const dropoffRide = quote?.dropoffRide !== false;
+  // "Send a parcel": the two ground legs are couriers carrying goods, not rides for
+  // the travellers. The flight itself is booked exactly as usual.
+  const parcelMode = quote?.serviceMode === 'parcel';
 
   // Set once the wallet debit succeeds, so any later failure can tell the
   // customer their money is held and point them at support for a refund.
@@ -78,6 +81,33 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Enter where the driver should take you on arrival, or turn the arrival ride off. You have not been charged.' });
     }
 
+    // Goods from a registered store abroad: re-priced from the database now (never the
+    // browser's figures), and the store's own location is the pickup.
+    let storeOrder = null;
+    if (quote.store) {
+      if (!parcelMode || !pickupRide) {
+        return res.status(400).json({ success: false, error: 'A store order is collected from the store by a courier. You have not been charged.' });
+      }
+      try {
+        storeOrder = await loadStoreOrder(supabaseAdmin, quote.store);
+      } catch (err) {
+        if (err instanceof StoreOrderError) {
+          return res.status(422).json({ success: false, error: `${err.message} You have not been charged.`, code: 'store_order' });
+        }
+        throw err;
+      }
+      quote.pickup = { ...quote.pickup, ...storeOrder.pickup };
+    }
+    const goodsIcan = storeOrder?.goodsIcan ?? 0;
+
+    const parcelCheck = parcelMode
+      ? cleanParcel({ ...quote.parcel, ...(storeOrder ? { description: storeOrder.description } : {}) }, { dropoffRide, weightKg: quote.cargoWeightKg })
+      : null;
+    if (parcelCheck?.error) {
+      return res.status(400).json({ success: false, error: `${parcelCheck.error} You have not been charged.` });
+    }
+    const parcel = parcelCheck?.parcel ?? null;
+
     let live;
     try {
       live = await getOfferStatus(quote.offer.offerId);
@@ -102,7 +132,7 @@ export default async function handler(req, res) {
     const liveOffer = { ...quote.offer, totalAmount: live.totalAmount, totalCurrency: live.totalCurrency };
     let amounts;
     try {
-      amounts = await computeQuoteAmounts(supabaseAdmin, { pickup: quote.pickup, offer: liveOffer, cargoWeightKg: quote.cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide, partySize });
+      amounts = await computeQuoteAmounts(supabaseAdmin, { pickup: quote.pickup, offer: liveOffer, cargoWeightKg: quote.cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide, partySize, parcel: parcelMode, goodsIcan });
     } catch (err) {
       if (err instanceof RideCapacityError) {
         return res.status(422).json({ success: false, error: `${err.message} You have not been charged.`, code: 'ride_capacity' });
@@ -115,7 +145,12 @@ export default async function handler(req, res) {
       }
       throw err;
     }
+    // chargeIcan is everything the customer pays; the transport part is debited as the
+    // journey fare and the goods part separately (held for the store), so a failure can
+    // put each back exactly.
     const chargeIcan = amounts.priced.totalIcan;
+    const transportIcan = Number((chargeIcan - goodsIcan).toFixed(8));
+    const transportUgx = amounts.priced.totalUgx - Math.round(goodsIcan * amounts.priced.icanPriceUgx);
     const quotedIcan = Number(quote.totalIcan);
     if (!Number.isFinite(quotedIcan) || quotedIcan <= 0 || Math.abs(chargeIcan - quotedIcan) / quotedIcan > PRICE_DRIFT_TOLERANCE) {
       return res.status(409).json({
@@ -136,11 +171,19 @@ export default async function handler(req, res) {
       destination_address: dropoffRide ? quote.destination.address : null,
       destination_lat: dropoffRide ? (quote.destination.lat ?? null) : null,
       destination_lng: dropoffRide ? (quote.destination.lng ?? null) : null,
-      total_fare_ugx: amounts.priced.totalUgx,
-      total_fare_ican: chargeIcan,
+      total_fare_ugx: transportUgx,
+      total_fare_ican: transportIcan,
       // Only sent for a party: a solo booking works even where
       // ADD_JOURNEY_MULTI_PASSENGER.sql hasn't been run yet.
-      ...(partySize > 1 ? { passenger_count: partySize } : {})
+      ...(partySize > 1 ? { passenger_count: partySize } : {}),
+      // The parcel's details ride on the journey; the couriers are told from them.
+      ...(parcel ? {
+        service_mode: 'parcel',
+        cargo_description: parcel.description,
+        cargo_weight_kg: amounts.weightKg,
+        recipient_name: dropoffRide ? parcel.recipientName : null,
+        recipient_phone: dropoffRide ? parcel.recipientPhone : null
+      } : {})
     };
     let { data: journey, error: journeyError } = await supabaseAdmin.from('mbg_journeys').insert(journeyRow).select().single();
     if (journeyError && /passenger_count/.test(journeyError.message || '')) {
@@ -150,12 +193,17 @@ export default async function handler(req, res) {
       const { passenger_count: _dropped, ...withoutCount } = journeyRow;
       ({ data: journey, error: journeyError } = await supabaseAdmin.from('mbg_journeys').insert(withoutCount).select().single());
     }
+    if (journeyError && parcel && /service_mode|recipient_name|recipient_phone|cargo_description|cargo_weight_kg/.test(journeyError.message || '')) {
+      // Booking it as a normal journey would send passenger rides for a parcel, so refuse instead.
+      console.error('Parcel columns are missing — run ADD_JOURNEY_PARCEL_AND_SHIP_LAND_LEGS.sql.', journeyError.message);
+      return res.status(503).json({ success: false, error: "Parcel journeys aren't available yet. You have not been charged.", code: 'parcel_unavailable' });
+    }
     if (journeyError) throw journeyError;
 
     // Tithe-free debit — see ICAN/backend/CREATE_JOURNEY_ESCROW_FUNCTION.sql.
     const { data: debitResult, error: debitError } = await supabaseAdmin.rpc('mbg_debit_journey_fare', {
       p_user_id: customerUserId,
-      p_ican_amount: chargeIcan,
+      p_ican_amount: transportIcan,
       p_source_app: 'mybodaguy',
       p_reference_id: journey.id
     });
@@ -168,6 +216,31 @@ export default async function handler(req, res) {
     // Kept on the journey even if booking fails below, so the customer's page
     // (and support) can tell "payment taken, no ticket" from "never charged".
     await supabaseAdmin.from('mbg_journeys').update({ ican_journey_tx_id: debitResult.tx_id }).eq('id', journey.id);
+
+    // The goods from the store: debited and held now, paid out to the store only once the
+    // courier has collected them. If they can't be charged, the fare just taken goes back.
+    if (storeOrder) {
+      const { data: goodsResult, error: goodsError } = await supabaseAdmin.rpc('mbg_charge_import_goods', {
+        p_journey_id: journey.id,
+        p_customer_user_id: customerUserId,
+        p_supermarket_id: storeOrder.supermarketId,
+        p_cart: storeOrder.cart,
+        p_transport: 'air'
+      });
+      if (goodsError || !goodsResult?.success) {
+        console.error('Import goods charge failed:', goodsError?.message || goodsResult?.error);
+        await supabaseAdmin.from('mbg_journeys').update({ status: 'failed' }).eq('id', journey.id);
+        const { data: fareRefund, error: fareRefundError } = await supabaseAdmin.rpc('mbg_refund_journey_fare', {
+          p_journey_id: journey.id,
+          p_reason: 'the goods from the store could not be charged'
+        });
+        const reason = goodsResult?.error || 'The goods from the store could not be charged.';
+        if (!fareRefundError && fareRefund?.success) {
+          return res.status(409).json({ success: false, error: `${reason} Nothing was charged.`, refunded: true, journeyId: journey.id });
+        }
+        return res.status(500).json({ success: false, error: `${reason} Contact support to have the transport fare returned.`, paymentTaken: true, journeyId: journey.id });
+      }
+    }
 
     // Book the real flight via Duffel — customer already paid, so a failure
     // here must fail loudly rather than silently strand them.
@@ -190,7 +263,16 @@ export default async function handler(req, res) {
         p_journey_id: journey.id,
         p_reason: `airline booking failed (${failure.code})`
       });
-      if (!refundError && refund?.success) {
+      // ...and the goods from the store, with their stock.
+      let goodsBack = true;
+      if (storeOrder) {
+        const { data: goodsRefund, error: goodsRefundError } = await supabaseAdmin.rpc('mbg_refund_import_goods', {
+          p_journey_id: journey.id,
+          p_reason: `airline booking failed (${failure.code})`
+        });
+        goodsBack = !goodsRefundError && !!goodsRefund?.success;
+      }
+      if (!refundError && refund?.success && goodsBack) {
         return res.status(502).json({
           success: false,
           error: `${failure.message} Nothing was charged — ${chargeIcan.toFixed(4)} ICAN has been returned to your wallet.${DUFFEL_TEST_MODE ? testModeDetail(flightError) : ''}`,
@@ -238,8 +320,9 @@ export default async function handler(req, res) {
         destination_country: quote.pickup.country || 'Uganda',
         destination_city: airport?.name || null,
         destination_lat: airport?.lat ?? null, destination_lng: airport?.lng ?? null,
-        // A bike carries one traveller, so any party goes by car.
-        preferred_vehicle_type: partySize > 1 ? 'car' : (quote.pickup.vehicleType || null),
+        // A bike carries one traveller, so any party goes by car; a parcel courier
+        // uses the vehicle chosen for the parcel.
+        preferred_vehicle_type: parcel ? parcel.vehicleType : (partySize > 1 ? 'car' : (quote.pickup.vehicleType || null)),
         power_type_requested: ['electric', 'fuel'].includes(prefs.powerType) ? prefs.powerType : null,
         umbrella_requested: prefs.umbrella === true,
         preferred_business_profile_id: uuid.test(prefs.companyId || '') ? prefs.companyId : null,
@@ -251,7 +334,7 @@ export default async function handler(req, res) {
       { journey_id: journey.id, leg_order: 2, leg_type: 'flight', status: 'dispatched', dispatched_at: new Date().toISOString(), umbrella_requested: false },
       ...(dropoffRide ? [{
         journey_id: journey.id, leg_order: 3, leg_type: 'local_dropoff', status: 'pending', umbrella_requested: false,
-        preferred_vehicle_type: partySize > 1 ? 'car' : null,
+        preferred_vehicle_type: parcel ? parcel.vehicleType : (partySize > 1 ? 'car' : null),
         origin_country: destinationCountry, origin_city: destinationCity,
         destination_country: destinationCountry, destination_city: destinationCity,
         destination_lat: quote.destination.lat ?? null, destination_lng: quote.destination.lng ?? null,

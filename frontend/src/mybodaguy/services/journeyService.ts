@@ -70,6 +70,8 @@ export interface QuoteLocalView {
   flight: number;
   cargo: number;
   dropoff: number;
+  /** Goods bought from a store abroad (0 / absent when there are none). */
+  goods?: number;
   total: number;
 }
 
@@ -101,6 +103,39 @@ export interface JourneyQuote {
   dropoffRide?: boolean;
   /** How many travellers the offer (and so every price above) covers. */
   partySize?: number;
+  /** 'parcel' = the ground legs are couriers carrying goods (see ParcelDetails). Default: 'travel'. */
+  serviceMode?: 'travel' | 'parcel';
+  parcel?: ParcelDetails;
+  /** Goods bought from a registered store abroad — already in ICAN, and included in totalIcan. */
+  goodsIcan?: number;
+  store?: StoreOrderSummary;
+}
+
+/** A store order as the server priced it. */
+export interface StoreOrderSummary {
+  supermarketId: string;
+  storeName: string;
+  /** The store's own price currency, and the goods' total in it. */
+  currency: string;
+  goodsLocal: number;
+  goodsIcan: number;
+  lines: Array<{ productId: string; name: string; quantity: number; unitPrice: number; lineTotal: number }>;
+  cart: StoreCartLine[];
+}
+
+export interface StoreCartLine {
+  productId: string;
+  quantity: number;
+}
+
+/** What a "Send a parcel" journey carries. The parcel's weight is the journey's baggage weight. */
+export interface ParcelDetails {
+  description: string;
+  /** Whoever meets the parcel on arrival — only needed when the arrival courier is kept. */
+  recipientName: string;
+  recipientPhone: string;
+  /** Courier vehicle for both legs; a bike only takes a small parcel. */
+  vehicleType: 'motorcycle' | 'car' | null;
 }
 
 /** Thrown when the server says the customer's wallet was already debited but
@@ -178,6 +213,11 @@ export async function getJourneyQuote(params: {
   /** Each airport ride is optional — leave one out when the customer has their own car or a friend drives them. Default: both. */
   pickupRide?: boolean;
   dropoffRide?: boolean;
+  /** Send a parcel instead of travelling: the ground legs become couriers. */
+  serviceMode?: 'travel' | 'parcel';
+  parcel?: ParcelDetails;
+  /** Buy the parcel from a registered store abroad: the store is the pickup, and the goods are added to the total. */
+  store?: { supermarketId: string; cart: StoreCartLine[] };
 }): Promise<{ quote: JourneyQuote }> {
   return postJson('/api/journeys/quote', params);
 }
@@ -237,6 +277,8 @@ export interface Journey {
   id: string;
   status: string;
   created_at?: string;
+  /** Last change — for a finished journey, roughly when it finished. */
+  updated_at?: string;
   destination_country: string;
   destination_city: string | null;
   destination_address: string | null;
@@ -358,32 +400,149 @@ export function pollJourney(journeyId: string, onUpdate: (journey: Journey) => v
   };
 }
 
+/** How a shipment's land legs are set up. A skipped leg isn't booked or charged. */
+export interface ShipLandOptions {
+  /** A truck/van collects from the pickup address and takes it to the departure port. Default true. */
+  pickupLeg?: boolean;
+  /** A vehicle takes it from the arrival port to the final address. Default true. */
+  dropoffLeg?: boolean;
+  /** null = automatic (truck/van matched on weight). */
+  vehicleType?: 'motorcycle' | 'car' | 'van' | 'truck' | null;
+}
+
+interface ShipRouteParams extends ShipLandOptions {
+  /** Coordinates of a skipped leg's address aren't needed. */
+  pickupLat: number | null; pickupLng: number | null; pickupCountry: string;
+  dropoffLat: number | null; dropoffLng: number | null; dropoffCountry: string;
+  cargoWeightKg?: number;
+  /** Buying from a registered store abroad: the store is the pickup (the server ignores the pickup fields) and the goods are charged with the shipping. */
+  store?: { supermarketId: string; cart: StoreCartLine[] };
+}
+
+const shipRouteArgs = (params: ShipRouteParams) => ({
+  p_pickup_lat: params.pickupLat,
+  p_pickup_lng: params.pickupLng,
+  p_pickup_country: params.pickupCountry,
+  p_dropoff_lat: params.dropoffLat,
+  p_dropoff_lng: params.dropoffLng,
+  p_dropoff_country: params.dropoffCountry,
+  p_pickup_leg: params.pickupLeg ?? true,
+  p_dropoff_leg: params.dropoffLeg ?? true,
+  p_land_vehicle_type: params.vehicleType ?? null,
+  p_cargo_weight_kg: params.cargoWeightKg ?? null,
+});
+
+export interface ShipCargoQuote {
+  pickupFareUgx: number;
+  seaFareUgx: number;
+  dropoffFareUgx: number;
+  totalUgx: number;
+  /** What will be charged, at ICAN's live value. */
+  totalIcan: number;
+  originPort: { city: string; name: string; country: string };
+  destPort: { city: string; name: string; country: string };
+}
+
+/** The price of a shipment as currently set up, before anything is charged. */
+export async function quoteShipCargoJourney(params: ShipRouteParams): Promise<{ success: boolean; quote?: ShipCargoQuote; error?: string }> {
+  const { data, error } = await supabase.rpc('mbg_quote_ship_cargo_journey', shipRouteArgs(params));
+  if (error) return { success: false, error: error.message };
+  if (!data?.success) return { success: false, error: data?.error };
+  return {
+    success: true,
+    quote: {
+      pickupFareUgx: Number(data.pickup_fare_ugx), seaFareUgx: Number(data.sea_fare_ugx), dropoffFareUgx: Number(data.dropoff_fare_ugx),
+      totalUgx: Number(data.total_ugx), totalIcan: Number(data.total_ican),
+      originPort: data.origin_port, destPort: data.dest_port,
+    },
+  };
+}
+
 /**
  * Books a full end-to-end cargo shipment (pickup -> departure port -> sea
  * crossing -> arrival port -> final delivery) directly via Supabase RPC —
- * unlike flight booking this needs no third-party secret, so it's called
- * straight from the browser like any other mbg_* RPC, not through /api.
+ * the land legs are optional (see ShipLandOptions). Unlike flight booking this
+ * needs no third-party secret, so it's called straight from the browser like any
+ * other mbg_* RPC, not through /api.
  */
-export async function requestShipCargoJourney(params: {
-  pickupLocation: string; pickupLat: number; pickupLng: number; pickupCountry: string;
-  dropoffLocation: string; dropoffLat: number; dropoffLng: number; dropoffCountry: string;
+export async function requestShipCargoJourney(params: ShipRouteParams & {
+  pickupLocation: string;
+  dropoffLocation: string;
   cargoDescription?: string;
-  cargoWeightKg?: number;
 }): Promise<{ success: boolean; journeyId?: string; error?: string }> {
   const { data, error } = await supabase.rpc('mbg_request_ship_cargo_journey', {
+    ...shipRouteArgs(params),
     p_pickup_location: params.pickupLocation,
-    p_pickup_lat: params.pickupLat,
-    p_pickup_lng: params.pickupLng,
-    p_pickup_country: params.pickupCountry,
     p_dropoff_location: params.dropoffLocation,
-    p_dropoff_lat: params.dropoffLat,
-    p_dropoff_lng: params.dropoffLng,
-    p_dropoff_country: params.dropoffCountry,
     p_cargo_description: params.cargoDescription ?? null,
-    p_cargo_weight_kg: params.cargoWeightKg ?? null,
+    ...(params.store ? {
+      p_supermarket_id: params.store.supermarketId,
+      p_cart: params.store.cart.map((l) => ({ product_id: l.productId, quantity: l.quantity })),
+    } : {}),
   });
   if (error) return { success: false, error: error.message };
   return { success: !!data?.success, journeyId: data?.journey_id, error: data?.error };
+}
+
+/**
+ * Removes finished journeys from the server (ADD_JOURNEY_SELF_DELETE.sql).
+ * The database refuses anything not the caller's own, not finished, still
+ * awaiting a refund, or with a flight that hasn't landed — those come back in
+ * `skipped` with the reason instead of being deleted.
+ */
+export async function deleteMyJourneys(journeyIds: string[]): Promise<{ deletedIds: string[]; skipped: Array<{ id: string; reason: string }> }> {
+  const { data, error } = await supabase.rpc('mbg_delete_my_journeys', { p_journey_ids: journeyIds });
+  if (error) throw new Error(error.message);
+  if (!data?.success) throw new Error(data?.error || 'Could not remove the journey right now.');
+  return { deletedIds: data.deleted_ids ?? [], skipped: data.skipped ?? [] };
+}
+
+export interface ImportStore {
+  id: string;
+  name: string;
+  businessType: string | null;
+  address: string | null;
+  latitude: number;
+  longitude: number;
+  country: string;
+  /** The currency the store's prices are written in. */
+  currency: string;
+  productCount: number;
+}
+
+/** Registered stores in a country other than the customer's own — the ones they can buy from abroad. */
+export async function listImportStores(homeCountry: string): Promise<ImportStore[]> {
+  const { data, error } = await supabase.rpc('mbg_list_import_stores', { p_home_country: homeCountry });
+  if (error) throw new Error(/mbg_list_import_stores/.test(error.message) ? 'Buying from abroad is not switched on yet.' : error.message);
+  return (data || []).map((r: any) => ({
+    id: r.id, name: r.name, businessType: r.business_type, address: r.address,
+    latitude: Number(r.latitude), longitude: Number(r.longitude), country: r.country,
+    currency: r.price_currency, productCount: Number(r.product_count) || 0,
+  }));
+}
+
+export interface ImportGoodsQuote {
+  currency: string;
+  goodsLocal: number;
+  goodsIcan: number;
+  lines: StoreOrderSummary['lines'];
+}
+
+/** What the items in a cart cost, converted to ICAN at the live value of the store's currency. */
+export async function quoteImportGoods(supermarketId: string, cart: StoreCartLine[]): Promise<{ success: boolean; quote?: ImportGoodsQuote; error?: string }> {
+  const { data, error } = await supabase.rpc('mbg_quote_import_goods', {
+    p_supermarket_id: supermarketId,
+    p_cart: cart.map((l) => ({ product_id: l.productId, quantity: l.quantity })),
+  });
+  if (error) return { success: false, error: error.message };
+  if (!data?.success) return { success: false, error: data?.error };
+  return {
+    success: true,
+    quote: {
+      currency: data.currency, goodsLocal: Number(data.goods_local), goodsIcan: Number(data.goods_ican),
+      lines: (data.lines || []).map((l: any) => ({ productId: l.product_id, name: l.product_name, quantity: Number(l.quantity), unitPrice: Number(l.unit_price), lineTotal: Number(l.line_total) })),
+    },
+  };
 }
 
 export async function getMyJourneys(customerUserId: string): Promise<Journey[]> {

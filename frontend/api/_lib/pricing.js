@@ -123,7 +123,7 @@ export async function getUserCurrency(db, userId) {
  * `*Ugx` figures are the ICAN amounts valued at the live UGX price — kept for
  * the journey records, which are UGX-denominated.
  */
-export async function priceJourney(db, { pickupFareUgx, dropoffFareUgx, cargoFareUgx, offer, userId }) {
+export async function priceJourney(db, { pickupFareUgx, dropoffFareUgx, cargoFareUgx, offer, userId, goodsIcan = 0 }) {
   const [ugxPrice, flight] = await Promise.all([
     getIcanPrice(db, 'UGX'),
     fiatToIcan(db, offer.totalAmount, offer.totalCurrency),
@@ -135,10 +135,12 @@ export async function priceJourney(db, { pickupFareUgx, dropoffFareUgx, cargoFar
   const cargoIcan = ugxToIcan(cargoFareUgx);
   const dropoffIcan = ugxToIcan(dropoffFareUgx);
   const flightIcan = flight.ican;
-  const totalIcan = round8(pickupIcan + flightIcan + cargoIcan + dropoffIcan);
+  // Goods bought from a store abroad are priced in ICAN already (at the live value of the
+  // store's own currency), so they join the total as they are.
+  const totalIcan = round8(pickupIcan + flightIcan + cargoIcan + dropoffIcan + goodsIcan);
 
   const flightFareUgx = Math.round(flightIcan * icanPriceUgx);
-  const totalUgx = pickupFareUgx + flightFareUgx + cargoFareUgx + dropoffFareUgx;
+  const totalUgx = pickupFareUgx + flightFareUgx + cargoFareUgx + dropoffFareUgx + Math.round(goodsIcan * icanPriceUgx);
 
   // The customer's own currency is a courtesy view of an ICAN price that's
   // already final — if it can't be worked out, they still get the ICAN price.
@@ -148,14 +150,14 @@ export async function priceJourney(db, { pickupFareUgx, dropoffFareUgx, cargoFar
     const at = (ican) => Number((ican * pricePerIcan).toFixed(6));
     local = {
       currency, countryCode, pricePerIcan,
-      pickup: at(pickupIcan), flight: at(flightIcan), cargo: at(cargoIcan), dropoff: at(dropoffIcan), total: at(totalIcan),
+      pickup: at(pickupIcan), flight: at(flightIcan), cargo: at(cargoIcan), dropoff: at(dropoffIcan), goods: at(goodsIcan), total: at(totalIcan),
     };
   } catch (err) {
     console.warn('[pricing] no local-currency view for this customer:', err.message);
   }
 
   return {
-    pickupIcan, flightIcan, cargoIcan, dropoffIcan, totalIcan,
+    pickupIcan, flightIcan, cargoIcan, dropoffIcan, goodsIcan, totalIcan,
     flightFareUgx, totalUgx,
     icanPriceUgx,
     local,

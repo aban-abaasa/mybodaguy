@@ -41,6 +41,23 @@ export interface SupermarketProfile {
   latitude: number | null;
   longitude: number | null;
   background_image_url: string | null;
+  /** Where the store is, and the currency its prices are written in — set by the owner; a store with a country can be bought from abroad. */
+  country?: string | null;
+  price_currency?: string;
+}
+
+/** An order from a customer abroad, as the store sees it. */
+export interface StoreImportOrder {
+  journeyId: string;
+  createdAt: string;
+  transport: 'air' | 'sea';
+  orderStatus: 'held' | 'released' | 'refunded';
+  currency: string;
+  goodsLocal: number;
+  lines: Array<{ product_name: string; quantity: number }>;
+  destinationCountry: string | null;
+  courierStatus: string | null;
+  courierDue: string | null;
 }
 
 function mapProductRow(row: any, stockByProduct: Map<string, number>): Product {
@@ -239,12 +256,43 @@ export const productService = {
   async getSupermarketProfile(supermarketId: string): Promise<SupermarketProfile | null> {
     const { data, error } = await supabase
       .from('supermarkets')
-      .select('id, name, location, address, latitude, longitude, background_image_url')
+      .select('id, name, location, address, latitude, longitude, background_image_url, country, price_currency')
       .eq('id', supermarketId)
       .maybeSingle();
 
-    if (error) return null;
-    return data;
+    if (!error) return data;
+
+    // The country / currency columns come from ADD_JOURNEY_STORE_IMPORT.sql — until that has
+    // been run, the profile still loads without them.
+    const { data: basic, error: basicError } = await supabase
+      .from('supermarkets')
+      .select('id, name, location, address, latitude, longitude, background_image_url')
+      .eq('id', supermarketId)
+      .maybeSingle();
+    if (basicError) return null;
+    return basic;
+  },
+
+  // The store's country and price currency — what makes it a store customers abroad can
+  // buy from. Owner-only (the same RLS as the location above).
+  async updateStoreImportSettings(supermarketId: string, settings: { country: string | null; priceCurrency: string }): Promise<void> {
+    const currency = settings.priceCurrency.trim().toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency)) throw new Error('Enter the currency as a 3-letter code, e.g. GBP');
+    const { error } = await supabase.from('supermarkets').update({ country: settings.country, price_currency: currency }).eq('id', supermarketId);
+    if (error) throw error;
+  },
+
+  // Orders placed from abroad for this store (owner only). An empty list when there are none —
+  // or when the feature's SQL hasn't been run yet.
+  async listStoreImportOrders(supermarketId: string): Promise<StoreImportOrder[]> {
+    const { data, error } = await supabase.rpc('mbg_list_store_import_orders', { p_supermarket_id: supermarketId });
+    if (error) return [];
+    return (data || []).map((r: any) => ({
+      journeyId: r.journey_id, createdAt: r.created_at, transport: r.transport, orderStatus: r.order_status,
+      currency: r.currency, goodsLocal: Number(r.goods_local),
+      lines: Array.isArray(r.goods_snapshot) ? r.goods_snapshot : [],
+      destinationCountry: r.destination_country, courierStatus: r.courier_status, courierDue: r.courier_due,
+    }));
   },
 
   // Sets/updates the store's real pickup coordinates — the one thing that

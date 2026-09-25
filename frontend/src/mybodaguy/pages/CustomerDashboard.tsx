@@ -168,6 +168,11 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   // that component's in-memory state while actively booking, and is lost on
   // navigation or refresh.
   const [trackedRide, setTrackedRide] = useState<any>(null);
+  // A booked journey chosen from My Journeys (Orders) to open on the Book a
+  // Ride tab, where its live tracking screen lives.
+  const [openJourneyId, setOpenJourneyId] = useState<string | null>(null);
+  // Leaving the tab without pressing Back must not re-open that journey next visit.
+  useEffect(() => { if (activeTab !== 'book-ride') setOpenJourneyId(null); }, [activeTab]);
   // "Recent Rides" (Overview) starts collapsed — it's a summary card, not
   // the primary content of that tab, so it shouldn't eat vertical space
   // until someone actually wants to look at it.
@@ -610,7 +615,13 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             flight, driver at destination) is inbuilt here as a mode toggle,
             not a separate tab */}
         {activeTab === 'book-ride' && (
-          <EnhancedRideRequest customerId={user?.id} fixedServiceType="ride" showJourneyOption />
+          <EnhancedRideRequest
+            customerId={user?.id}
+            fixedServiceType="ride"
+            showJourneyOption
+            openJourneyId={openJourneyId}
+            onJourneyClosed={() => setOpenJourneyId(null)}
+          />
         )}
 
         {/* Delivery — same real matching-engine flow as Book a Ride, locked
@@ -667,7 +678,12 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         {activeTab === 'orders' && (
           <div className="space-y-4">
           {user?.id && <RefundableDeliveries customerId={user.id} />}
-          {user?.id && <JourneyTracker customerId={user.id} />}
+          {user?.id && (
+            <JourneyTracker
+              customerId={user.id}
+              onOpen={(id) => { setOpenJourneyId(id); setActiveTab('book-ride'); window.scrollTo({ top: 0 }); }}
+            />
+          )}
           <div className="classic-card p-5">
             <div className="mb-3">
               <SectionHeading>Rides &amp; Deliveries</SectionHeading>

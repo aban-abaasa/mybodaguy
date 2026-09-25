@@ -34,8 +34,17 @@ interface RideRow {
   power_type_requested: string | null;
   umbrella_requested: boolean;
   order_notes: string | null;
+  // A "Send a parcel" journey's courier ride: what is being carried, and for whom.
+  is_parcel?: boolean;
+  parcel_description?: string | null;
+  parcel_weight_kg?: number | null;
+  recipient_name?: string | null;
+  recipient_phone?: string | null;
   created_at: string;
 }
+
+const isPackageJob = (r: RideRow) => !!r.is_parcel || r.service_type === 'delivery';
+const requestLabel = (r: RideRow) => (r.is_parcel ? 'Parcel' : r.service_type === 'delivery' ? 'Delivery' : 'Ride');
 
 interface CustomerContact {
   userId: string;
@@ -294,10 +303,10 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
         <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center">
             <div className="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-orange-400 to-yellow-400 flex items-center justify-center text-white mb-4 animate-pulse">
-              {pending.service_type === 'delivery' ? <Package size={36} /> : <Bike size={36} />}
+              {isPackageJob(pending) ? <Package size={36} /> : <Bike size={36} />}
             </div>
             <h3 className="text-lg font-bold text-slate-800">
-              New {pending.service_type === 'delivery' ? 'Delivery' : 'Ride'} Request
+              New {requestLabel(pending)} Request
             </h3>
             <p className="text-sm text-slate-500 mb-4">Ringing…</p>
 
@@ -336,8 +345,8 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
             <div className="border-2 border-orange-400 bg-orange-50 rounded-xl p-5 shadow-md animate-pulse-slow">
               <div className="flex items-center justify-between mb-3">
                 <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-orange-500 text-white text-xs font-bold rounded-full">
-                  {pending.service_type === 'delivery' ? <Package size={12} /> : <Bike size={12} />}
-                  New {pending.service_type === 'delivery' ? 'Delivery' : 'Ride'} Request
+                  {isPackageJob(pending) ? <Package size={12} /> : <Bike size={12} />}
+                  New {requestLabel(pending)} Request
                 </span>
                 <span className="text-xs text-slate-500">{new Date(pending.created_at).toLocaleTimeString()}</span>
               </div>
@@ -494,6 +503,21 @@ function RideSummary({ ride, live }: { ride: RideRow; live?: { riderId: string; 
           <p className="text-sm font-medium text-slate-700">{ride.dropoff_location}</p>
         </div>
       </div>
+      {ride.is_parcel && (
+        <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2">
+          <Package size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+          <div className="min-w-0">
+            <p className="text-xs text-amber-700">Parcel{ride.parcel_weight_kg ? ` · ${Number(ride.parcel_weight_kg)} kg` : ''}</p>
+            {ride.parcel_description && <p className="text-sm font-medium text-slate-700">{ride.parcel_description}</p>}
+            {(ride.recipient_name || ride.recipient_phone) && (
+              <p className="text-xs text-slate-600">
+                For {ride.recipient_name || 'the recipient'}
+                {ride.recipient_phone && <> · <a href={`tel:${ride.recipient_phone}`} className="font-semibold text-orange-600">{ride.recipient_phone}</a></>}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
       {hasCoords && (
         <button
           type="button"

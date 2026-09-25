@@ -10,6 +10,7 @@ import ProductPicker, { CartLine } from './ProductPicker';
 import LocationPickerMap from './LocationPickerMap';
 import LiveTrackingMap from './LiveTrackingMap';
 import JourneyBookingFlow from './JourneyBookingFlow';
+import JourneyTracker from './JourneyTracker';
 import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type CountryLookup } from '../services/geocodeService';
 import { verifyPin } from '../services/pinService';
 import { productService, type Product } from '../services/productService';
@@ -113,6 +114,10 @@ interface EnhancedRideRequestProps {
    * separate top-level tab. Only passed from the "Book a Ride" tab —
    * Delivery doesn't offer it. */
   showJourneyOption?: boolean;
+  /** Opens an already-booked journey on its live tracking screen (chosen from My Journeys on another tab). */
+  openJourneyId?: string | null;
+  /** Called when the customer leaves that tracking screen, so the parent stops asking for it to be opened. */
+  onJourneyClosed?: () => void;
 }
 
 // Wallet payments carry the same platform fee the backend applies when it
@@ -147,8 +152,10 @@ function payableFare(fare: number, paymentMethod: 'wallet' | 'cash' | 'company',
   return paymentMethod === 'wallet' ? Math.round(fare * (1 + surchargePct / 100)) : fare;
 }
 
-export default function EnhancedRideRequest({ customerId, fixedServiceType, showJourneyOption }: EnhancedRideRequestProps) {
-  const [bookingMode, setBookingMode] = useState<'ride' | 'journey'>('ride');
+export default function EnhancedRideRequest({ customerId, fixedServiceType, showJourneyOption, openJourneyId, onJourneyClosed }: EnhancedRideRequestProps) {
+  const [bookingMode, setBookingMode] = useState<'ride' | 'journey'>(openJourneyId ? 'journey' : 'ride');
+  // The booked journey being tracked, when the customer opened one from My Journeys.
+  const [resumeJourneyId, setResumeJourneyId] = useState<string | null>(openJourneyId ?? null);
   const [pickup, setPickup] = useState('');
   const [dropoff, setDropoff] = useState('');
   const [pickupSuggestions, setPickupSuggestions] = useState<Location[]>([]);
@@ -1429,13 +1436,15 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     return (
       <div className="space-y-4">
         <button
-          onClick={() => setBookingMode('ride')}
+          onClick={() => { setBookingMode('ride'); setResumeJourneyId(null); onJourneyClosed?.(); }}
           className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1 font-medium"
         >
           <ArrowLeft size={16} /> Back to Book a Ride
         </button>
         <JourneyBookingFlow
+          key={resumeJourneyId ?? 'new-journey'}
           customerId={customerId}
+          resumeJourneyId={resumeJourneyId ?? undefined}
           initialBookingKind={prefillFromAutoRedirect ? (serviceType === 'delivery' ? 'ship' : 'fly') : undefined}
           initialShipPickup={
             prefillFromAutoRedirect && serviceType === 'delivery'
@@ -1599,6 +1608,16 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           </span>
           <ArrowRight size={16} className="flex-shrink-0 text-slate-400" />
         </button>
+      )}
+
+      {/* Journeys already booked, so they can be opened and tracked from here
+          too (renders nothing when there are none). */}
+      {showJourneyOption && customerId && (
+        <JourneyTracker
+          customerId={customerId}
+          compact
+          onOpen={(id) => { setResumeJourneyId(id); setBookingMode('journey'); }}
+        />
       )}
 
       {/* Service type — hidden when the parent tab already fixes it, so

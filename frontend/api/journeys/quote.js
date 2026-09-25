@@ -1,6 +1,6 @@
 import { applyCors } from '../_lib/cors.js';
 import { loadServer, sendMisconfigured } from '../_lib/loadServer.js';
-import { computeQuoteAmounts, RideCapacityError } from '../_lib/journeyQuote.js';
+import { computeQuoteAmounts, cleanParcel, loadStoreOrder, RideCapacityError, StoreOrderError } from '../_lib/journeyQuote.js';
 import { UnsupportedCurrencyError, PriceUnavailableError } from '../_lib/pricing.js';
 
 export default async function handler(req, res) {
@@ -19,11 +19,32 @@ export default async function handler(req, res) {
   if (!user) return;
 
   try {
-    const { customerUserId, pickup, offer, destination, cargoWeightKg } = req.body;
+    const { customerUserId, pickup: requestedPickup, offer, destination, cargoWeightKg } = req.body;
     // The customer can leave either airport ride out (own car / a friend drives them).
     const pickupRide = req.body.pickupRide !== false;
     const dropoffRide = req.body.dropoffRide !== false;
     if (!requireMatchingUser(user, customerUserId, res)) return;
+
+    // "Send a parcel": the ground legs carry goods (a courier), not the travellers.
+    const parcelMode = req.body.serviceMode === 'parcel';
+
+    // Goods bought from a registered store abroad ride on a parcel journey: the store is
+    // the pickup (its own location, priced by the database), and the goods join the total.
+    let storeOrder = null;
+    if (req.body.store) {
+      if (!parcelMode || !pickupRide) {
+        return res.status(400).json({ success: false, error: 'A store order is collected from the store by a courier, so the airport pickup courier must stay on.' });
+      }
+      storeOrder = await loadStoreOrder(supabaseAdmin, req.body.store);
+    }
+    const pickup = storeOrder ? { ...requestedPickup, ...storeOrder.pickup } : requestedPickup;
+
+    const parcelCheck = parcelMode
+      ? cleanParcel({ ...req.body.parcel, ...(storeOrder ? { description: storeOrder.description } : {}) }, { dropoffRide, weightKg: cargoWeightKg })
+      : null;
+    if (parcelCheck?.error) {
+      return res.status(400).json({ success: false, error: parcelCheck.error });
+    }
 
     const { data: customer } = await supabaseAdmin
       .from('mbg_customers')
@@ -35,7 +56,7 @@ export default async function handler(req, res) {
     }
 
     const { airport, pickupFareUgx, pickupKm, dropoffFareUgx, cargoFareUgx, weightKg, priced, partySize } =
-      await computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide });
+      await computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide, parcel: parcelMode, goodsIcan: storeOrder?.goodsIcan ?? 0 });
 
     res.status(200).json({
       success: true,
@@ -47,10 +68,23 @@ export default async function handler(req, res) {
         local: priced.local,
         pickupKm, pickupAirport: airport,
         pickup, destination, offer, cargoWeightKg: weightKg,
-        pickupRide, dropoffRide, partySize
+        pickupRide, dropoffRide, partySize,
+        serviceMode: parcelMode ? 'parcel' : 'travel',
+        ...(parcelMode ? { parcel: parcelCheck.parcel } : {}),
+        ...(storeOrder ? {
+          goodsIcan: priced.goodsIcan,
+          store: {
+            supermarketId: storeOrder.supermarketId, storeName: storeOrder.storeName, currency: storeOrder.currency,
+            goodsLocal: storeOrder.goodsLocal, goodsIcan: storeOrder.goodsIcan, lines: storeOrder.lines,
+            cart: storeOrder.lines.map((l) => ({ productId: l.productId, quantity: l.quantity }))
+          }
+        } : {})
       }
     });
   } catch (error) {
+    if (error instanceof StoreOrderError) {
+      return res.status(422).json({ success: false, error: error.message, code: 'store_order' });
+    }
     if (error instanceof RideCapacityError) {
       return res.status(422).json({ success: false, error: error.message, code: 'ride_capacity' });
     }

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { MapPin, Plane, Home, CreditCard, CheckCircle, Loader2, Star, Phone, Car, Search, Bike, Ship, Package, Printer, User, ArrowRight, Wallet, ShieldCheck, Truck, AlertTriangle } from 'lucide-react';
+import { MapPin, Plane, Home, CreditCard, CheckCircle, Loader2, Star, Phone, Car, Search, Bike, Ship, Package, Printer, User, ArrowRight, Wallet, ShieldCheck, Truck, AlertTriangle, ShoppingBag } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 import {
-  searchFlights, searchAirports, getJourneyQuote, confirmJourney, pollJourney, getMyJourneys, requestShipCargoJourney, PaymentTakenError,
-  type FlightOffer, type Journey, type JourneyQuote, type AirportSuggestion,
+  searchFlights, searchAirports, getJourneyQuote, confirmJourney, pollJourney, getMyJourneys, requestShipCargoJourney, quoteShipCargoJourney, PaymentTakenError,
+  type FlightOffer, type Journey, type JourneyQuote, type AirportSuggestion, type ShipCargoQuote, type ImportStore, type ImportGoodsQuote, type StoreCartLine,
 } from '../services/journeyService';
 import { geocodeAddress, reverseGeocodeCountry, searchCities, searchAddresses, type CountryLookup, type CitySuggestion, type AddressSuggestion, type GeocodeResult } from '../services/geocodeService';
 import { printShipTicket } from '../services/printTicket';
@@ -14,6 +14,7 @@ import JourneyRideOptions, { DEFAULT_PICKUP_PREFERENCES, preferencesForApi, desc
 import { getBalance, ICAN_TO_UGX, formatICAN, SOURCE_APP } from '../services/icanWalletService';
 import { payWithFlutterwave, generateTxRef } from '../services/flutterwaveClient';
 import LocationPickerMap from './LocationPickerMap';
+import ImportStoreStep from './ImportStoreStep';
 import FlightResultsPicker, { CabinPicker } from './FlightResultsPicker';
 import { JourneyStepper, StepCard, Field, TripSummary, ErrorBanner, FlightSkeleton, type StepperStep } from './JourneyUI';
 import { formatIcan, formatMoney, summarizeOffer, todayIsoDate, type CabinClass } from '../services/flightOffers';
@@ -26,6 +27,20 @@ const SHIP_BOOKING_TIMEOUT_MS = 60_000;
 const MAX_PARTY_SIZE = 9;
 /** One BodaGoEra car carries this many; a bigger party keeps the flight but makes its own way to/from the airport. */
 const CAR_SEATS = 4;
+
+/** Heaviest parcel a courier on a bike takes (mirrors PARCEL_BIKE_MAX_KG in api/_lib/journeyQuote.js). */
+const PARCEL_BIKE_MAX_KG = 30;
+
+type ShipLandVehicle = 'motorcycle' | 'car' | 'van' | 'truck' | null;
+
+/** Vehicles for a shipment's land legs. Weight limits mirror mbg_plan_ship_cargo_journey (SQL). */
+const SHIP_LAND_VEHICLES: Array<{ value: ShipLandVehicle; label: string; desc: string; maxKg: number; Icon: typeof Car }> = [
+  { value: null, label: 'Automatic', desc: 'Truck or van, matched on weight', maxKg: Infinity, Icon: Truck },
+  { value: 'motorcycle', label: 'Bike', desc: 'Small loads, up to 30 kg', maxKg: 30, Icon: Bike },
+  { value: 'car', label: 'Car', desc: 'Up to 200 kg', maxKg: 200, Icon: Car },
+  { value: 'van', label: 'Van', desc: 'Medium loads', maxKg: Infinity, Icon: Truck },
+  { value: 'truck', label: 'Truck', desc: 'Heavy loads', maxKg: Infinity, Icon: Truck },
+];
 
 type PassengerTitle = 'mr' | 'mrs' | 'ms' | 'miss' | 'dr';
 
@@ -57,6 +72,10 @@ interface JourneyBookingFlowProps {
   initialShipPickup?: JourneyPrefillPoint;
   initialShipDropoff?: JourneyPrefillPoint;
   initialPickupCountryIso2?: string;
+  // Opens an already-booked journey straight on its live tracking screen
+  // (from a journey's "Open & track" button in My Journeys) instead of the
+  // booking form.
+  resumeJourneyId?: string;
 }
 
 interface CustomerArea {
@@ -66,8 +85,9 @@ interface CustomerArea {
   longitude: number;
 }
 
-type BookingKind = 'fly' | 'ship';
-type Step = 'pickup' | 'flight' | 'destination' | 'review' | 'confirming' | 'tracking' | 'ship-details';
+type BookingKind = 'fly' | 'ship' | 'import';
+type Step = 'pickup' | 'flight' | 'destination' | 'review' | 'confirming' | 'tracking' | 'ship-details' | 'import-store' | 'import-delivery';
+type ShipBookingParams = Parameters<typeof requestShipCargoJourney>[0];
 
 export const legLabel: Record<string, string> = {
   local_pickup: 'Ride to the airport',
@@ -75,6 +95,12 @@ export const legLabel: Record<string, string> = {
   local_dropoff: 'Driver to your final address',
   road_leg: 'Road transport',
   sea_leg: 'Sea crossing',
+};
+
+// A parcel journey's ground legs are couriers, not rides for the traveller.
+const parcelLegLabel: Record<string, string> = {
+  local_pickup: 'Courier to the airport',
+  local_dropoff: 'Courier to the recipient',
 };
 
 const legIcon: Record<string, typeof Car> = {
@@ -100,14 +126,17 @@ export default function JourneyBookingFlow({
   initialShipPickup,
   initialShipDropoff,
   initialPickupCountryIso2,
+  resumeJourneyId,
 }: JourneyBookingFlowProps) {
   const [bookingKind, setBookingKind] = useState<BookingKind>(initialBookingKind || 'fly');
-  const [step, setStep] = useState<Step>(initialBookingKind === 'ship' ? 'ship-details' : 'pickup');
+  const [step, setStep] = useState<Step>(resumeJourneyId ? 'tracking' : initialBookingKind === 'ship' ? 'ship-details' : 'pickup');
   const [error, setError] = useState<string | null>(null);
 
   const changeBookingKind = (kind: BookingKind) => {
+    // Leaving "Buy abroad" for the plain Fly form: don't leave its store, parcel and address behind in it.
+    if (kind !== 'import' && importAirPrefilled) clearImportAirPrefill();
     setBookingKind(kind);
-    setStep(kind === 'fly' ? 'pickup' : 'ship-details');
+    setStep(kind === 'fly' ? 'pickup' : kind === 'ship' ? 'ship-details' : 'import-store');
     setError(null);
   };
 
@@ -120,6 +149,17 @@ export default function JourneyBookingFlow({
   const [cargoDescription, setCargoDescription] = useState('');
   const [shipCargoWeightKg, setShipCargoWeightKg] = useState('');
   const [submittingShip, setSubmittingShip] = useState(false);
+  // Land transport is optional at each end: a customer who brings the cargo to the
+  // departure port (or collects it at the arrival port) skips that road leg and is
+  // not charged for it. Without a leg there is no address, only a country.
+  const [shipPickupLeg, setShipPickupLeg] = useState(true);
+  const [shipDropoffLeg, setShipDropoffLeg] = useState(true);
+  const [shipLandVehicle, setShipLandVehicle] = useState<ShipLandVehicle>(null);
+  const [shipPickupCountryPick, setShipPickupCountryPick] = useState('');
+  const [shipDropoffCountryPick, setShipDropoffCountryPick] = useState('');
+  const [shipQuote, setShipQuote] = useState<ShipCargoQuote | null>(null);
+  const [shipQuoteError, setShipQuoteError] = useState<string | null>(null);
+  const [shipQuoting, setShipQuoting] = useState(false);
 
   useEffect(() => {
     if (!shipPickup) { setShipPickupCountry(null); return; }
@@ -131,8 +171,48 @@ export default function JourneyBookingFlow({
     reverseGeocodeCountry(shipDropoff.lat, shipDropoff.lng).then(setShipDropoffCountry);
   }, [shipDropoff?.lat, shipDropoff?.lng]);
 
-  const submitShipCargo = async () => {
-    if (!shipPickup || !shipDropoff || !shipPickupCountry || !shipDropoffCountry) return;
+  const shipFromCountry = shipPickupLeg ? shipPickupCountry?.name : shipPickupCountryPick;
+  const shipToCountry = shipDropoffLeg ? shipDropoffCountry?.name : shipDropoffCountryPick;
+  const shipWeight = Number(shipCargoWeightKg) || 0;
+  const shipVehicleOption = SHIP_LAND_VEHICLES.find((v) => v.value === shipLandVehicle) ?? SHIP_LAND_VEHICLES[0];
+  // A bike or car has no cargo capacity on file, so its limit is checked on the weight
+  // the customer states — which must therefore be given.
+  const shipVehicleProblem = (shipPickupLeg || shipDropoffLeg) && shipLandVehicle && (shipLandVehicle === 'motorcycle' || shipLandVehicle === 'car')
+    ? (shipWeight <= 0 ? `Enter the weight to use a ${shipVehicleOption.label.toLowerCase()}.` : shipWeight > shipVehicleOption.maxKg ? `A ${shipVehicleOption.label.toLowerCase()} carries up to ${shipVehicleOption.maxKg} kg — choose a bigger vehicle.` : null)
+    : null;
+  const shipReady = !!shipFromCountry && !!shipToCountry
+    && (!shipPickupLeg || !!shipPickup) && (!shipDropoffLeg || !!shipDropoff) && !shipVehicleProblem;
+  const shipRouteParams = {
+    pickupLat: shipPickupLeg ? shipPickup?.lat ?? null : null, pickupLng: shipPickupLeg ? shipPickup?.lng ?? null : null, pickupCountry: shipFromCountry || '',
+    dropoffLat: shipDropoffLeg ? shipDropoff?.lat ?? null : null, dropoffLng: shipDropoffLeg ? shipDropoff?.lng ?? null : null, dropoffCountry: shipToCountry || '',
+    pickupLeg: shipPickupLeg, dropoffLeg: shipDropoffLeg, vehicleType: shipLandVehicle,
+    cargoWeightKg: shipWeight > 0 ? shipWeight : undefined,
+  };
+
+  // Price the shipment as currently set up, so choices show their cost before anything is charged.
+  const shipRouteKey = JSON.stringify(shipRouteParams);
+  useEffect(() => {
+    setShipQuote(null);
+    setShipQuoteError(null);
+    if (bookingKind !== 'ship' || !shipReady) {
+      setShipQuoting(false);
+      return;
+    }
+    setShipQuoting(true);
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const result = await quoteShipCargoJourney(shipRouteParams);
+      if (cancelled) return;
+      setShipQuoting(false);
+      if (result.success && result.quote) setShipQuote(result.quote);
+      else setShipQuoteError(result.error || 'Could not price this shipment');
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookingKind, shipReady, shipRouteKey]);
+
+  const submitShipCargo = async (prepared?: ShipBookingParams) => {
+    if (!prepared && !shipReady) return;
     setError(null);
     setPaymentIssue(null);
     setSubmittingShip(true);
@@ -141,11 +221,11 @@ export default function JourneyBookingFlow({
       // spinning forever: after a minute, work out what actually happened.
       let timer: ReturnType<typeof setTimeout> | undefined;
       const outcome = await Promise.race([
-        requestShipCargoJourney({
-          pickupLocation: shipPickup.address, pickupLat: shipPickup.lat, pickupLng: shipPickup.lng, pickupCountry: shipPickupCountry.name,
-          dropoffLocation: shipDropoff.address, dropoffLat: shipDropoff.lat, dropoffLng: shipDropoff.lng, dropoffCountry: shipDropoffCountry.name,
+        requestShipCargoJourney(prepared ?? {
+          ...shipRouteParams,
+          pickupLocation: shipPickupLeg ? shipPickup?.address ?? '' : '',
+          dropoffLocation: shipDropoffLeg ? shipDropoff?.address ?? '' : '',
           cargoDescription: cargoDescription.trim() || undefined,
-          cargoWeightKg: shipCargoWeightKg ? Number(shipCargoWeightKg) : undefined,
         }),
         new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), SHIP_BOOKING_TIMEOUT_MS); }),
       ]);
@@ -201,6 +281,11 @@ export default function JourneyBookingFlow({
     );
   };
   useEffect(() => () => stopPollingRef.current?.(), []);
+  useEffect(() => {
+    if (resumeJourneyId) startTracking(resumeJourneyId);
+    // Only the journey being opened matters; startTracking is recreated every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeJourneyId]);
 
   const [areas, setAreas] = useState<CustomerArea[]>([]);
   const [selectedAreaId, setSelectedAreaId] = useState('');
@@ -217,9 +302,16 @@ export default function JourneyBookingFlow({
   // How many people are travelling on this one booking. It sizes the flight
   // search and decides what the ground rides can be (see CAR_SEATS).
   const [partySize, setPartySize] = useState(1);
-  const ridesAvailable = partySize <= CAR_SEATS;
+  // "Send a parcel": the two ground legs become couriers carrying goods, and the
+  // flight is booked as usual for whoever carries the parcel as baggage. A courier
+  // isn't limited by seats, and the vehicle is chosen for the parcel, not the party.
+  const [parcelMode, setParcelMode] = useState(false);
+  const [parcelDescription, setParcelDescription] = useState('');
+  const [recipientName, setRecipientName] = useState('');
+  const [recipientPhone, setRecipientPhone] = useState('');
+  const ridesAvailable = parcelMode || partySize <= CAR_SEATS;
   // A bike carries one traveller, so any party goes by car.
-  const effectiveVehicleType: 'motorcycle' | 'car' = partySize > 1 ? 'car' : pickupVehicleType;
+  const effectiveVehicleType: 'motorcycle' | 'car' = !parcelMode && partySize > 1 ? 'car' : pickupVehicleType;
   const [pickupPreferences, setPickupPreferences] = useState<PickupPreferences>(DEFAULT_PICKUP_PREFERENCES);
   // Which country the journey actually STARTS in — was hardcoded to
   // 'Uganda' throughout (geocoding, quote, and the leg mbg_dispatch_journey_leg
@@ -267,6 +359,11 @@ export default function JourneyBookingFlow({
   const [paymentIssue, setPaymentIssue] = useState<{ journeyId: string | null; certain: boolean; ticketIssued?: boolean } | null>(null);
   const [journey, setJourney] = useState<Journey | null>(null);
   const [customerName, setCustomerName] = useState('Customer');
+  // A resumed journey has no booking form behind it, so whether it is a ship
+  // shipment or a flight comes from the journey itself.
+  useEffect(() => {
+    if (resumeJourneyId && journey) setBookingKind(journey.legs.some((l) => l.leg_type === 'sea_leg') ? 'ship' : 'fly');
+  }, [resumeJourneyId, journey]);
 
   // Real traveler details — must match each passenger's ID/passport, since
   // this books actual seats with a real airline via Duffel. One entry per
@@ -577,15 +674,25 @@ export default function JourneyBookingFlow({
     }
   };
 
+  // What a parcel journey still needs before it can be priced. The weight is the
+  // journey's baggage weight, so it is charged like any extra baggage.
+  const parcelWeight = Number(flightCargoWeightKg) || 0;
+  const parcelProblem = !parcelMode ? null
+    : !parcelDescription.trim() ? 'Say what the parcel is.'
+    : parcelWeight <= 0 ? "Enter the parcel's weight."
+    : (wantPickupRide || wantDropoffRide) && effectiveVehicleType === 'motorcycle' && parcelWeight > PARCEL_BIKE_MAX_KG ? `A bike carries up to ${PARCEL_BIKE_MAX_KG} kg — choose a car for this parcel.`
+    : wantDropoffRide && (!recipientName.trim() || recipientPhone.replace(/\D/g, '').length < 7) ? "Enter the recipient's name and phone number."
+    : null;
+
   const buildQuote = async () => {
-    if (!selectedOffer || (wantPickupRide && !pickup)) return;
+    if (!selectedOffer || (wantPickupRide && !pickup) || parcelProblem) return;
     setError(null);
     setQuoting(true);
     try {
       const { quote } = await getJourneyQuote({
         customerUserId: customerId,
         pickup: wantPickupRide && pickup
-          ? { ...pickup, country: pickupCountry.name, vehicleType: effectiveVehicleType, preferences: preferencesForApi(pickupPreferences, effectiveVehicleType) }
+          ? { ...pickup, country: pickupCountry.name, vehicleType: effectiveVehicleType, preferences: preferencesForApi(parcelMode ? DEFAULT_PICKUP_PREFERENCES : pickupPreferences, effectiveVehicleType) }
           : { lat: null, lng: null, address: '', country: pickupCountry.name },
         offer: selectedOffer,
         // With no arrival ride there is no address to collect: the server records
@@ -596,6 +703,16 @@ export default function JourneyBookingFlow({
         cargoWeightKg: flightCargoWeightKg ? Number(flightCargoWeightKg) : undefined,
         pickupRide: wantPickupRide,
         dropoffRide: wantDropoffRide,
+        ...(importAir && importStore ? { store: { supermarketId: importStore.id, cart: importCart } } : {}),
+        ...(parcelMode ? {
+          serviceMode: 'parcel' as const,
+          parcel: {
+            description: parcelDescription.trim(),
+            recipientName: recipientName.trim(),
+            recipientPhone: recipientPhone.trim(),
+            vehicleType: wantPickupRide || wantDropoffRide ? effectiveVehicleType : null,
+          },
+        } : {}),
       });
       setQuote(quote);
       setStep('review');
@@ -654,14 +771,173 @@ export default function JourneyBookingFlow({
     }
   };
 
+  // ---- Buy abroad: goods from a registered store in another country, brought to the
+  // customer's door by AIR (the parcel journey: a traveller flying the route carries it
+  // as baggage, so this hands over to the flight steps) or by SEA (the ship-cargo
+  // journey, booked from here). Either way the customer pays goods + transport in ICAN.
+  const [importHomeCountry, setImportHomeCountry] = useState(COUNTRIES[0].name);
+  const [importStore, setImportStore] = useState<ImportStore | null>(null);
+  const [importCart, setImportCart] = useState<StoreCartLine[]>([]);
+  const [importGoods, setImportGoods] = useState<ImportGoodsQuote | null>(null);
+  const [importMethod, setImportMethod] = useState<'air' | 'sea'>('air');
+  const [importDropoff, setImportDropoff] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [importDropoffCountry, setImportDropoffCountry] = useState<CountryLookup | null>(null);
+  const [importWeightKg, setImportWeightKg] = useState('');
+  const [importRecipientName, setImportRecipientName] = useState('');
+  const [importRecipientPhone, setImportRecipientPhone] = useState('');
+  const [importVehicle, setImportVehicle] = useState<ShipLandVehicle>(null);
+  const [importShipQuote, setImportShipQuote] = useState<ShipCargoQuote | null>(null);
+  const [importShipQuoteError, setImportShipQuoteError] = useState<string | null>(null);
+  const [importShipQuoting, setImportShipQuoting] = useState(false);
+  // Set once the air path has filled the flight steps in, so leaving Buy abroad can clear it again.
+  const [importAirPrefilled, setImportAirPrefilled] = useState(false);
+
+  const isImport = bookingKind === 'import';
+  const importAir = isImport && importMethod === 'air';
+  const importSea = isImport && importMethod === 'sea';
+  const isFlyFlow = bookingKind === 'fly' || importAir;
+  const importWeight = Number(importWeightKg) || 0;
+
+  useEffect(() => {
+    if (!importDropoff) { setImportDropoffCountry(null); return; }
+    reverseGeocodeCountry(importDropoff.lat, importDropoff.lng).then(setImportDropoffCountry);
+  }, [importDropoff?.lat, importDropoff?.lng]);
+
+  // Whoever receives it is, by default, the customer themselves.
+  useEffect(() => {
+    if (step === 'import-delivery' && !importRecipientName && customerName && customerName !== 'Customer') setImportRecipientName(customerName);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, customerName]);
+
+  const importVehicleOption = SHIP_LAND_VEHICLES.find((v) => v.value === importVehicle) ?? SHIP_LAND_VEHICLES[0];
+  const importVehicleProblem = importSea && (importVehicle === 'motorcycle' || importVehicle === 'car')
+    ? (importWeight <= 0 ? `Enter the weight to use a ${importVehicleOption.label.toLowerCase()}.` : importWeight > importVehicleOption.maxKg ? `A ${importVehicleOption.label.toLowerCase()} carries up to ${importVehicleOption.maxKg} kg — choose a bigger vehicle.` : null)
+    : null;
+  const importRecipientOk = importRecipientName.trim().length > 0 && importRecipientPhone.replace(/\D/g, '').length >= 7;
+  const importSeaReady = importSea && !!importStore && !!importGoods && importCart.length > 0 && !!importDropoff && !!importDropoffCountry && !importVehicleProblem;
+  const importAirReady = importAir && !!importStore && !!importGoods && importCart.length > 0 && !!importDropoff && !!importDropoffCountry
+    && importWeight > 0 && importRecipientOk && !(pickupVehicleType === 'motorcycle' && importWeight > PARCEL_BIKE_MAX_KG);
+  const importSeaParams = importStore && importDropoff && importDropoffCountry ? {
+    pickupLat: importStore.latitude, pickupLng: importStore.longitude, pickupCountry: importStore.country,
+    dropoffLat: importDropoff.lat, dropoffLng: importDropoff.lng, dropoffCountry: importDropoffCountry.name,
+    pickupLeg: true, dropoffLeg: true, vehicleType: importVehicle,
+    cargoWeightKg: importWeight > 0 ? importWeight : undefined,
+    store: { supermarketId: importStore.id, cart: importCart },
+  } : null;
+
+  // Shipping for the sea route, priced before anything is charged (the goods are priced in the
+  // store step); together they are what "Pay" takes.
+  const importSeaKey = JSON.stringify(importSeaParams);
+  useEffect(() => {
+    setImportShipQuote(null);
+    setImportShipQuoteError(null);
+    if (!importSeaReady || !importSeaParams) {
+      setImportShipQuoting(false);
+      return;
+    }
+    setImportShipQuoting(true);
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const result = await quoteShipCargoJourney(importSeaParams);
+      if (cancelled) return;
+      setImportShipQuoting(false);
+      if (result.success && result.quote) setImportShipQuote(result.quote);
+      else setImportShipQuoteError(result.error || 'Could not price the shipping');
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [importSeaReady, importSeaKey]);
+
+  const payImportSea = () => {
+    if (!importSeaReady || !importSeaParams || !importStore || !importDropoff) return;
+    return submitShipCargo({
+      ...importSeaParams,
+      pickupLocation: importStore.address || importStore.name,
+      dropoffLocation: importDropoff.address,
+    });
+  };
+
+  // By air: hand over to the flight steps with everything already filled in — the store is the
+  // pickup, the delivery address is the arrival, and the basket is the parcel.
+  const startImportAir = () => {
+    if (!importAirReady || !importStore || !importDropoff || !importDropoffCountry) return;
+    setError(null);
+    const storeCountry = COUNTRIES.find((c) => c.name === importStore.country);
+    if (storeCountry) setPickupCountry(storeCountry);
+    setParcelMode(true);
+    setWantPickupRide(true);
+    setWantDropoffRide(true);
+    setSelectedAreaId('');
+    setManualAddress(importStore.address || importStore.name);
+    setManualPickup({ lat: importStore.latitude, lng: importStore.longitude, address: importStore.address || importStore.name });
+    setParcelDescription(importGoods ? importGoods.lines.map((l) => `${l.quantity}x ${l.name}`).join(', ').slice(0, 200) : importStore.name);
+    setFlightCargoWeightKg(String(importWeight));
+    setDestCountry(importDropoffCountry.name);
+    setDestCity('');
+    selectedDestinationAddressRef.current = importDropoff.address;
+    setDestAddress(importDropoff.address);
+    setDestPin(importDropoff);
+    setRecipientName(importRecipientName.trim());
+    setRecipientPhone(importRecipientPhone.trim());
+    // Home is usually Uganda: Entebbe is the arrival airport unless they choose another.
+    const home = COUNTRIES.find((c) => c.name === importDropoffCountry.name);
+    if (home?.iso2 === 'UG') {
+      setDestinationIata('EBB');
+      setDestinationLabel('Entebbe International Airport (EBB)');
+    } else {
+      setDestinationIata('');
+      setDestinationLabel(null);
+    }
+    clearFlightResults();
+    setImportAirPrefilled(true);
+    goToStep('flight');
+  };
+
+  /** Puts the flight steps back the way they were before "Buy abroad" filled them in. */
+  const clearImportAirPrefill = () => {
+    setParcelMode(false);
+    setManualAddress('');
+    setManualPickup(null);
+    setParcelDescription('');
+    setFlightCargoWeightKg('');
+    setDestCountry('');
+    setDestCity('');
+    setDestAddress('');
+    setDestPin(null);
+    setRecipientName('');
+    setRecipientPhone('');
+    clearFlightResults();
+    setImportAirPrefilled(false);
+  };
+
+  const landVehicleTiles = (value: ShipLandVehicle, onPick: (v: ShipLandVehicle) => void) => (
+    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" role="group" aria-label="Land transport vehicle">
+      {SHIP_LAND_VEHICLES.map(({ value: v, label, desc, Icon }) => (
+        <button
+          key={label}
+          type="button"
+          aria-pressed={value === v}
+          onClick={() => onPick(v)}
+          className={`classic-tile flex items-center gap-2.5 p-3 ${value === v ? 'is-active' : ''}`}
+        >
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40"><Icon size={18} /></span>
+          <span className="min-w-0">
+            <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{label}</span>
+            <span className="block text-[11px] leading-tight text-slate-500">{desc}</span>
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+
   const flowSteps: StepperStep[] = [
-    { id: 'pickup', label: 'Pickup' },
+    ...(importAir ? [] : [{ id: 'pickup', label: 'Pickup' }]),
     { id: 'flight', label: 'Flight' },
     { id: 'destination', label: 'Arrival' },
     { id: 'review', label: 'Pay' },
   ];
   const flowIndex = flowSteps.findIndex((s) => s.id === step);
-  const showStepper = bookingKind === 'fly' && flowIndex >= 0;
+  const showStepper = isFlyFlow && flowIndex >= 0;
   const selectedSummary = selectedOffer ? summarizeOffer(selectedOffer) : null;
   const destinationLine = [destAddress, destCity, destCountry].filter(Boolean).join(', ');
   const PickupVehicleIcon = effectiveVehicleType === 'car' ? Car : Bike;
@@ -671,10 +947,13 @@ export default function JourneyBookingFlow({
 
   // What's already been decided, kept in view while working on the next step.
   const tripItems: Array<{ icon: ReactNode; label: string; value: string }> = [];
-  if (bookingKind === 'fly' && partySize > 1 && (step === 'flight' || step === 'destination')) {
+  if (isFlyFlow && partySize > 1 && (step === 'flight' || step === 'destination')) {
     tripItems.push({ icon: <User size={15} />, label: 'Travellers', value: `${partySize} people on one booking` });
   }
-  if (bookingKind === 'fly' && (step === 'flight' || step === 'destination') && (pickup || !wantPickupRide)) {
+  if (importAir && importStore && (step === 'flight' || step === 'destination')) {
+    tripItems.push({ icon: <ShoppingBag size={15} />, label: 'Your order', value: `${importStore.name} · ${importStore.country}${importGoods ? ` · ${formatIcan(importGoods.goodsIcan)} ICAN` : ''}` });
+  }
+  if (isFlyFlow && !importAir && (step === 'flight' || step === 'destination') && (pickup || !wantPickupRide)) {
     tripItems.push({ icon: <PickupVehicleIcon size={15} />, label: 'To the airport', value: wantPickupRide && pickup ? pickup.address : 'Own way (no BodaGoEra ride)' });
   }
   if (step === 'destination' && selectedSummary) {
@@ -705,15 +984,19 @@ export default function JourneyBookingFlow({
         <h2 className="mt-1 font-classic-display text-[28px] font-bold leading-tight text-slate-800">Book a full journey</h2>
         <div className="landing-classic-divider mx-auto mt-3 max-w-[14rem]" />
         <p className="mx-auto mt-3 max-w-md text-[13px] leading-relaxed text-slate-500">
-          {bookingKind === 'ship'
-            ? 'Cargo collected from your door, carried across the water, and delivered at the other end.'
-            : 'A ride to the airport, a real flight, and a driver waiting when you land.'}
+          {bookingKind === 'import'
+            ? 'Buy from a store abroad and have it brought to your door, by air or by sea.'
+            : bookingKind === 'ship'
+            ? 'Cargo carried across the water, with land transport at either end if you want it.'
+            : parcelMode
+              ? 'A courier to the airport, a real flight, and a courier waiting when it lands.'
+              : 'A ride to the airport, a real flight, and a driver waiting when you land.'}
         </p>
       </header>
 
       {step !== 'tracking' && step !== 'confirming' && (
-        <div className="classic-card grid grid-cols-2 gap-1 !rounded-2xl p-1" role="group" aria-label="What are you booking?">
-          {([['fly', 'Fly', Plane], ['ship', 'Ship Cargo', Ship]] as const).map(([kind, label, Icon]) => {
+        <div className="classic-card grid grid-cols-3 gap-1 !rounded-2xl p-1" role="group" aria-label="What are you booking?">
+          {([['fly', 'Fly', Plane], ['ship', 'Ship Cargo', Ship], ['import', 'Buy abroad', ShoppingBag]] as const).map(([kind, label, Icon]) => {
             const active = bookingKind === kind;
             return (
               <button
@@ -767,26 +1050,281 @@ export default function JourneyBookingFlow({
 
       {tripItems.length > 0 && <TripSummary items={tripItems} />}
 
+      {isImport && (
+        <div hidden={step !== 'import-store'}>
+          <ImportStoreStep
+            homeCountry={importHomeCountry}
+            onHomeCountryChange={setImportHomeCountry}
+            store={importStore}
+            onStoreChange={setImportStore}
+            onCartChange={setImportCart}
+            goods={importGoods}
+            onGoodsChange={setImportGoods}
+            onContinue={() => goToStep('import-delivery')}
+          />
+        </div>
+      )}
+
+      {isImport && step === 'import-delivery' && importStore && importGoods && (
+        <StepCard
+          eyebrow="Buy abroad · 2 of 2"
+          title="Where should it be delivered?"
+          description="Set the address, choose how it travels, and see the whole price before you pay."
+          onBack={() => goToStep('import-store')}
+          backLabel="Basket"
+        >
+          <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#fbf3dc] p-3 text-sm text-[#5c4410]">
+            <span className="min-w-0 truncate font-semibold">{importStore.name} · {importCart.reduce((n, l) => n + l.quantity, 0)} item{importCart.reduce((n, l) => n + l.quantity, 0) === 1 ? '' : 's'}</span>
+            <span className="shrink-0 tabular-nums">{formatIcan(importGoods.goodsIcan)} ICAN</span>
+          </div>
+
+          <Field label="Delivery address" hint="Tap the map to drop a pin, or search for the place. Drag the pin to fine-tune it.">
+            <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
+              <LocationPickerMap
+                pickup={null}
+                dropoff={importDropoff ? { id: 'import_dropoff', name: importDropoff.address, area: importDropoff.address, fullAddress: importDropoff.address, coordinates: { lat: importDropoff.lat, lng: importDropoff.lng } } : null}
+                onPickupChange={() => {}}
+                onDropoffChange={(loc) => setImportDropoff({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
+                selectionMode="dropoff"
+                gpsTarget="dropoff"
+              />
+            </div>
+          </Field>
+          {importDropoffCountry && (
+            <p className="flex items-center justify-center gap-2 rounded-full bg-[#fbf3dc] px-3 py-1.5 text-xs font-semibold text-[#7a5a12]">
+              {importStore.country} <ArrowRight size={13} /> {importDropoffCountry.name}
+            </p>
+          )}
+
+          <Field label="Estimated weight (kg)" htmlFor="jb-import-weight" hint="Of the whole order. It sets the baggage charge by air and which vehicles can carry it.">
+            <input
+              id="jb-import-weight"
+              className="classic-input"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              placeholder="e.g. 4"
+              value={importWeightKg}
+              onChange={(e) => setImportWeightKg(e.target.value)}
+            />
+          </Field>
+
+          <div>
+            <span className="classic-label">How should it travel?</span>
+            <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="How it travels">
+              {([
+                { method: 'air', label: 'By air', desc: 'Fastest. A traveller flying the route carries it as baggage', Icon: Plane },
+                { method: 'sea', label: 'By sea', desc: 'Better for bulk. Cargo ship via the port, land transport both ends', Icon: Ship },
+              ] as const).map(({ method, label, desc, Icon }) => (
+                <button
+                  key={method}
+                  type="button"
+                  aria-pressed={importMethod === method}
+                  onClick={() => { setImportMethod(method); setError(null); }}
+                  className={`classic-tile flex items-center gap-3 p-3 text-left ${importMethod === method ? 'is-active' : ''}`}
+                >
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40"><Icon size={20} /></span>
+                  <span className="min-w-0">
+                    <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{label}</span>
+                    <span className="block text-[11px] leading-tight text-slate-500">{desc}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {importAir && (<>
+            <p className="rounded-2xl bg-[#fbf3dc] p-3 text-xs leading-relaxed text-[#5c4410]">
+              A BodaGoEra courier collects your order from {importStore.name} and takes it to the airport, where whoever is flying with it meets them. You book that flight in the next step — it can be you, or a friend or agent you name on the ticket. On landing, a courier brings it to the address above.
+            </p>
+            <div>
+              <span className="classic-label">Courier vehicle (both legs)</span>
+              <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="Courier vehicle">
+                {([
+                  { value: 'motorcycle', label: 'Bike', desc: `Small orders, up to ${PARCEL_BIKE_MAX_KG} kg`, Icon: Bike },
+                  { value: 'car', label: 'Car', desc: 'Bigger or awkward orders', Icon: Car },
+                ] as const).map(({ value, label, desc, Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    aria-pressed={pickupVehicleType === value}
+                    onClick={() => setPickupVehicleType(value)}
+                    className={`classic-tile flex items-center gap-3 p-3 ${pickupVehicleType === value ? 'is-active' : ''}`}
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40"><Icon size={20} /></span>
+                    <span className="min-w-0">
+                      <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{label}</span>
+                      <span className="block text-[11px] leading-tight text-slate-500">{desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {pickupVehicleType === 'motorcycle' && importWeight > PARCEL_BIKE_MAX_KG && (
+                <p role="alert" className="mt-2 text-xs font-medium text-red-600">A bike carries up to {PARCEL_BIKE_MAX_KG} kg — choose a car for this order.</p>
+              )}
+            </div>
+            <Field label="Recipient's name" htmlFor="jb-import-recipient" hint="Who the courier hands it to on arrival.">
+              <input id="jb-import-recipient" className="classic-input" maxLength={100} autoComplete="off" value={importRecipientName} onChange={(e) => setImportRecipientName(e.target.value)} />
+            </Field>
+            <Field label="Recipient's phone" htmlFor="jb-import-recipient-phone" hint="The courier calls this number on arrival. Include the country code.">
+              <input id="jb-import-recipient-phone" className="classic-input" type="tel" inputMode="tel" maxLength={30} autoComplete="off" placeholder="+256 7XX XXX XXX" value={importRecipientPhone} onChange={(e) => setImportRecipientPhone(e.target.value)} />
+            </Field>
+            <div className="space-y-2">
+              <button disabled={!importAirReady} onClick={startImportAir} className="classic-btn classic-btn-primary">
+                Choose the flight <ArrowRight size={18} />
+              </button>
+              {!importAirReady && (
+                <p className="text-center text-xs text-slate-500">
+                  {!importDropoff ? 'Set the delivery address on the map to continue.' : importWeight <= 0 ? 'Enter the order\'s weight to continue.' : !importRecipientOk ? 'Enter the recipient\'s name and phone number to continue.' : 'Choose a bigger courier vehicle to continue.'}
+                </p>
+              )}
+            </div>
+          </>)}
+
+          {importSea && (<>
+            <div>
+              <span className="classic-label">Land transport vehicle</span>
+              {landVehicleTiles(importVehicle, setImportVehicle)}
+              {importVehicleProblem && <p role="alert" className="mt-2 text-xs font-medium text-red-600">{importVehicleProblem}</p>}
+            </div>
+            {importShipQuote && (
+              <div className="classic-tile !cursor-default space-y-1.5 p-3.5 text-sm text-slate-600" aria-live="polite">
+                <div className="flex justify-between gap-3"><span>Goods from {importStore.name}</span><span className="tabular-nums">{formatIcan(importGoods.goodsIcan)} ICAN</span></div>
+                <div className="flex justify-between gap-3"><span>Courier to {importShipQuote.originPort.city} port</span><span className="tabular-nums">UGX {importShipQuote.pickupFareUgx.toLocaleString()}</span></div>
+                <div className="flex justify-between gap-3"><span>Sea crossing, {importShipQuote.originPort.city} → {importShipQuote.destPort.city}</span><span className="tabular-nums">UGX {importShipQuote.seaFareUgx.toLocaleString()}</span></div>
+                <div className="flex justify-between gap-3"><span>Delivery from {importShipQuote.destPort.city} port</span><span className="tabular-nums">UGX {importShipQuote.dropoffFareUgx.toLocaleString()}</span></div>
+                <div className="flex justify-between gap-3 border-t border-[#c4a052]/30 pt-1.5 font-semibold text-slate-800">
+                  <span>Total, paid from your wallet</span>
+                  <span className="tabular-nums">{formatIcan(importGoods.goodsIcan + importShipQuote.totalIcan)} ICAN</span>
+                </div>
+              </div>
+            )}
+            {importShipQuoteError && <p role="alert" className="text-center text-xs font-medium text-red-600">{importShipQuoteError}</p>}
+            <div className="space-y-2">
+              <button disabled={!importSeaReady || importShipQuoting || !importShipQuote || submittingShip} onClick={payImportSea} className="classic-btn classic-btn-primary">
+                {submittingShip || importShipQuoting ? <Loader2 className="animate-spin" size={18} /> : <Ship size={18} />}
+                {submittingShip ? 'Booking…' : importShipQuoting ? 'Pricing…' : importShipQuote ? `Pay ${formatIcan(importGoods.goodsIcan + importShipQuote.totalIcan)} ICAN & ship` : 'Pay & ship'}
+              </button>
+              {!importSeaReady && !importVehicleProblem && (
+                <p className="text-center text-xs text-slate-500">Set the delivery address on the map to see the shipping price.</p>
+              )}
+            </div>
+          </>)}
+        </StepCard>
+      )}
+
       {step === 'ship-details' && (
         <StepCard
           eyebrow="Cargo · by sea"
           title="What are you shipping?"
-          description="For real overseas cargo — pickup and destination in different countries not reachable by road. Routed automatically via a real seaport when needed."
+          description="For real overseas cargo — pickup and destination in different countries not reachable by road. Routed automatically via a real seaport. Choose whether we also move it over land at either end."
         >
-          <Field label="Pickup & destination" hint="Tap the map to set the destination, drag either pin to fine-tune.">
-            <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
-              <LocationPickerMap
-                pickup={shipPickup ? { id: 'ship_pickup', name: shipPickup.address, area: shipPickup.address, fullAddress: shipPickup.address, coordinates: { lat: shipPickup.lat, lng: shipPickup.lng } } : null}
-                dropoff={shipDropoff ? { id: 'ship_dropoff', name: shipDropoff.address, area: shipDropoff.address, fullAddress: shipDropoff.address, coordinates: { lat: shipDropoff.lat, lng: shipDropoff.lng } } : null}
-                onPickupChange={(loc) => setShipPickup({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
-                onDropoffChange={(loc) => setShipDropoff({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
-              />
-            </div>
-          </Field>
+          <div className="space-y-4">
+            {([
+              {
+                label: 'At the pickup end',
+                on: shipPickupLeg,
+                set: setShipPickupLeg,
+                options: [
+                  { on: true, title: 'Collect from my door', desc: 'A vehicle takes it to the departure port' },
+                  { on: false, title: "I'll bring it to the port", desc: 'No land leg booked or charged' },
+                ],
+              },
+              {
+                label: 'At the destination end',
+                on: shipDropoffLeg,
+                set: setShipDropoffLeg,
+                options: [
+                  { on: true, title: 'Deliver to the address', desc: 'A vehicle takes it from the arrival port' },
+                  { on: false, title: "We'll collect at the port", desc: 'No land leg booked or charged' },
+                ],
+              },
+            ] as const).map((group) => (
+              <div key={group.label}>
+                <span className="classic-label">{group.label}</span>
+                <div className="grid grid-cols-2 gap-2.5" role="group" aria-label={group.label}>
+                  {group.options.map((option) => (
+                    <button
+                      key={option.title}
+                      type="button"
+                      aria-pressed={group.on === option.on}
+                      onClick={() => { group.set(option.on); setError(null); }}
+                      className={`classic-tile p-3 text-left ${group.on === option.on ? 'is-active' : ''}`}
+                    >
+                      <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{option.title}</span>
+                      <span className="block text-[11px] leading-tight text-slate-500">{option.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
 
-          {(shipPickupCountry || shipDropoffCountry) && (
+          {(shipPickupLeg || shipDropoffLeg) && (
+            <div>
+              <span className="classic-label">Land transport vehicle</span>
+              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" role="group" aria-label="Land transport vehicle">
+                {SHIP_LAND_VEHICLES.map(({ value, label, desc, Icon }) => (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-pressed={shipLandVehicle === value}
+                    onClick={() => setShipLandVehicle(value)}
+                    className={`classic-tile flex items-center gap-2.5 p-3 ${shipLandVehicle === value ? 'is-active' : ''}`}
+                  >
+                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40">
+                      <Icon size={18} />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{label}</span>
+                      <span className="block text-[11px] leading-tight text-slate-500">{desc}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              {shipVehicleProblem && <p role="alert" className="mt-2 text-xs font-medium text-red-600">{shipVehicleProblem}</p>}
+            </div>
+          )}
+
+          {(shipPickupLeg || shipDropoffLeg) && (
+            <Field
+              label={shipPickupLeg && shipDropoffLeg ? 'Pickup & destination' : shipPickupLeg ? 'Pickup location' : 'Delivery location'}
+              hint={shipPickupLeg && shipDropoffLeg ? 'Tap the map to set the destination, drag either pin to fine-tune.' : 'Tap the map to set the pin, drag it to fine-tune.'}
+            >
+              <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
+                <LocationPickerMap
+                  key={`${shipPickupLeg}-${shipDropoffLeg}`}
+                  pickup={shipPickupLeg && shipPickup ? { id: 'ship_pickup', name: shipPickup.address, area: shipPickup.address, fullAddress: shipPickup.address, coordinates: { lat: shipPickup.lat, lng: shipPickup.lng } } : null}
+                  dropoff={shipDropoffLeg && shipDropoff ? { id: 'ship_dropoff', name: shipDropoff.address, area: shipDropoff.address, fullAddress: shipDropoff.address, coordinates: { lat: shipDropoff.lat, lng: shipDropoff.lng } } : null}
+                  onPickupChange={(loc) => setShipPickup({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
+                  onDropoffChange={(loc) => setShipDropoff({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
+                  selectionMode={shipDropoffLeg ? 'dropoff' : 'pickup'}
+                  autoLocateGPS={shipPickupLeg}
+                />
+              </div>
+            </Field>
+          )}
+
+          {!shipPickupLeg && (
+            <Field label="Shipping from (country)" htmlFor="jb-ship-from" hint="You bring the cargo to this country's departure port.">
+              <select id="jb-ship-from" className="classic-input" value={shipPickupCountryPick} onChange={(e) => setShipPickupCountryPick(e.target.value)}>
+                <option value="">Select a country</option>
+                {COUNTRIES.map((c) => <option key={c.iso2 || c.name} value={c.name}>{c.name}</option>)}
+              </select>
+            </Field>
+          )}
+          {!shipDropoffLeg && (
+            <Field label="Shipping to (country)" htmlFor="jb-ship-to" hint="The cargo is held at this country's arrival port for you to collect.">
+              <select id="jb-ship-to" className="classic-input" value={shipDropoffCountryPick} onChange={(e) => setShipDropoffCountryPick(e.target.value)}>
+                <option value="">Select a country</option>
+                {COUNTRIES.map((c) => <option key={c.iso2 || c.name} value={c.name}>{c.name}</option>)}
+              </select>
+            </Field>
+          )}
+
+          {(shipFromCountry || shipToCountry) && (
             <p className="flex items-center justify-center gap-2 rounded-full bg-[#fbf3dc] px-3 py-1.5 text-xs font-semibold text-[#7a5a12]">
-              {shipPickupCountry?.name || '…'} <ArrowRight size={13} /> {shipDropoffCountry?.name || '…'}
+              {shipFromCountry || '…'} <ArrowRight size={13} /> {shipToCountry || '…'}
             </p>
           )}
 
@@ -812,16 +1350,33 @@ export default function JourneyBookingFlow({
             />
           </Field>
 
+          {shipQuote && (
+            <div className="classic-tile !cursor-default space-y-1.5 p-3.5 text-sm text-slate-600" aria-live="polite">
+              {shipPickupLeg && <div className="flex justify-between gap-3"><span>Land transport to {shipQuote.originPort.city} port</span><span className="tabular-nums">UGX {shipQuote.pickupFareUgx.toLocaleString()}</span></div>}
+              <div className="flex justify-between gap-3"><span>Sea crossing, {shipQuote.originPort.city} → {shipQuote.destPort.city}</span><span className="tabular-nums">UGX {shipQuote.seaFareUgx.toLocaleString()}</span></div>
+              {shipDropoffLeg && <div className="flex justify-between gap-3"><span>Land transport from {shipQuote.destPort.city} port</span><span className="tabular-nums">UGX {shipQuote.dropoffFareUgx.toLocaleString()}</span></div>}
+              <div className="flex justify-between gap-3 border-t border-[#c4a052]/30 pt-1.5 font-semibold text-slate-800">
+                <span>Total, paid from your wallet</span>
+                <span className="tabular-nums">{formatIcan(shipQuote.totalIcan)} ICAN</span>
+              </div>
+            </div>
+          )}
+          {shipQuoteError && <p role="alert" className="text-center text-xs font-medium text-red-600">{shipQuoteError}</p>}
+
           <button
-            disabled={!shipPickup || !shipDropoff || !shipPickupCountry || !shipDropoffCountry || submittingShip}
-            onClick={submitShipCargo}
+            disabled={!shipReady || submittingShip || shipQuoting || !shipQuote}
+            onClick={() => submitShipCargo()}
             className="classic-btn classic-btn-primary"
           >
-            {submittingShip ? <Loader2 className="animate-spin" size={18} /> : <Ship size={18} />}
-            {submittingShip ? 'Booking…' : 'Ship this cargo'}
+            {submittingShip || shipQuoting ? <Loader2 className="animate-spin" size={18} /> : <Ship size={18} />}
+            {submittingShip ? 'Booking…' : shipQuoting ? 'Pricing…' : shipQuote ? `Ship this cargo · ${formatIcan(shipQuote.totalIcan)} ICAN` : 'Ship this cargo'}
           </button>
-          {(!shipPickup || !shipDropoff) && (
-            <p className="-mt-2 text-center text-xs text-slate-500">Set both pins on the map to continue.</p>
+          {!shipReady && !shipVehicleProblem && (
+            <p className="-mt-2 text-center text-xs text-slate-500">
+              {(shipPickupLeg && !shipPickup) || (shipDropoffLeg && !shipDropoff)
+                ? 'Set the pin on the map for each land leg to continue.'
+                : 'Choose the countries to continue.'}
+            </p>
           )}
         </StepCard>
       )}
@@ -830,12 +1385,83 @@ export default function JourneyBookingFlow({
         <StepCard
           eyebrow="Step 1 of 4"
           title="Where should we collect you?"
-          description="Your ride to the airport starts here — or skip it if someone else is taking you."
+          description={parcelMode
+            ? 'A courier collects the parcel here and takes it to the airport — or skip it if you are bringing it yourself.'
+            : 'Your ride to the airport starts here — or skip it if someone else is taking you.'}
         >
+          <div>
+            <span className="classic-label">What is this journey for?</span>
+            <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="Travel or send a parcel">
+              {([
+                { parcel: false, label: 'Travel', desc: 'Rides for you, and your flight', Icon: User },
+                { parcel: true, label: 'Send a parcel', desc: 'Couriers carry it; it flies as baggage', Icon: Package },
+              ] as const).map(({ parcel, label, desc, Icon }) => (
+                <button
+                  key={label}
+                  type="button"
+                  aria-pressed={parcelMode === parcel}
+                  onClick={() => { setParcelMode(parcel); setError(null); }}
+                  className={`classic-tile flex items-center gap-3 p-3 text-left ${parcelMode === parcel ? 'is-active' : ''}`}
+                >
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40">
+                    <Icon size={20} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{label}</span>
+                    <span className="block text-[11px] leading-tight text-slate-500">{desc}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            {parcelMode && (
+              <div className="mt-3 space-y-3.5">
+                <Field label="What are you sending?" htmlFor="jb-parcel-desc" hint="The courier is told what they are carrying. Its weight is asked on the flight step.">
+                  <input
+                    id="jb-parcel-desc"
+                    className="classic-input"
+                    maxLength={200}
+                    placeholder="e.g. documents, a laptop, spare parts"
+                    value={parcelDescription}
+                    onChange={(e) => setParcelDescription(e.target.value)}
+                  />
+                </Field>
+                {(wantPickupRide || wantDropoffRide) && (
+                  <div>
+                    <span className="classic-label">Courier vehicle (both legs)</span>
+                    <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="Courier vehicle">
+                      {([
+                        { value: 'motorcycle', label: 'Bike', desc: `Small parcels, up to ${PARCEL_BIKE_MAX_KG} kg`, Icon: Bike },
+                        { value: 'car', label: 'Car', desc: 'Bigger or awkward parcels', Icon: Car },
+                      ] as const).map(({ value, label, desc, Icon }) => (
+                        <button
+                          key={value}
+                          type="button"
+                          aria-pressed={effectiveVehicleType === value}
+                          onClick={() => setPickupVehicleType(value)}
+                          className={`classic-tile flex items-center gap-3 p-3 ${effectiveVehicleType === value ? 'is-active' : ''}`}
+                        >
+                          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40">
+                            <Icon size={20} />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{label}</span>
+                            <span className="block text-[11px] leading-tight text-slate-500">{desc}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           <Field
-            label="How many people are travelling?"
+            label={parcelMode ? 'How many people are flying?' : 'How many people are travelling?'}
             htmlFor="jb-party-size"
-            hint={partySize > 1
+            hint={parcelMode
+              ? 'Whoever flies carries the parcel as checked baggage. Everyone is booked on the same flight and you pay once.'
+              : partySize > 1
               ? (ridesAvailable
                 ? 'One car takes the whole party to the airport, and everyone is booked on the same flight.'
                 : `A BodaGoEra car seats up to ${CAR_SEATS}, so for ${partySize} travellers only the flights are booked — you make your own way to and from the airport.`)
@@ -884,11 +1510,11 @@ export default function JourneyBookingFlow({
           </Field>
 
           <div>
-            <span className="classic-label">How will you get to the airport?</span>
+            <span className="classic-label">{parcelMode ? 'How does the parcel get to the airport?' : 'How will you get to the airport?'}</span>
             <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="How you get to the airport">
               {([
-                { on: true, label: 'BodaGoEra ride', desc: partySize > 1 ? 'A car collects everyone' : 'A driver collects you' },
-                { on: false, label: 'My own way', desc: 'Own car or a friend drives me' },
+                { on: true, label: parcelMode ? 'BodaGoEra courier' : 'BodaGoEra ride', desc: parcelMode ? 'A rider collects the parcel' : partySize > 1 ? 'A car collects everyone' : 'A driver collects you' },
+                { on: false, label: parcelMode ? "I'll bring it myself" : 'My own way', desc: parcelMode ? 'You take it to the airport' : 'Own car or a friend drives me' },
               ] as const).map(({ on, label, desc }) => (
                 <button
                   key={label}
@@ -909,6 +1535,7 @@ export default function JourneyBookingFlow({
           </div>
 
           {wantPickupRide && (<>
+          {!parcelMode && (<>
           <div>
             <span className="classic-label">Ride to the airport</span>
             <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="Ride to the airport">
@@ -937,6 +1564,7 @@ export default function JourneyBookingFlow({
           </div>
 
           <JourneyRideOptions vehicleType={effectiveVehicleType} country={pickupCountry.name} value={pickupPreferences} onChange={setPickupPreferences} />
+          </>)}
 
           {areas.length > 0 && (
             <Field label="Saved places" htmlFor="jb-saved-area">
@@ -1013,7 +1641,7 @@ export default function JourneyBookingFlow({
 
           <div className="space-y-2">
             <button
-              disabled={wantPickupRide && ((!selectedAreaId && !manualAddress.trim()) || geocoding)}
+              disabled={(wantPickupRide && ((!selectedAreaId && !manualAddress.trim()) || geocoding)) || (parcelMode && !parcelDescription.trim())}
               onClick={goToFlightStep}
               className="classic-btn classic-btn-primary"
             >
@@ -1023,17 +1651,22 @@ export default function JourneyBookingFlow({
             {wantPickupRide && !selectedAreaId && !manualAddress.trim() && (
               <p className="text-center text-xs text-slate-500">Choose or enter a pickup location to continue.</p>
             )}
+            {parcelMode && !parcelDescription.trim() && (
+              <p className="text-center text-xs text-slate-500">Say what you are sending to continue.</p>
+            )}
           </div>
         </StepCard>
       )}
 
       {step === 'flight' && (
         <StepCard
-          eyebrow="Step 2 of 4"
+          eyebrow={importAir ? 'Buy abroad · flight' : 'Step 2 of 4'}
           title="Choose your flight"
-          description="Pick your route and date, and we'll show every airline flying it."
-          onBack={() => goToStep('pickup')}
-          backLabel="Pickup"
+          description={importAir
+            ? "Pick the route and date of whoever is flying your order in, and we'll show every airline flying it."
+            : "Pick your route and date, and we'll show every airline flying it."}
+          onBack={() => goToStep(importAir ? 'import-delivery' : 'pickup')}
+          backLabel={importAir ? 'Delivery' : 'Pickup'}
         >
           <AirportPicker
             label="From"
@@ -1080,9 +1713,11 @@ export default function JourneyBookingFlow({
             }}
           />
           <Field
-            label={partySize > 1 ? 'Extra baggage for everyone (kg) — optional' : 'Extra baggage (kg) — optional'}
+            label={parcelMode ? 'Parcel weight (kg)' : partySize > 1 ? 'Extra baggage for everyone (kg) — optional' : 'Extra baggage (kg) — optional'}
             htmlFor="jb-flight-cargo"
-            hint={partySize > 1
+            hint={parcelMode
+              ? 'The parcel flies as checked baggage. Each traveller has a free allowance; only what is beyond all of them is charged, as a per-kg platform surcharge added to your total.'
+              : partySize > 1
               ? 'The total weight for the whole party. Each traveller has their own free allowance; only what is beyond all of them is charged, as a per-kg platform surcharge added to your total.'
               : 'Anything beyond the free allowance. Charged as a per-kg platform surcharge, added to your total.'}
           >
@@ -1119,29 +1754,33 @@ export default function JourneyBookingFlow({
           <FlightResultsPicker offers={offers} selectedOffer={selectedOffer} onSelect={setSelectedOffer} travellers={partySize} />
 
           <button
-            disabled={!selectedOffer}
+            disabled={!selectedOffer || (parcelMode && parcelWeight <= 0)}
             onClick={() => goToStep('destination')}
             className="classic-btn classic-btn-primary"
           >
-            {selectedOffer ? <>Continue with {selectedOffer.carrier || 'this flight'} <ArrowRight size={18} /></> : 'Choose a flight to continue'}
+            {selectedOffer
+              ? (parcelMode && parcelWeight <= 0 ? "Enter the parcel's weight to continue" : <>Continue with {selectedOffer.carrier || 'this flight'} <ArrowRight size={18} /></>)
+              : 'Choose a flight to continue'}
           </button>
         </StepCard>
       )}
 
       {step === 'destination' && (
         <StepCard
-          eyebrow="Step 3 of 4"
-          title="Where are you headed?"
-          description="A driver is dispatched automatically once you land — timed off your actual arrival, and re-timed if your flight is delayed."
+          eyebrow={importAir ? 'Buy abroad · arrival' : 'Step 3 of 4'}
+          title={importAir ? 'Where is it going?' : 'Where are you headed?'}
+          description={parcelMode
+            ? 'A courier is dispatched automatically once the flight lands — timed off the actual arrival, and re-timed if the flight is delayed.'
+            : 'A driver is dispatched automatically once you land — timed off your actual arrival, and re-timed if your flight is delayed.'}
           onBack={() => goToStep('flight')}
           backLabel="Flight"
         >
           <div>
-            <span className="classic-label">When you land</span>
+            <span className="classic-label">{parcelMode ? 'When the parcel lands' : 'When you land'}</span>
             <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="What happens when you land">
               {([
-                { on: true, label: 'BodaGoEra ride', desc: partySize > 1 ? 'A car is waiting for everyone' : 'A driver is waiting for you' },
-                { on: false, label: partySize > 1 ? 'Someone collects us' : 'Someone collects me', desc: partySize > 1 ? 'Own car or a friend picks us up' : 'Own car or a friend picks me up' },
+                { on: true, label: parcelMode ? 'BodaGoEra courier' : 'BodaGoEra ride', desc: parcelMode ? 'A rider takes it to the recipient' : partySize > 1 ? 'A car is waiting for everyone' : 'A driver is waiting for you' },
+                { on: false, label: parcelMode ? 'Someone collects it' : partySize > 1 ? 'Someone collects us' : 'Someone collects me', desc: parcelMode ? 'The recipient meets you at the airport' : partySize > 1 ? 'Own car or a friend picks us up' : 'Own car or a friend picks me up' },
               ] as const).map(({ on, label, desc }) => (
                 <button
                   key={label}
@@ -1158,7 +1797,7 @@ export default function JourneyBookingFlow({
             </div>
             {!wantDropoffRide && (
               <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                Your flight is booked to {destinationLabel || 'your arrival airport'} and no ride is booked or charged on arrival.
+                Your flight is booked to {destinationLabel || 'your arrival airport'} and no {parcelMode ? 'courier' : 'ride'} is booked or charged on arrival.
               </p>
             )}
           </div>
@@ -1230,27 +1869,54 @@ export default function JourneyBookingFlow({
               </p>
             </div>
           )}
+          {parcelMode && (<>
+          <Field label="Recipient's name" htmlFor="jb-recipient-name" hint="Who the courier hands the parcel to.">
+            <input
+              id="jb-recipient-name"
+              className="classic-input"
+              maxLength={100}
+              autoComplete="off"
+              value={recipientName}
+              onChange={(e) => setRecipientName(e.target.value)}
+            />
+          </Field>
+          <Field label="Recipient's phone" htmlFor="jb-recipient-phone" hint="The courier calls this number on arrival. Include the country code.">
+            <input
+              id="jb-recipient-phone"
+              className="classic-input"
+              type="tel"
+              inputMode="tel"
+              maxLength={30}
+              autoComplete="off"
+              placeholder="+256 7XX XXX XXX"
+              value={recipientPhone}
+              onChange={(e) => setRecipientPhone(e.target.value)}
+            />
+          </Field>
+          </>)}
           </>)}
 
           <div className="space-y-2">
             <button
-              disabled={(wantDropoffRide && (!destCountry || !destAddress)) || quoting}
+              disabled={(wantDropoffRide && (!destCountry || !destAddress)) || !!parcelProblem || quoting}
               onClick={buildQuote}
               className="classic-btn classic-btn-primary"
             >
               {quoting ? <Loader2 className="animate-spin" size={18} /> : null}
               {quoting ? 'Pricing your journey…' : <>See my price <ArrowRight size={18} /></>}
             </button>
-            {wantDropoffRide && (!destCountry || !destAddress) && (
-              <p className="text-center text-xs text-slate-500">Choose a country and enter where you'll be staying.</p>
-            )}
+            {wantDropoffRide && (!destCountry || !destAddress) ? (
+              <p className="text-center text-xs text-slate-500">{parcelMode ? 'Choose a country and enter where the parcel is going.' : "Choose a country and enter where you'll be staying."}</p>
+            ) : parcelProblem ? (
+              <p role="alert" className="text-center text-xs font-medium text-red-600">{parcelProblem}</p>
+            ) : null}
           </div>
         </StepCard>
       )}
 
       {step === 'review' && quote && (
         <StepCard
-          eyebrow="Step 4 of 4"
+          eyebrow={importAir ? 'Buy abroad · pay' : 'Step 4 of 4'}
           title="Review & pay"
           description="Your whole journey, door to door."
           onBack={() => goToStep('destination')}
@@ -1259,7 +1925,7 @@ export default function JourneyBookingFlow({
           <ol>
             {[
               ...(quote.pickupRide !== false
-                ? [{ key: 'pickup', icon: <PickupVehicleIcon size={16} />, title: 'Ride to the airport', detail: [pickup?.address, quote.pickupAirport?.name && `→ ${quote.pickupAirport.name}${quote.pickupKm ? ` (${quote.pickupKm} km)` : ''}`, describePreferences(pickupPreferences, effectiveVehicleType).join(', '), 'Driver is sent shortly before you need to leave'].filter(Boolean).join(' · '), ican: quote.pickupIcan, local: quote.local?.pickup, ugx: quote.pickupFareUgx }]
+                ? [{ key: 'pickup', icon: <PickupVehicleIcon size={16} />, title: quote.serviceMode === 'parcel' ? 'Courier to the airport' : 'Ride to the airport', detail: [pickup?.address, quote.pickupAirport?.name && `→ ${quote.pickupAirport.name}${quote.pickupKm ? ` (${quote.pickupKm} km)` : ''}`, quote.serviceMode === 'parcel' ? quote.parcel?.description : describePreferences(pickupPreferences, effectiveVehicleType).join(', '), quote.serviceMode === 'parcel' ? 'A courier is sent shortly before the parcel has to leave' : 'Driver is sent shortly before you need to leave'].filter(Boolean).join(' · '), ican: quote.pickupIcan, local: quote.local?.pickup, ugx: quote.pickupFareUgx }]
                 : []),
               {
                 key: 'flight',
@@ -1275,10 +1941,17 @@ export default function JourneyBookingFlow({
                 ugx: quote.flightFareUgx,
               },
               ...(quote.cargoFareUgx > 0
-                ? [{ key: 'bag', icon: <Package size={16} />, title: 'Extra baggage', detail: `${quote.cargoWeightKg} kg`, ican: quote.cargoIcan, local: quote.local?.cargo, ugx: quote.cargoFareUgx }]
+                ? [{ key: 'bag', icon: <Package size={16} />, title: quote.serviceMode === 'parcel' ? 'Parcel (extra baggage)' : 'Extra baggage', detail: `${quote.cargoWeightKg} kg`, ican: quote.cargoIcan, local: quote.local?.cargo, ugx: quote.cargoFareUgx }]
+                : []),
+              ...(quote.store
+                ? [{
+                    key: 'goods', icon: <ShoppingBag size={16} />, title: `Goods · ${quote.store.storeName}`,
+                    detail: `${quote.store.lines.map((l) => `${l.quantity}× ${l.name}`).join(', ')} · ${quote.store.currency} ${quote.store.goodsLocal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                    ican: quote.store.goodsIcan, local: quote.local?.goods, ugx: Math.round(quote.store.goodsIcan * (quote.icanPriceUgx || 0)),
+                  }]
                 : []),
               ...(quote.dropoffRide !== false
-                ? [{ key: 'dropoff', icon: <Home size={16} />, title: partySize > 1 ? 'Car on arrival' : 'Driver on arrival', detail: destinationLine, ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx }]
+                ? [{ key: 'dropoff', icon: <Home size={16} />, title: quote.serviceMode === 'parcel' ? 'Courier on arrival' : partySize > 1 ? 'Car on arrival' : 'Driver on arrival', detail: quote.serviceMode === 'parcel' && quote.parcel?.recipientName ? `${destinationLine} · for ${quote.parcel.recipientName}` : destinationLine, ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx }]
                 : []),
             ].map((leg, i, all) => (
               <li key={leg.key} className="relative flex gap-3 pb-5 last:pb-0">
@@ -1351,7 +2024,7 @@ export default function JourneyBookingFlow({
 
           <div className="space-y-3.5">
             <div className="flex items-center gap-3">
-              <h4 className="flex items-center gap-2 font-classic-display text-lg font-semibold text-slate-800"><User size={16} /> {partySize > 1 ? 'Traveller details' : 'Passenger details'}</h4>
+              <h4 className="flex items-center gap-2 font-classic-display text-lg font-semibold text-slate-800"><User size={16} /> {quote.serviceMode === 'parcel' ? 'Who is flying with the parcel' : partySize > 1 ? 'Traveller details' : 'Passenger details'}</h4>
               <div className="landing-classic-divider flex-1" />
             </div>
             <p className="text-xs leading-relaxed text-slate-500">
@@ -1460,7 +2133,7 @@ export default function JourneyBookingFlow({
                 <h3 className="font-classic-display text-[22px] font-bold leading-tight">Your journey</h3>
               </div>
             </div>
-            {journey && bookingKind === 'fly' && journey.legs.some((l) => l.leg_type === 'flight' && l.flight_booking) && (
+            {journey && isFlyFlow && journey.legs.some((l) => l.leg_type === 'flight' && l.flight_booking) && (
               <div className="relative mt-4">
                 <AirTicketButton
                   journeyId={journey.id}
@@ -1468,7 +2141,8 @@ export default function JourneyBookingFlow({
                 />
               </div>
             )}
-            {journey && bookingKind === 'ship' && (
+            {/* The waybill is printed from the booking form's fields, which a resumed journey doesn't have. */}
+            {journey && bookingKind === 'ship' && !resumeJourneyId && (
               <button
                 type="button"
                 onClick={() => {
@@ -1503,10 +2177,16 @@ export default function JourneyBookingFlow({
             )
           ) : (
             <div className="space-y-3">
-              {bookingKind === 'ship' && journey.total_fare_ican > 0 && (
+              {(bookingKind === 'ship' || importSea) && journey.total_fare_ican > 0 && (
                 <div className="flex justify-between gap-3 rounded-2xl border border-[#c4a052]/40 bg-[#fbf3dc] p-3.5 text-sm text-[#5c4410]">
-                  <span>Charged automatically from your ICAN wallet</span>
+                  <span>{importSea ? 'Shipping, charged from your ICAN wallet' : 'Charged automatically from your ICAN wallet'}</span>
                   <span className="shrink-0 font-semibold tabular-nums">{journey.total_fare_ican.toFixed(4)} ICAN (UGX {journey.total_fare_ugx.toLocaleString()})</span>
+                </div>
+              )}
+              {importSea && importGoods && (
+                <div className="flex justify-between gap-3 rounded-2xl border border-[#c4a052]/40 bg-[#fbf3dc] p-3.5 text-sm text-[#5c4410]">
+                  <span>Goods from {importStore?.name}, paid to the store once collected</span>
+                  <span className="shrink-0 font-semibold tabular-nums">{formatIcan(importGoods.goodsIcan)} ICAN</span>
                 </div>
               )}
               <ol className="classic-card p-4">
@@ -1522,7 +2202,7 @@ export default function JourneyBookingFlow({
                       <div className="min-w-0 flex-1 space-y-2">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <p className="font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{legLabel[leg.leg_type]}</p>
+                            <p className="font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{(parcelMode && parcelLegLabel[leg.leg_type]) || legLabel[leg.leg_type]}</p>
                             {leg.flight_booking?.pnr && (
                               <p className="mt-0.5 text-xs text-slate-500">Booking reference <span className="font-semibold tracking-wider text-slate-700">{leg.flight_booking.pnr}</span></p>
                             )}

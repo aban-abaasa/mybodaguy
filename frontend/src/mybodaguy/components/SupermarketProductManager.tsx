@@ -8,7 +8,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Plus, Pencil, Trash2, X, Image as ImageIcon, Package, Camera, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
-import { productService, Product, ProductInput, SupermarketProfile } from '../services/productService';
+import { productService, Product, ProductInput, SupermarketProfile, StoreImportOrder } from '../services/productService';
+import { reverseGeocodeCountry } from '../services/geocodeService';
 import LocationPickerMap from './LocationPickerMap';
 import type { Location } from '../data/mockLocations';
 
@@ -23,6 +24,11 @@ export default function SupermarketProductManager({ supermarketId, supermarketNa
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Product | 'new' | null>(null);
+  // The currency this store's prices are written in (UGX until the owner sets another).
+  const [currency, setCurrency] = useState('UGX');
+  useEffect(() => {
+    productService.getSupermarketProfile(supermarketId).then((p) => { if (p?.price_currency) setCurrency(p.price_currency); });
+  }, [supermarketId]);
 
   const load = async () => {
     setLoading(true);
@@ -60,7 +66,8 @@ export default function SupermarketProductManager({ supermarketId, supermarketNa
 
   return (
     <div className="space-y-4">
-      <StoreLocationEditor supermarketId={supermarketId} />
+      <StoreLocationEditor supermarketId={supermarketId} onCurrencyChange={setCurrency} />
+      <StoreImportOrders supermarketId={supermarketId} />
       <StoreBackgroundEditor supermarketId={supermarketId} />
 
       <div className="flex items-center justify-between">
@@ -105,7 +112,7 @@ export default function SupermarketProductManager({ supermarketId, supermarketNa
               <div className="p-3">
                 <p className="font-semibold text-slate-800 text-sm truncate">{p.name}</p>
                 <p className="text-xs text-slate-400 truncate">{p.category || 'Uncategorized'}</p>
-                <p className="font-bold text-orange-600 text-sm mt-1">UGX {Number(p.price_ugx).toLocaleString()}</p>
+                <p className="font-bold text-orange-600 text-sm mt-1">{currency} {Number(p.price_ugx).toLocaleString()}</p>
                 <p className="text-[11px] text-slate-400">{p.stock_qty} in stock</p>
                 <div className="flex items-center gap-1.5 mt-2">
                   <button onClick={() => setEditing(p)} className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-slate-100 hover:bg-slate-200 rounded-lg text-xs font-medium">
@@ -128,6 +135,7 @@ export default function SupermarketProductManager({ supermarketId, supermarketNa
         <ProductEditModal
           supermarketId={supermarketId}
           product={editing === 'new' ? null : editing}
+          currency={currency}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); load(); }}
         />
@@ -137,10 +145,11 @@ export default function SupermarketProductManager({ supermarketId, supermarketNa
 }
 
 function ProductEditModal({
-  supermarketId, product, onClose, onSaved,
+  supermarketId, product, currency, onClose, onSaved,
 }: {
   supermarketId: string;
   product: Product | null;
+  currency: string;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -268,7 +277,7 @@ function ProductEditModal({
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Price (UGX) *</label>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Price ({currency}) *</label>
               <input
                 type="number" min="0" value={price}
                 onChange={(e) => setPrice(e.target.value)}
@@ -327,14 +336,18 @@ function ProductEditModal({
 // (EnhancedRideRequest.tsx) can't rank or even show this store by distance,
 // and a delivery's pickup point falls back to geocoding the store's address
 // text on every order instead of using an exact, reliable pin.
-function StoreLocationEditor({ supermarketId }: { supermarketId: string }) {
+function StoreLocationEditor({ supermarketId, onCurrencyChange }: { supermarketId: string; onCurrencyChange: (currency: string) => void }) {
   const [profile, setProfile] = useState<SupermarketProfile | null>(null);
   const [editing, setEditing] = useState(false);
   const [pin, setPin] = useState<Location | null>(null);
   const [saving, setSaving] = useState(false);
+  const [priceCurrency, setPriceCurrency] = useState('UGX');
 
   useEffect(() => {
-    productService.getSupermarketProfile(supermarketId).then(setProfile);
+    productService.getSupermarketProfile(supermarketId).then((p) => {
+      setProfile(p);
+      if (p?.price_currency) setPriceCurrency(p.price_currency);
+    });
   }, [supermarketId]);
 
   const hasLocation = profile?.latitude != null && profile?.longitude != null;
@@ -360,7 +373,17 @@ function StoreLocationEditor({ supermarketId }: { supermarketId: string }) {
         address: pin.fullAddress,
       });
       setProfile(p => p ? { ...p, latitude: pin.coordinates.lat, longitude: pin.coordinates.lng, address: pin.fullAddress } : p);
-      toast.success('Store location saved');
+      // The country comes from where the pin is, and the currency is what the owner says their
+      // prices are in: together they let customers abroad buy from this store.
+      try {
+        const country = await reverseGeocodeCountry(pin.coordinates.lat, pin.coordinates.lng);
+        await productService.updateStoreImportSettings(supermarketId, { country: country?.name ?? null, priceCurrency });
+        setProfile(p => p ? { ...p, country: country?.name ?? null, price_currency: priceCurrency.toUpperCase() } : p);
+        onCurrencyChange(priceCurrency.toUpperCase());
+        toast.success('Store location saved');
+      } catch (settingsError: any) {
+        toast.warning(`Location saved, but the country and currency could not be: ${settingsError.message || 'try again'}`);
+      }
       setEditing(false);
     } catch (e: any) {
       toast.error(e.message || 'Failed to save location');
@@ -378,7 +401,7 @@ function StoreLocationEditor({ supermarketId }: { supermarketId: string }) {
         </p>
         <p className="text-xs text-slate-500 truncate">
           {hasLocation
-            ? (profile?.address || 'Set — findable in nearest-store search and delivery pickup auto-fills')
+            ? ((profile?.address || 'Set — findable in nearest-store search and delivery pickup auto-fills') + (profile?.country ? ` · ${profile.country}, prices in ${profile.price_currency || 'UGX'}` : ''))
             : "Not set — customers won't find this store in nearest-store search"}
         </p>
       </div>
@@ -410,6 +433,18 @@ function StoreLocationEditor({ supermarketId }: { supermarketId: string }) {
               gpsTarget="pickup"
             />
             {pin && <p className="text-xs text-slate-500 mt-2 truncate">📍 {pin.fullAddress}</p>}
+            <div className="mt-3">
+              <label className="block text-sm font-medium text-slate-700 mb-1" htmlFor="store-price-currency">Currency your prices are written in</label>
+              <input
+                id="store-price-currency"
+                value={priceCurrency}
+                onChange={(e) => setPriceCurrency(e.target.value.toUpperCase().slice(0, 3))}
+                maxLength={3}
+                placeholder="UGX"
+                className="w-28 px-3 py-2 border border-slate-300 rounded-lg text-sm uppercase focus:ring-2 focus:ring-orange-400 outline-none"
+              />
+              <p className="text-xs text-slate-500 mt-1">Customers in other countries pay in ICAN, converted from this at its live value — so a UK store enters GBP.</p>
+            </div>
             <div className="flex gap-3 pt-4">
               <button onClick={() => setEditing(false)} disabled={saving} className="flex-1 py-2.5 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 disabled:opacity-50">
                 Cancel
@@ -425,6 +460,56 @@ function StoreLocationEditor({ supermarketId }: { supermarketId: string }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Orders from customers abroad (the "Buy abroad" flow in Book a Journey): what to
+// prepare, and when the courier comes. The goods money is held and paid to the
+// store's business wallet once the courier has collected the order.
+function StoreImportOrders({ supermarketId }: { supermarketId: string }) {
+  const [orders, setOrders] = useState<StoreImportOrder[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => productService.listStoreImportOrders(supermarketId).then((rows) => { if (!cancelled) setOrders(rows); });
+    load();
+    const timer = setInterval(load, 30000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [supermarketId]);
+
+  // Nothing to show (or the feature isn't installed yet): stay out of the way.
+  if (!orders || orders.length === 0) return null;
+
+  const statusText = (o: StoreImportOrder) => {
+    if (o.orderStatus === 'released') return 'Collected — payment released to your wallet';
+    if (o.orderStatus === 'refunded') return 'Cancelled — refunded';
+    if (o.courierStatus === 'in_progress') return 'Courier is on the way with it';
+    if (o.courierStatus === 'dispatched') return 'Courier assigned — have it ready';
+    return o.courierDue ? `Courier due ${new Date(o.courierDue).toLocaleString()}` : 'Courier being arranged';
+  };
+
+  return (
+    <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 space-y-3">
+      <p className="text-sm font-semibold text-orange-800 flex items-center gap-1.5">
+        <Package size={15} /> Orders from abroad ({orders.filter((o) => o.orderStatus === 'held').length} to prepare)
+      </p>
+      {orders.map((o) => (
+        <div key={o.journeyId} className="rounded-lg bg-white p-3 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-medium text-slate-700">
+              {o.transport === 'air' ? '✈️ By air' : '🚢 By sea'} → {o.destinationCountry || 'abroad'}
+            </span>
+            <span className="text-xs text-slate-500">{new Date(o.createdAt).toLocaleDateString()}</span>
+          </div>
+          <p className="mt-1 text-slate-600">
+            {o.lines.map((l) => `${l.quantity}× ${l.product_name}`).join(', ')}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {o.currency} {Number(o.goodsLocal).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · {statusText(o)}
+          </p>
+        </div>
+      ))}
     </div>
   );
 }

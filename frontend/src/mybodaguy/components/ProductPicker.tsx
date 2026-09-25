@@ -16,9 +16,11 @@ export interface CartLine {
 interface ProductPickerProps {
   supermarketId: string;
   onCartChange: (lines: CartLine[]) => void;
+  /** The store's own price currency. Defaults to UGX (whole shillings); any other is shown to 2 decimals, matching how the server prices it. */
+  currency?: string;
 }
 
-export default function ProductPicker({ supermarketId, onCartChange }: ProductPickerProps) {
+export default function ProductPicker({ supermarketId, onCartChange, currency = 'UGX' }: ProductPickerProps) {
   const [profile, setProfile] = useState<SupermarketProfile | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,7 +73,11 @@ export default function ProductPicker({ supermarketId, onCartChange }: ProductPi
   // never added on top later. mbg_respond_to_ride charges the customer this
   // exact same tax-inclusive amount at acceptance, so what's shown here
   // while shopping is always what actually gets billed.
-  const inclusivePrice = (p: Product) => Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100));
+  const foreign = currency !== 'UGX';
+  const inclusivePrice = (p: Product) => foreign
+    ? Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100) * 100) / 100
+    : Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100));
+  const money = (n: number) => `${currency} ${foreign ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : n.toLocaleString()}`;
 
   const cartCount = Object.values(qtyById).reduce((sum, q) => sum + q, 0);
   const cartTotal = products.reduce((sum, p) => sum + (qtyById[p.id] || 0) * inclusivePrice(p), 0);
@@ -154,7 +160,7 @@ export default function ProductPicker({ supermarketId, onCartChange }: ProductPi
                   </div>
                   <div className="p-2">
                     <p className="text-xs font-semibold text-slate-800 truncate">{p.name}</p>
-                    <p className="text-xs text-orange-600 font-bold">UGX {inclusivePrice(p).toLocaleString()}</p>
+                    <p className="text-xs text-orange-600 font-bold">{money(inclusivePrice(p))}</p>
                     {p.tax_rate > 0 && <p className="text-[9px] text-slate-400">incl. {p.tax_rate}% tax</p>}
                     {p.stock_qty <= 0 ? (
                       <p className="mt-1.5 text-center text-[10px] font-medium text-red-500 py-1">Out of stock</p>
@@ -192,7 +198,7 @@ export default function ProductPicker({ supermarketId, onCartChange }: ProductPi
             <span className="flex items-center gap-1.5 text-orange-700 font-medium">
               <ShoppingCart size={14} /> {cartCount} item{cartCount !== 1 ? 's' : ''}
             </span>
-            <span className="font-bold text-orange-700">UGX {cartTotal.toLocaleString()}</span>
+            <span className="font-bold text-orange-700">{money(cartTotal)}</span>
           </div>
         )}
       </div>
