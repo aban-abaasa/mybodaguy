@@ -206,9 +206,11 @@ export default async function handler(req, res) {
         fare_ugx: amounts.pickupFareUgx,
         dispatch_after: plan.dispatchAt.toISOString()
       },
-      { journey_id: journey.id, leg_order: 2, leg_type: 'flight', status: 'dispatched', dispatched_at: new Date().toISOString() },
+      // A bulk insert sends every column named on ANY row as null on the rest, so
+      // umbrella_requested (NOT NULL) must be spelled out on every leg.
+      { journey_id: journey.id, leg_order: 2, leg_type: 'flight', status: 'dispatched', dispatched_at: new Date().toISOString(), umbrella_requested: false },
       {
-        journey_id: journey.id, leg_order: 3, leg_type: 'local_dropoff', status: 'pending',
+        journey_id: journey.id, leg_order: 3, leg_type: 'local_dropoff', status: 'pending', umbrella_requested: false,
         origin_country: quote.destination.country, origin_city: quote.destination.city,
         destination_country: quote.destination.country, destination_city: quote.destination.city,
         destination_lat: quote.destination.lat ?? null, destination_lng: quote.destination.lng ?? null,
