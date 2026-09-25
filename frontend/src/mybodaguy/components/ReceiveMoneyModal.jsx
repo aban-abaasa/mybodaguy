@@ -105,7 +105,7 @@ const ReceiveMoneyModal = ({
       });
       setQrData(request);
       setPaymentLink(request.qrValue);
-      setSuccessMessage(`Payment request created for ${formData.amount} ICAN`);
+      setSuccessMessage(`Payment request created for ${formData.amount} IcanEra`);
       setStep('qrcode');
     } catch (err) {
       setError(err.message || 'Failed to generate QR code');

@@ -41,7 +41,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
     }
 
     if (parseFloat(icanAmount) > balance) {
-      toast.error('Insufficient ICAN balance');
+      toast.error('Insufficient IcanEra balance');
       return;
     }
 
@@ -53,7 +53,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
         reference: `MBG-SELL-${Date.now()}`,
       });
 
-      toast.success(`Successfully sold ${formatICAN(parseFloat(icanAmount))} ICAN for UGX ${result.ugx_payout.toLocaleString()} (after fees) — added to your ICANera Wallet balance!`);
+      toast.success(`Successfully sold ${formatICAN(parseFloat(icanAmount))} IcanEra for UGX ${result.ugx_payout.toLocaleString()} (after fees) — added to your IcanEra Wallet balance!`);
       setIcanAmount('');
       if (onSuccess) onSuccess();
     } catch (error: any) {
@@ -70,7 +70,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
         <div className="bg-gray-800 rounded-lg p-3 text-center">
           <div className="text-xs text-gray-400 mb-1">Available Balance</div>
           <div className="text-orange-400 text-xl font-bold">
-            {formatICAN(balance)} ICAN
+            {formatICAN(balance)} IcanEra
           </div>
           <div className="text-gray-500 text-xs mt-1">
             ≈ UGX {(balance * ICAN_TO_UGX).toLocaleString()}
@@ -80,7 +80,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
         {/* Amount Input */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">
-            Amount to Sell (ICAN)
+            Amount to Sell (IcanEra)
           </label>
           <div className="relative">
             <input
@@ -103,7 +103,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
             </button>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            1 ICAN = UGX {ICAN_TO_UGX.toLocaleString()} (floor price)
+            1 IcanEra = UGX {ICAN_TO_UGX.toLocaleString()} (floor price)
           </p>
         </div>
 
@@ -113,7 +113,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
             <div className="text-center flex-1">
               <div className="text-xs text-gray-400 mb-1">You Sell</div>
               <div className="text-white font-semibold">
-                {formatICAN(parseFloat(icanAmount))} ICAN
+                {formatICAN(parseFloat(icanAmount))} IcanEra
               </div>
             </div>
             <div className="text-orange-400 mx-4">→</div>
@@ -130,9 +130,9 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
         <div className="bg-amber-900/20 border border-amber-700/30 rounded-lg p-3">
           <p className="text-xs text-amber-200 font-semibold mb-2">ℹ️ Payout Information</p>
           <ul className="text-xs text-amber-200/80 space-y-1">
-            <li>✓ Credited instantly to your ICANera Wallet balance</li>
+            <li>✓ Credited instantly to your IcanEra Wallet balance</li>
             <li>✓ To cash out to mobile money/bank, use "Send Out" instead</li>
-            <li>✓ Floor price: 1 ICAN = UGX 5,000</li>
+            <li>✓ Floor price: 1 IcanEra = UGX 5,000</li>
           </ul>
         </div>
 
@@ -148,7 +148,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
               Processing...
             </span>
           ) : (
-            '💰 Sell ICAN'
+            '💰 Sell IcanEra'
           )}
         </button>
       </form>

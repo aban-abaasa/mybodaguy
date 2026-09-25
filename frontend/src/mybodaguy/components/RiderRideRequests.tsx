@@ -218,6 +218,8 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
       await load();
     } catch (e: any) {
       toast.error(e.message || 'Failed to start trip');
+      // The screen may be out of date (ride already started, reassigned or cancelled) — refresh it.
+      await load();
     } finally {
       setActing(false);
     }

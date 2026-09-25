@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import CallController from './CallController';
 import RideChatModal from './RideChatModal';
 import { sendICAN, formatICAN } from '../services/icanWalletService';
+import { verifyPin } from '../services/pinService';
 
 interface RideCommsBarProps {
   rideId: string;
@@ -27,6 +28,7 @@ export default function RideCommsBar({ rideId, selfUserId, selfName, peerUserId,
   const [chatOpen, setChatOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
   const [sendAmount, setSendAmount] = useState('');
+  const [sendPin, setSendPin] = useState('');
   const [sending, setSending] = useState(false);
 
   const submitSend = async () => {
@@ -37,6 +39,11 @@ export default function RideCommsBar({ rideId, selfUserId, selfName, peerUserId,
     }
     setSending(true);
     try {
+      const pinCheck = await verifyPin(selfUserId, sendPin);
+      if (!pinCheck.success) {
+        toast.error(pinCheck.error || 'Incorrect transaction PIN. Transfer cancelled.');
+        return;
+      }
       const result = await sendICAN({
         fromUserId: selfUserId,
         toUserId: peerUserId,
@@ -44,11 +51,12 @@ export default function RideCommsBar({ rideId, selfUserId, selfName, peerUserId,
         note: `Sent during ride ${rideId}`,
         referenceId: rideId,
       });
-      toast.success(`✅ Sent ${formatICAN(amount)} ICAN to ${peerName} (they received ${formatICAN(result.recipient_received)} after tithe)`);
+      toast.success(`✅ Sent ${formatICAN(amount)} icanera to ${peerName} (they received ${formatICAN(result.recipient_received)} after tithe)`);
       setSendOpen(false);
       setSendAmount('');
+      setSendPin('');
     } catch (e: any) {
-      toast.error(e.message || 'Failed to send ICAN');
+      toast.error(e.message || 'Failed to send icanera');
     } finally {
       setSending(false);
     }
@@ -106,12 +114,12 @@ export default function RideCommsBar({ rideId, selfUserId, selfName, peerUserId,
         <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold text-slate-800">Send ICAN to {peerName}</h3>
-              <button onClick={() => setSendOpen(false)} className="text-slate-400 hover:text-slate-600">
+              <h3 className="text-lg font-bold text-slate-800">Send icanera to {peerName}</h3>
+              <button onClick={() => { setSendOpen(false); setSendPin(''); }} className="text-slate-400 hover:text-slate-600">
                 <X size={20} />
               </button>
             </div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1">Amount (ICAN)</label>
+            <label className="block text-xs font-semibold text-slate-500 mb-1">Amount (icanera)</label>
             <input
               type="number"
               min="0"
@@ -123,9 +131,20 @@ export default function RideCommsBar({ rideId, selfUserId, selfName, peerUserId,
               className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg text-lg font-bold focus:border-purple-500 focus:outline-none mb-2"
             />
             <p className="text-[11px] text-slate-400 mb-4">A standard 10% tithe applies, same as any personal transfer — {peerName} receives 90% of what you send.</p>
+            <label className="block text-xs font-semibold text-slate-500 mb-1">Transaction PIN</label>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              value={sendPin}
+              onChange={(e) => setSendPin(e.target.value.replace(/\D/g, ''))}
+              placeholder="4–6 digit PIN"
+              className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg text-lg font-bold tracking-widest focus:border-purple-500 focus:outline-none mb-4"
+            />
             <button
               onClick={submitSend}
-              disabled={sending}
+              disabled={sending || sendPin.length < 4}
               className="w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-600 text-white font-bold rounded-lg hover:opacity-90 disabled:opacity-50"
             >
               {sending ? 'Sending…' : 'Send'}

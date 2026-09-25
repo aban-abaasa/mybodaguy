@@ -57,7 +57,7 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
         customerPhone: isMobileMoney ? phoneNumber : undefined,
         paymentOptions: selectedMethod.paymentOptions,
         title: 'BodaGoEra — IcanEra Wallet',
-        description: `Buy ${formatICAN(icanAmount)} ICAN`,
+        description: `Buy ${formatICAN(icanAmount)} IcanEra`,
         txRef,
       });
 
@@ -82,7 +82,7 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Payment verification failed');
 
-      toast.success(`Successfully bought ${formatICAN(icanAmount)} ICAN!`);
+      toast.success(`Successfully bought ${formatICAN(icanAmount)} IcanEra!`);
       setUgxAmount('');
       setPhoneNumber('');
       if (onSuccess) onSuccess();
@@ -148,7 +148,7 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
             />
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            1 ICAN = UGX {ICAN_TO_UGX.toLocaleString()} (floor price)
+            1 IcanEra = UGX {ICAN_TO_UGX.toLocaleString()} (floor price)
           </p>
         </div>
 
@@ -165,7 +165,7 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
             <div className="text-center flex-1">
               <div className="text-xs text-gray-400 mb-1">You Get</div>
               <div className="text-orange-400 font-bold text-lg">
-                {formatICAN(icanAmount)} ICAN
+                {formatICAN(icanAmount)} IcanEra
               </div>
             </div>
           </div>
@@ -175,9 +175,9 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
         <div className="bg-orange-900/20 border border-orange-700/30 rounded-lg p-3">
           <p className="text-xs text-orange-200 font-semibold mb-2">ℹ️ How it works</p>
           <ul className="text-xs text-orange-200/80 space-y-1">
-            <li>✓ ICAN arrives in your wallet instantly</li>
-            <li>✓ Floor price: 1 ICAN = UGX 5,000</li>
-            <li>✓ Use ICAN to pay for rides or send to others</li>
+            <li>✓ IcanEra arrives in your wallet instantly</li>
+            <li>✓ Floor price: 1 IcanEra = UGX 5,000</li>
+            <li>✓ Use IcanEra to pay for rides or send to others</li>
           </ul>
         </div>
 
@@ -193,7 +193,7 @@ export default function BuyIcan({ userId, onSuccess }: BuyIcanProps) {
               Processing...
             </span>
           ) : (
-            '💳 Buy ICAN Now'
+            '💳 Buy IcanEra Now'
           )}
         </button>
 

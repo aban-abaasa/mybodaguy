@@ -62,7 +62,7 @@ export default function SendIcanOut({ userId, balance, onSuccess }: SendIcanOutP
     <div className="p-4">
       <form onSubmit={handleSendOut} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-slate-600 mb-2">Amount (ICAN)</label>
+          <label className="block text-sm font-medium text-slate-600 mb-2">Amount (IcanEra)</label>
           <input
             type="number"
             min="0.0001"
@@ -74,7 +74,7 @@ export default function SendIcanOut({ userId, balance, onSuccess }: SendIcanOutP
             disabled={processing}
             className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-rose-400"
           />
-          <p className="text-xs text-slate-400 mt-1">Balance: {formatICAN(balance)} ICAN</p>
+          <p className="text-xs text-slate-400 mt-1">Balance: {formatICAN(balance)} IcanEra</p>
         </div>
 
         <div className="flex gap-2">
@@ -162,7 +162,7 @@ export default function SendIcanOut({ userId, balance, onSuccess }: SendIcanOutP
         )}
 
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-          <p className="text-xs text-amber-700">Sent via Flutterwave. A 3% cash-out fee applies. If the transfer fails, your ICAN is refunded automatically.</p>
+          <p className="text-xs text-amber-700">Sent via Flutterwave. A 3% cash-out fee applies. If the transfer fails, your IcanEra is refunded automatically.</p>
         </div>
 
         <button

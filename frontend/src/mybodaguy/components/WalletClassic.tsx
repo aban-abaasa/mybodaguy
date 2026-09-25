@@ -41,9 +41,9 @@ export function WalletSheet({ title, onClose, children, z = 50 }: { title: strin
         aria-modal="true"
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
-        className="animate-sheet-up relative max-h-[92vh] w-full max-w-md overflow-y-auto rounded-t-[28px] border border-[#c4a052]/40 bg-gradient-to-b from-[#fffdf8] to-[#faf3e1] shadow-[0_-18px_50px_-20px_rgba(28,21,13,0.6)] outline-none dark:from-slate-800 dark:to-slate-900 sm:rounded-[28px]"
+        className="animate-sheet-up relative max-h-[92vh] w-full max-w-md overflow-y-auto overscroll-contain rounded-t-[28px] border border-[#c4a052]/40 bg-gradient-to-b from-[#fffdf8] to-[#faf3e1] shadow-[0_-18px_50px_-20px_rgba(28,21,13,0.6)] outline-none dark:from-slate-800 dark:to-slate-900 sm:rounded-[28px]"
       >
-        <div className="sticky top-0 z-10 bg-gradient-to-b from-[#fffdf8] via-[#fffdf8] to-[#fffdf8]/90 px-5 pb-3 pt-3 dark:from-slate-800 dark:via-slate-800 dark:to-slate-800/90">
+        <div className="sticky top-0 z-10 bg-gradient-to-b from-[#fffdf8] via-[#fffdf8] to-[#fffdf8]/90 px-4 pb-3 pt-3 min-[380px]:px-5 dark:from-slate-800 dark:via-slate-800 dark:to-slate-800/90">
           <span aria-hidden className="mx-auto mb-3 block h-1 w-10 rounded-full bg-[#c4a052]/50 sm:hidden" />
           <div className="flex items-center justify-between gap-3">
             <h2 className="font-classic-display text-[20px] font-bold leading-tight text-slate-800 dark:text-slate-100">{title}</h2>
@@ -58,15 +58,34 @@ export function WalletSheet({ title, onClose, children, z = 50 }: { title: strin
           </div>
           <div className="landing-classic-divider mt-3" />
         </div>
-        <div className="px-5 pb-6 pt-2 safe-bottom">{children}</div>
+        <div className="px-4 pb-6 pt-2 min-[380px]:px-5 safe-bottom">{children}</div>
       </div>
     </div>
   );
 }
 
+// ── compact numbers ─────────────────────────────────────────────────────────
+
+const compactFmt = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 2 });
+
+/** 5793.6514 → "5.79K", 3_400_000 → "3.4M", 5e12 → "5T"; small values keep their decimals. */
+export function compactNumber(n: number): string {
+  const v = Number(n) || 0;
+  const abs = Math.abs(v);
+  if (abs >= 1000) return compactFmt.format(v);
+  return v.toLocaleString('en', { maximumFractionDigits: abs < 1 ? 4 : 2 });
+}
+
+/** The exact 4-decimal amount, until it is too wide for a phone (a million or more), then compact. */
+export function formatAmount(n: number): string {
+  const v = Number(n) || 0;
+  return Math.abs(v) >= 1_000_000 ? compactFmt.format(v) : v.toFixed(4);
+}
+
 // ── Balance card ────────────────────────────────────────────────────────────
 
-const shortAddress = (a: string) => (a.length > 18 ? `${a.slice(0, 9)}…${a.slice(-6)}` : a);
+/** A 16-digit account number reads in fours, like a card: 1002 3456 7890 1234. */
+export const displayAddress = (a: string) => (/^\d{16}$/.test(a) ? a.replace(/(\d{4})(?=\d)/g, '$1 ') : a.length > 18 ? `${a.slice(0, 9)}…${a.slice(-6)}` : a);
 
 export interface LocalValue {
   currency: string;
@@ -77,7 +96,7 @@ export interface LocalValue {
 
 export function formatLocalMoney(amount: number, currency: string): string {
   try {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency, currencyDisplay: 'code', maximumFractionDigits: amount < 100 ? 2 : 0 }).format(amount);
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency, currencyDisplay: 'code', notation: amount >= 1e9 ? 'compact' : 'standard', maximumFractionDigits: amount < 100 ? 2 : amount >= 1e9 ? 2 : 0 }).format(amount);
   } catch {
     return `${currency} ${Math.round(amount).toLocaleString()}`;
   }
@@ -85,6 +104,7 @@ export function formatLocalMoney(amount: number, currency: string): string {
 
 export function BalanceCard({
   balanceText,
+  exactText,
   hidden,
   onToggleHidden,
   onRefresh,
@@ -96,6 +116,8 @@ export function BalanceCard({
   onShowQr,
 }: {
   balanceText: string;
+  /** The full-precision figure, shown as a tooltip when balanceText is abbreviated. */
+  exactText?: string;
   hidden: boolean;
   onToggleHidden: () => void;
   onRefresh: () => void;
@@ -107,16 +129,18 @@ export function BalanceCard({
   onShowQr: () => void;
 }) {
   // A long balance steps down a size instead of wrapping on a phone.
-  const size = balanceText.length > 11 ? 'text-[30px]' : balanceText.length > 8 ? 'text-[36px]' : 'text-[44px]';
+  const size = balanceText.length > 11
+    ? 'text-[26px] min-[380px]:text-[30px]'
+    : balanceText.length > 8 ? 'text-[30px] min-[380px]:text-[36px]' : 'text-[36px] min-[380px]:text-[44px]';
 
   return (
     <section
-      className="relative overflow-hidden rounded-[26px] p-5 text-white"
+      className="relative overflow-hidden rounded-[26px] p-4 text-white min-[380px]:p-5"
       style={{
         background: 'linear-gradient(135deg, #1c150d 0%, #2f2415 48%, #4a3418 100%)',
         boxShadow: '0 24px 44px -20px rgba(44, 36, 22, 0.75)',
       }}
-      aria-label="ICAN wallet balance"
+      aria-label="IcanEra wallet balance"
     >
       <span aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-white/5" />
       <span aria-hidden className="pointer-events-none absolute -right-14 -top-14 h-48 w-48 rounded-full border border-[#c4a052]/25" />
@@ -157,8 +181,7 @@ export function BalanceCard({
       <div className="relative mt-6">
         <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]/80">Balance</p>
         <p className="mt-1.5 flex items-baseline gap-2 font-classic-display font-bold leading-none tabular-nums lining-nums" aria-live="polite">
-          <span className={size}>{hidden ? '••••••' : balanceText}</span>
-          <span className="text-[13px] font-semibold tracking-[0.2em] text-[#e6c980]">ICAN</span>
+          <span className={size} title={hidden ? undefined : exactText}>{hidden ? '••••••' : balanceText}</span>
         </p>
         <p className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px] text-white/75">
           <span>{hidden ? '••••' : `≈ ${local ? formatLocalMoney(local.balanceLocal, local.currency) : formatLocalMoney(fallbackUgx, 'UGX')}`}</span>
@@ -167,14 +190,14 @@ export function BalanceCard({
           )}
         </p>
         {local && local.priceLocal > 0 && (
-          <p className="mt-1 text-[11px] text-white/50">1 ICAN = {formatLocalMoney(local.priceLocal, local.currency)} · live rate</p>
+          <p className="mt-1 text-[11px] text-white/50">1 IcanEra = {formatLocalMoney(local.priceLocal, local.currency)} · live rate</p>
         )}
       </div>
 
       {address && (
         <div className="relative mt-5 flex items-center gap-2 rounded-2xl bg-black/20 px-3 py-2 ring-1 ring-[#c4a052]/25">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#e6c980]/70">Wallet</span>
-          <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-white/85">{shortAddress(address)}</span>
+          <span className="hidden text-[10px] font-semibold uppercase tracking-[0.18em] text-[#e6c980]/70 min-[360px]:inline">Account</span>
+          <span className="min-w-0 flex-1 truncate font-mono text-[12px] tabular-nums tracking-tight text-white/85">{displayAddress(address)}</span>
           <button type="button" onClick={onCopyAddress} aria-label="Copy wallet address" className="grid h-8 w-8 place-items-center rounded-full text-[#e6c980] hover:bg-white/10">
             <Copy size={14} />
           </button>
@@ -214,7 +237,7 @@ export function QuickActions({ onAction }: { onAction: (a: WalletAction) => void
       <div className="landing-classic-divider my-4" />
       <div className="grid grid-cols-2 gap-2.5">
         <button type="button" onClick={() => onAction('sell')} className="classic-btn classic-btn-outline !min-h-[44px] !text-[13px]">
-          <Banknote size={16} /> Sell ICAN
+          <Banknote size={16} /> Sell IcanEra
         </button>
         <button type="button" onClick={() => onAction('sendout')} className="classic-btn classic-btn-outline !min-h-[44px] !text-[13px]">
           <ArrowUp size={16} /> Cash out
@@ -242,9 +265,9 @@ export function ActivityStrip({ days, earned, spent, tithe, hidden, format }: { 
           { label: 'Spent', value: spent },
           { label: 'Tithe', value: tithe },
         ].map((s) => (
-          <div key={s.label} className="px-2">
+          <div key={s.label} className="min-w-0 px-1.5 min-[380px]:px-2">
             <p className="classic-eyebrow !text-[9.5px]">{s.label}</p>
-            <p className="mt-1 font-classic-display text-[15px] font-bold tabular-nums lining-nums text-slate-800 dark:text-slate-100">{hidden ? '••••' : s.value}</p>
+            <p className="mt-1 truncate font-classic-display text-[13px] font-bold tabular-nums lining-nums text-slate-800 dark:text-slate-100 min-[380px]:text-[15px]">{hidden ? '••••' : s.value}</p>
           </div>
         ))}
       </div>
@@ -261,7 +284,7 @@ export function ActivityStrip({ days, earned, spent, tithe, hidden, format }: { 
 
       <div className="mt-3 flex h-[72px] items-end gap-1.5" role="img" aria-label={quiet ? 'No wallet movement in the last 7 days' : 'Money in and out per day over the last 7 days'}>
         {days.map((d) => (
-          <div key={d.label} className="flex h-full flex-1 flex-col items-center justify-end gap-1" title={hidden ? undefined : `${d.label}: +${format(d.in)} / -${format(d.out)} ICAN`}>
+          <div key={d.label} className="flex h-full flex-1 flex-col items-center justify-end gap-1" title={hidden ? undefined : `${d.label}: +${format(d.in)} / -${format(d.out)}`}>
             <div className="flex h-full w-full items-end justify-center gap-[3px]">
               <span className="w-[42%] rounded-t-[3px] bg-[#3f7d58]" style={{ height: `${max ? Math.max(hidden ? 0 : (d.in / max) * 100, d.in > 0 ? 6 : 0) : 0}%` }} />
               <span className="w-[42%] rounded-t-[3px] bg-[#a17c28]" style={{ height: `${max ? Math.max(hidden ? 0 : (d.out / max) * 100, d.out > 0 ? 6 : 0) : 0}%` }} />
@@ -296,15 +319,15 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
   );
 }
 
-/** The wallet address as a scannable code, so another Icanera app can pay it without typing. */
+/** The wallet address as a scannable code, so another IcanEra app can pay it without typing. */
 export function AddressQr({ address }: { address: string }) {
   return (
     <div className="space-y-4 text-center">
       <div className="mx-auto w-fit rounded-2xl border border-[#c4a052]/50 bg-white p-4 shadow-[0_14px_28px_-18px_rgba(44,36,22,0.5)]">
         <QRCodeCanvas value={address} size={196} level="M" fgColor="#231b12" bgColor="#ffffff" />
       </div>
-      <p className="break-all font-mono text-[12.5px] text-slate-600 dark:text-slate-300">{address}</p>
-      <p className="text-[12px] leading-relaxed text-slate-500 dark:text-slate-400">Share this address to receive ICAN from any Icanera app.</p>
+      <p className="font-mono text-[14px] tabular-nums tracking-wider text-slate-700 dark:text-slate-200">{displayAddress(address)}</p>
+      <p className="text-[12px] leading-relaxed text-slate-500 dark:text-slate-400">Share this account number to receive IcanEra from any IcanEra app.</p>
       <CopyButton text={address} label="Copy address" />
     </div>
   );
