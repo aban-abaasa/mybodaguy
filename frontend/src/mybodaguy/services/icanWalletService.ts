@@ -350,6 +350,38 @@ export async function buyICAN({
 }
 
 /**
+ * Buy ICAN coins with the money in the user's own IcanEra Wallet (wallet_accounts), at the
+ * coin's LIVE value — no payment window: it is an exchange between two balances they already
+ * hold. Flutterwave is only for money entering or leaving the platform.
+ */
+export async function buyICANFromWallet({
+  userId,
+  icanAmount,
+  reference = null,
+}: {
+  userId: string;
+  icanAmount: number;
+  reference?: string | null;
+}): Promise<{ success: boolean; ican_bought: number; ugx_paid: number; price_per_ican: number; wallet_balance: number }> {
+  const { data, error } = await supabase.rpc('buy_ican_coins_from_wallet', {
+    p_user_id: userId,
+    p_ican_amount: icanAmount,
+    p_source_app: SOURCE_APP,
+    p_reference: reference,
+  });
+  if (error) throw new Error(/buy_ican_coins_from_wallet/.test(error.message) ? 'Buying IcanEra is not switched on yet.' : error.message);
+  if (!data.success) throw new Error(data.error ?? 'Buy failed');
+  return data;
+}
+
+/** The money (UGX) in the user's own IcanEra Wallet — what a purchase is paid from. */
+export async function getWalletUgxBalance(): Promise<number> {
+  const { data, error } = await supabase.rpc('get_my_wallet_ugx_balance');
+  if (error) throw error;
+  return Number(data) || 0;
+}
+
+/**
  * Sell ICAN coins into the app's own ICANera Wallet balance (wallet_accounts)
  * — instant, fee only. For an external cash-out to mobile money/bank instead,
  * use requestIcanPayout().
@@ -428,6 +460,23 @@ export async function requestIcanPayout({
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** The platform's cut of a sale, as a share of what is sold (mirrors sell_ican_coins in SQL). */
+export const SELL_FEE_RATE = 0.03;
+
+/**
+ * The LIVE price of one icaneracoin in UGX — the same number the wallet badge shows (FX, the
+ * inflation floor and network usage; never below the 5,000 launch floor). Selling pays at this,
+ * not at the floor. Returns null if the price engine can't be reached, so callers can refuse
+ * to quote a figure rather than show a wrong one.
+ */
+export async function getLiveUgxPrice(): Promise<number | null> {
+  const { data, error } = await supabase.rpc('ican_get_price_in_currency', { p_currency_code: 'UGX' });
+  if (error) return null;
+  const row = Array.isArray(data) ? data[0] : data;
+  const price = Number(row?.price_local);
+  return Number.isFinite(price) && price > 0 ? price : null;
+}
 
 export function ugxToICAN(ugx: number): number {
   return Math.floor((ugx / ICAN_TO_UGX) * 1e8) / 1e8;

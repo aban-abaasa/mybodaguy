@@ -5,7 +5,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { sellICAN, ICAN_TO_UGX, formatICAN, getBalance } from '../services/icanWalletService';
+import { sellICAN, formatICAN, getBalance, getLiveUgxPrice, SELL_FEE_RATE } from '../services/icanWalletService';
 import { useEffect } from 'react';
 
 interface SellIcanProps {
@@ -17,6 +17,22 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
   const [icanAmount, setIcanAmount] = useState('');
   const [processing, setProcessing] = useState(false);
   const [balance, setBalance] = useState(0);
+  // Sales pay at icaneracoin's live value, so nothing is quoted until it is known.
+  const [livePrice, setLivePrice] = useState<number | null>(null);
+  const [priceFailed, setPriceFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => getLiveUgxPrice().then((p) => {
+      if (cancelled) return;
+      setLivePrice(p);
+      setPriceFailed(p === null);
+    });
+    load();
+    // The price moves slowly, but a sale should never be quoted from a stale figure.
+    const timer = setInterval(load, 60_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
 
   useEffect(() => {
     const loadBalance = async () => {
@@ -30,7 +46,8 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
     loadBalance();
   }, [userId]);
 
-  const ugxAmount = icanAmount ? parseFloat(icanAmount) * ICAN_TO_UGX : 0;
+  // What lands in the wallet: the coins at the live value, less the platform's cut — the one final number.
+  const ugxAmount = icanAmount && livePrice ? Math.round(parseFloat(icanAmount) * livePrice * (1 - SELL_FEE_RATE) * 100) / 100 : 0;
 
   const handleSell = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,6 +59,10 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
 
     if (parseFloat(icanAmount) > balance) {
       toast.error('Insufficient IcanEra balance');
+      return;
+    }
+    if (!livePrice) {
+      toast.error("The live IcanEra price isn't available right now — please try again in a moment");
       return;
     }
 
@@ -73,7 +94,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
             {formatICAN(balance)} IcanEra
           </div>
           <div className="text-gray-500 text-xs mt-1">
-            ≈ UGX {(balance * ICAN_TO_UGX).toLocaleString()}
+            {livePrice ? `≈ UGX ${Math.round(balance * livePrice).toLocaleString()}` : '…'}
           </div>
         </div>
 
@@ -103,7 +124,9 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
             </button>
           </div>
           <p className="text-xs text-gray-500 mt-1">
-            1 IcanEra = UGX {ICAN_TO_UGX.toLocaleString()} (floor price)
+            {livePrice
+              ? `1 IcanEra = UGX ${livePrice.toLocaleString(undefined, { maximumFractionDigits: 2 })} (live value)`
+              : priceFailed ? "Couldn't load the live price — retrying…" : 'Loading the live price…'}
           </p>
         </div>
 
@@ -132,14 +155,14 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
           <ul className="text-xs text-amber-200/80 space-y-1">
             <li>✓ Credited instantly to your IcanEra Wallet balance</li>
             <li>✓ To cash out to mobile money/bank, use "Send Out" instead</li>
-            <li>✓ Floor price: 1 IcanEra = UGX 5,000</li>
+            <li>✓ Paid at the live value of IcanEra — never below UGX 5,000</li>
           </ul>
         </div>
 
         {/* Sell Button */}
         <button
           type="submit"
-          disabled={!icanAmount || parseFloat(icanAmount) <= 0 || parseFloat(icanAmount) > balance || processing}
+          disabled={!icanAmount || parseFloat(icanAmount) <= 0 || parseFloat(icanAmount) > balance || processing || !livePrice}
           className="w-full py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {processing ? (

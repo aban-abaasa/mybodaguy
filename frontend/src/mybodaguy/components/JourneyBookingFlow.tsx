@@ -12,8 +12,8 @@ import AirTicketButton from './AirTicketButton';
 import JourneyLegRideActions from './JourneyLegRideActions';
 import { toInternationalPhone, genderForTitle } from '../services/phone';
 import JourneyRideOptions, { DEFAULT_PICKUP_PREFERENCES, preferencesForApi, describePreferences, type PickupPreferences } from './JourneyRideOptions';
-import { getBalance, ICAN_TO_UGX, formatICAN, SOURCE_APP } from '../services/icanWalletService';
-import { payWithFlutterwave, generateTxRef } from '../services/flutterwaveClient';
+import { getBalance, ICAN_TO_UGX, formatICAN, buyICANFromWallet } from '../services/icanWalletService';
+import { generateTxRef } from '../services/flutterwaveClient';
 import LocationPickerMap from './LocationPickerMap';
 import ImportStoreStep from './ImportStoreStep';
 import type { CartLine } from './ProductPicker';
@@ -442,57 +442,16 @@ export default function JourneyBookingFlow({
   const topUpUnitUgx = Math.max(ICAN_TO_UGX, quote?.icanPriceUgx ?? 0);
   const hasEnoughBalance = walletIcan === null ? true : shortfallIcan <= 0;
 
+  // Short of ICAN for this booking: buy the missing coins from the IcanEra Wallet (UGX) at the
+  // live value — an exchange of the customer's own two balances, so no payment window.
   const doTopUp = async () => {
     if (!quote || shortfallIcan <= 0) return;
     setError(null);
     setToppingUp(true);
     try {
-      const { data: authUser } = await supabase.auth.getUser();
-      const email = authUser?.user?.email;
-      // Round up to whole shillings, and up to at least one coin, so a
-      // fractional shortfall still clears Flutterwave and buy_ican_coins' own
-      // minimum-amount expectations. The coin amount is floored (8 dp) so it
-      // can never be worth more than the shillings actually paid.
-      const ugxAmount = Math.max(Math.ceil(topUpUnitUgx), Math.ceil(shortfallIcan * topUpUnitUgx));
-      const icanAmount = Math.floor((ugxAmount / topUpUnitUgx) * 1e8) / 1e8;
-      const txRef = generateTxRef('MBGJ-TOPUP');
-
-      const payment = await payWithFlutterwave({
-        amount: ugxAmount,
-        currency: 'UGX',
-        customerEmail: email,
-        customerPhone: leadPhone.trim() || undefined,
-        customerName: `${passengers[0]?.givenName ?? ''} ${passengers[0]?.familyName ?? ''}`.trim() || customerName,
-        title: 'BodaGoEra Journey — Top up ICAN',
-        description: `Top up ${formatICAN(icanAmount)} ICAN to complete your journey booking`,
-        txRef,
-      });
-
-      if (payment.status === 'cancelled') {
-        setError('Top-up cancelled.');
-        return;
-      }
-      if (payment.status !== 'successful' || !payment.transaction_id) {
-        setError('Top-up payment was not successful.');
-        return;
-      }
-
-      // Server-side verification against Flutterwave's own API (secret key,
-      // never in the browser) before crediting — see
-      // ICAN/backend/components/supabase/functions/verify-flutterwave-payment.
-      // buy_ican_coins itself is locked to service_role only, so this edge
-      // function is the only real way to credit a wallet.
-      const { data, error: verifyError } = await supabase.functions.invoke('verify-flutterwave-payment', {
-        body: {
-          transaction_id: payment.transaction_id,
-          tx_ref: txRef,
-          ican_amount: icanAmount,
-          source_app: SOURCE_APP,
-        },
-      });
-      if (verifyError) throw verifyError;
-      if (!data?.success) throw new Error(data?.error || 'Top-up verification failed');
-
+      // Rounded up (8 dp) so the coins bought always cover the shortfall.
+      const icanAmount = Math.ceil(shortfallIcan * 1e8) / 1e8;
+      await buyICANFromWallet({ userId: customerId, icanAmount, reference: generateTxRef('MBGJ-BUY') });
       await refreshBalance();
     } catch (err: any) {
       setError(err.message || 'Top-up failed');
@@ -2048,11 +2007,11 @@ export default function JourneyBookingFlow({
             {!checkingBalance && walletIcan !== null && !hasEnoughBalance && (
               <div className="space-y-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3">
                 <p className="text-sm text-amber-800">
-                  You need {shortfallIcan.toFixed(4)} more ICAN (about UGX {Math.ceil(shortfallIcan * topUpUnitUgx).toLocaleString()} at today's live value) to complete this booking.
+                  You need {shortfallIcan.toFixed(4)} more ICAN (about UGX {Math.ceil(shortfallIcan * topUpUnitUgx).toLocaleString()} at today's live value) to complete this booking — buy it from your IcanEra Wallet.
                 </p>
                 <button type="button" disabled={toppingUp} onClick={doTopUp} className="classic-btn classic-btn-ink !min-h-[44px] !text-sm">
                   {toppingUp ? <Loader2 className="animate-spin" size={16} /> : <CreditCard size={16} />}
-                  {toppingUp ? 'Processing top-up…' : 'Top up via Flutterwave'}
+                  {toppingUp ? 'Buying IcanEra…' : 'Buy the missing IcanEra from my wallet'}
                 </button>
               </div>
             )}
