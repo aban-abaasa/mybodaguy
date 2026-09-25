@@ -222,9 +222,30 @@ export async function getJourneyQuote(params: {
   return postJson('/api/journeys/quote', params);
 }
 
+/** The company that may pay this person's journeys, if any (ADD_JOURNEY_COMPANY_PAYMENT.sql). */
+export interface CompanyJourneyBenefit {
+  eligible: boolean;
+  businessName?: string;
+  /** The most the company allows for one journey, in ICAN; absent = no limit. */
+  limitIcan?: number | null;
+}
+
+export async function getCompanyJourneyBenefit(): Promise<CompanyJourneyBenefit> {
+  const { data, error } = await supabase.rpc('mbg_get_company_journey_benefit');
+  // Anything wrong (or the SQL not installed yet) simply means "Business" isn't offered.
+  if (error || !data?.eligible) return { eligible: false };
+  return {
+    eligible: true,
+    businessName: data.business_name || undefined,
+    limitIcan: data.limit_ican == null ? null : Number(data.limit_ican),
+  };
+}
+
 export async function confirmJourney(params: {
   customerUserId: string;
   quote: JourneyQuote;
+  /** Charge the company wallet (per the person's company allocation) instead of their own. */
+  payWithCompany?: boolean;
   passengers: Array<{ id: string; type: 'adult'; given_name: string; family_name: string; born_on: string; gender: 'm' | 'f'; email: string; phone_number: string; title?: string }>;
 }): Promise<{ journeyId: string; pnr: string }> {
   try {
@@ -469,9 +490,12 @@ export async function requestShipCargoJourney(params: ShipRouteParams & {
   pickupLocation: string;
   dropoffLocation: string;
   cargoDescription?: string;
+  /** Charge the company wallet (per the person's company allocation) instead of their own. */
+  payWithCompany?: boolean;
 }): Promise<{ success: boolean; journeyId?: string; error?: string }> {
   const { data, error } = await supabase.rpc('mbg_request_ship_cargo_journey', {
     ...shipRouteArgs(params),
+    ...(params.payWithCompany ? { p_pay_with_company: true } : {}),
     p_pickup_location: params.pickupLocation,
     p_dropoff_location: params.dropoffLocation,
     p_cargo_description: params.cargoDescription ?? null,

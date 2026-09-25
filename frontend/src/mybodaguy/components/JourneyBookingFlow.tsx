@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { MapPin, Plane, Home, CreditCard, CheckCircle, Loader2, Star, Phone, Car, Search, Bike, Ship, Package, Printer, User, ArrowRight, Wallet, ShieldCheck, Truck, AlertTriangle, ShoppingBag } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
 import {
-  searchFlights, searchAirports, getJourneyQuote, confirmJourney, pollJourney, getMyJourneys, requestShipCargoJourney, quoteShipCargoJourney, PaymentTakenError,
-  type FlightOffer, type Journey, type JourneyQuote, type AirportSuggestion, type ShipCargoQuote, type ImportStore, type ImportGoodsQuote, type StoreCartLine,
+  searchFlights, searchAirports, getJourneyQuote, confirmJourney, pollJourney, getMyJourneys, requestShipCargoJourney, quoteShipCargoJourney, getCompanyJourneyBenefit, PaymentTakenError,
+  type FlightOffer, type Journey, type JourneyQuote, type AirportSuggestion, type ShipCargoQuote, type ImportStore, type ImportGoodsQuote, type StoreCartLine, type CompanyJourneyBenefit,
 } from '../services/journeyService';
+import JourneyPayerPicker, { type JourneyPayer } from './JourneyPayerPicker';
 import { geocodeAddress, reverseGeocodeCountry, searchCities, searchAddresses, type CountryLookup, type CitySuggestion, type AddressSuggestion, type GeocodeResult } from '../services/geocodeService';
 import { printShipTicket } from '../services/printTicket';
 import AirTicketButton from './AirTicketButton';
@@ -15,6 +16,7 @@ import { getBalance, ICAN_TO_UGX, formatICAN, SOURCE_APP } from '../services/ica
 import { payWithFlutterwave, generateTxRef } from '../services/flutterwaveClient';
 import LocationPickerMap from './LocationPickerMap';
 import ImportStoreStep from './ImportStoreStep';
+import type { CartLine } from './ProductPicker';
 import FlightResultsPicker, { CabinPicker } from './FlightResultsPicker';
 import { JourneyStepper, StepCard, Field, TripSummary, ErrorBanner, FlightSkeleton, type StepperStep } from './JourneyUI';
 import { formatIcan, formatMoney, summarizeOffer, todayIsoDate, type CabinClass } from '../services/flightOffers';
@@ -76,6 +78,10 @@ interface JourneyBookingFlowProps {
   // (from a journey's "Open & track" button in My Journeys) instead of the
   // booking form.
   resumeJourneyId?: string;
+  // Opens straight on "Buy abroad" with a store and basket already chosen — set when a
+  // customer picks a product from a store abroad on the Delivery tab, which is then a
+  // complete-journey delivery rather than a local one.
+  initialImport?: { store: ImportStore; lines: CartLine[]; homeCountry: string };
 }
 
 interface CustomerArea {
@@ -123,16 +129,32 @@ function legStatusClass(status: string): string {
 export default function JourneyBookingFlow({
   customerId,
   initialBookingKind,
+  initialImport,
   initialShipPickup,
   initialShipDropoff,
   initialPickupCountryIso2,
   resumeJourneyId,
 }: JourneyBookingFlowProps) {
-  const [bookingKind, setBookingKind] = useState<BookingKind>(initialBookingKind || 'fly');
-  const [step, setStep] = useState<Step>(resumeJourneyId ? 'tracking' : initialBookingKind === 'ship' ? 'ship-details' : 'pickup');
+  const [bookingKind, setBookingKind] = useState<BookingKind>(initialImport ? 'import' : initialBookingKind || 'fly');
+  const [step, setStep] = useState<Step>(resumeJourneyId ? 'tracking' : initialImport ? 'import-store' : initialBookingKind === 'ship' ? 'ship-details' : 'pickup');
   const [error, setError] = useState<string | null>(null);
 
-  const changeBookingKind = (kind: BookingKind) => {
+  // Personal / Business: a person whose company has allowed them to pay for journeys can
+  // choose the company wallet for any booking (fly, ship, parcel, buy abroad). Everyone
+  // else never sees the choice and always pays from their own wallet.
+  const [companyBenefit, setCompanyBenefit] = useState<CompanyJourneyBenefit>({ eligible: false });
+  const [payer, setPayer] = useState<JourneyPayer>('personal');
+  useEffect(() => {
+    if (!customerId) return;
+    let cancelled = false;
+    getCompanyJourneyBenefit().then((benefit) => { if (!cancelled) setCompanyBenefit(benefit); });
+    return () => { cancelled = true; };
+  }, [customerId]);
+  const payWithCompany = companyBenefit.eligible && payer === 'company';
+  const payerPicker = <JourneyPayerPicker benefit={companyBenefit} value={payer} onChange={setPayer} />;
+  const payerLabel = payWithCompany ? `paid by ${companyBenefit.businessName || 'your company'}` : 'paid from your wallet';
+
+  const changeBookingKind =(kind: BookingKind) => {
     // Leaving "Buy abroad" for the plain Fly form: don't leave its store, parcel and address behind in it.
     if (kind !== 'import' && importAirPrefilled) clearImportAirPrefill();
     setBookingKind(kind);
@@ -221,11 +243,14 @@ export default function JourneyBookingFlow({
       // spinning forever: after a minute, work out what actually happened.
       let timer: ReturnType<typeof setTimeout> | undefined;
       const outcome = await Promise.race([
-        requestShipCargoJourney(prepared ?? {
-          ...shipRouteParams,
-          pickupLocation: shipPickupLeg ? shipPickup?.address ?? '' : '',
-          dropoffLocation: shipDropoffLeg ? shipDropoff?.address ?? '' : '',
-          cargoDescription: cargoDescription.trim() || undefined,
+        requestShipCargoJourney({
+          ...(prepared ?? {
+            ...shipRouteParams,
+            pickupLocation: shipPickupLeg ? shipPickup?.address ?? '' : '',
+            dropoffLocation: shipDropoffLeg ? shipDropoff?.address ?? '' : '',
+            cargoDescription: cargoDescription.trim() || undefined,
+          }),
+          payWithCompany,
         }),
         new Promise<'timeout'>((resolve) => { timer = setTimeout(() => resolve('timeout'), SHIP_BOOKING_TIMEOUT_MS); }),
       ]);
@@ -408,7 +433,9 @@ export default function JourneyBookingFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step, quote]);
 
-  const shortfallIcan = quote && walletIcan !== null ? Math.max(0, quote.totalIcan - walletIcan) : 0;
+  // When the company pays, the customer's own balance is irrelevant (the server checks the
+  // company's wallet, and says so if it can't cover the journey).
+  const shortfallIcan = quote && walletIcan !== null && !payWithCompany ? Math.max(0, quote.totalIcan - walletIcan) : 0;
   // A top-up buys ICAN at its live UGX price — the same value the quote used.
   // Never below the 5,000 UGX launch floor, which is also the least the
   // payment verifier will accept per coin (verify-flutterwave-payment).
@@ -747,6 +774,7 @@ export default function JourneyBookingFlow({
       const { journeyId } = await confirmJourney({
         customerUserId: customerId,
         quote,
+        payWithCompany,
         passengers: passengers.map((p, i) => ({
           // Each traveller is matched to the airline's own passenger id, in order.
           id: offerPassengers[i].id, type: 'adult' as const, title: p.title,
@@ -775,9 +803,9 @@ export default function JourneyBookingFlow({
   // customer's door by AIR (the parcel journey: a traveller flying the route carries it
   // as baggage, so this hands over to the flight steps) or by SEA (the ship-cargo
   // journey, booked from here). Either way the customer pays goods + transport in ICAN.
-  const [importHomeCountry, setImportHomeCountry] = useState(COUNTRIES[0].name);
-  const [importStore, setImportStore] = useState<ImportStore | null>(null);
-  const [importCart, setImportCart] = useState<StoreCartLine[]>([]);
+  const [importHomeCountry, setImportHomeCountry] = useState(initialImport?.homeCountry || COUNTRIES[0].name);
+  const [importStore, setImportStore] = useState<ImportStore | null>(initialImport?.store ?? null);
+  const [importCart, setImportCart] = useState<StoreCartLine[]>(() => (initialImport?.lines ?? []).map((l) => ({ productId: l.product.id, quantity: l.qty })));
   const [importGoods, setImportGoods] = useState<ImportGoodsQuote | null>(null);
   const [importMethod, setImportMethod] = useState<'air' | 'sea'>('air');
   const [importDropoff, setImportDropoff] = useState<{ lat: number; lng: number; address: string } | null>(null);
@@ -1061,6 +1089,7 @@ export default function JourneyBookingFlow({
             goods={importGoods}
             onGoodsChange={setImportGoods}
             onContinue={() => goToStep('import-delivery')}
+            initialLines={initialImport?.lines}
           />
         </div>
       )}
@@ -1194,11 +1223,12 @@ export default function JourneyBookingFlow({
                 <div className="flex justify-between gap-3"><span>Sea crossing, {importShipQuote.originPort.city} → {importShipQuote.destPort.city}</span><span className="tabular-nums">UGX {importShipQuote.seaFareUgx.toLocaleString()}</span></div>
                 <div className="flex justify-between gap-3"><span>Delivery from {importShipQuote.destPort.city} port</span><span className="tabular-nums">UGX {importShipQuote.dropoffFareUgx.toLocaleString()}</span></div>
                 <div className="flex justify-between gap-3 border-t border-[#c4a052]/30 pt-1.5 font-semibold text-slate-800">
-                  <span>Total, paid from your wallet</span>
+                  <span>Total, {payerLabel}</span>
                   <span className="tabular-nums">{formatIcan(importGoods.goodsIcan + importShipQuote.totalIcan)} ICAN</span>
                 </div>
               </div>
             )}
+            {payerPicker}
             {importShipQuoteError && <p role="alert" className="text-center text-xs font-medium text-red-600">{importShipQuoteError}</p>}
             <div className="space-y-2">
               <button disabled={!importSeaReady || importShipQuoting || !importShipQuote || submittingShip} onClick={payImportSea} className="classic-btn classic-btn-primary">
@@ -1356,11 +1386,12 @@ export default function JourneyBookingFlow({
               <div className="flex justify-between gap-3"><span>Sea crossing, {shipQuote.originPort.city} → {shipQuote.destPort.city}</span><span className="tabular-nums">UGX {shipQuote.seaFareUgx.toLocaleString()}</span></div>
               {shipDropoffLeg && <div className="flex justify-between gap-3"><span>Land transport from {shipQuote.destPort.city} port</span><span className="tabular-nums">UGX {shipQuote.dropoffFareUgx.toLocaleString()}</span></div>}
               <div className="flex justify-between gap-3 border-t border-[#c4a052]/30 pt-1.5 font-semibold text-slate-800">
-                <span>Total, paid from your wallet</span>
+                <span>Total, {payerLabel}</span>
                 <span className="tabular-nums">{formatIcan(shipQuote.totalIcan)} ICAN</span>
               </div>
             </div>
           )}
+          {payerPicker}
           {shipQuoteError && <p role="alert" className="text-center text-xs font-medium text-red-600">{shipQuoteError}</p>}
 
           <button
@@ -1988,11 +2019,16 @@ export default function JourneyBookingFlow({
               {quote.local ? `≈ ${formatMoney(quote.local.total, quote.local.currency)}` : `≈ UGX ${quote.totalUgx.toLocaleString()}`}
             </p>
             <p className="relative mt-2 text-[12.5px] leading-relaxed text-white/70">
-              A fixed price in ICAN, paid in full from your wallet with no tithe.
+              {payWithCompany
+                ? `A fixed price in ICAN, paid in full by ${companyBenefit.businessName || 'your company'} from its business wallet.`
+                : 'A fixed price in ICAN, paid in full from your wallet with no tithe.'}
               {quote.local && ` At today's live value: 1 ICAN = ${formatMoney(quote.local.pricePerIcan, quote.local.currency)}.`}
             </p>
           </div>
 
+          {payerPicker}
+
+          {!payWithCompany && (
           <div className="classic-tile !cursor-default space-y-3 p-3.5">
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-2.5 text-sm text-slate-600">
@@ -2021,6 +2057,7 @@ export default function JourneyBookingFlow({
               </div>
             )}
           </div>
+          )}
 
           <div className="space-y-3.5">
             <div className="flex items-center gap-3">

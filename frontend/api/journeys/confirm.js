@@ -31,8 +31,12 @@ export default async function handler(req, res) {
   const user = await requireUser(req, res);
   if (!user) return;
 
-  const { customerUserId, quote, passengers } = req.body;
+  const { customerUserId, quote, passengers, payWithCompany } = req.body;
   if (!requireMatchingUser(user, customerUserId, res)) return;
+
+  // "Business": the company wallet pays instead of the customer's own. Which company is
+  // worked out from this user's allocation in the database — never taken from the browser.
+  const paidByCompany = payWithCompany === true;
 
   // Either airport ride is optional (own car / a friend drives or collects the
   // customer). A ride that is left out is neither charged nor created; the
@@ -161,6 +165,23 @@ export default async function handler(req, res) {
       });
     }
 
+    // A company payment is only started if the company is allowed and can cover all of it
+    // (fare + goods), so a refusal here has charged nothing.
+    if (paidByCompany) {
+      const { data: companyCheck, error: companyCheckError } = await supabaseAdmin.rpc('mbg_company_journey_check', {
+        p_user_id: customerUserId,
+        p_amount_ican: chargeIcan
+      });
+      if (companyCheckError || !companyCheck?.success) {
+        if (companyCheckError) console.error('Company journey check failed:', companyCheckError.message);
+        return res.status(422).json({
+          success: false,
+          error: `${companyCheck?.error || 'Paying with your company is not available right now.'} You have not been charged.`,
+          code: 'company_payment'
+        });
+      }
+    }
+
     const journeyRow = {
       customer_id: customer.id,
       status: 'pending_payment',
@@ -201,12 +222,21 @@ export default async function handler(req, res) {
     if (journeyError) throw journeyError;
 
     // Tithe-free debit — see ICAN/backend/CREATE_JOURNEY_ESCROW_FUNCTION.sql.
-    const { data: debitResult, error: debitError } = await supabaseAdmin.rpc('mbg_debit_journey_fare', {
-      p_user_id: customerUserId,
-      p_ican_amount: transportIcan,
-      p_source_app: 'mybodaguy',
-      p_reference_id: journey.id
-    });
+    // (A company payment comes out of the company's business wallet instead, and its
+    // result has the same shape.)
+    const { data: debitResult, error: debitError } = paidByCompany
+      ? await supabaseAdmin.rpc('mbg_charge_company_journey', {
+          p_journey_id: journey.id,
+          p_user_id: customerUserId,
+          p_amount_ican: transportIcan,
+          p_part: 'fare'
+        })
+      : await supabaseAdmin.rpc('mbg_debit_journey_fare', {
+          p_user_id: customerUserId,
+          p_ican_amount: transportIcan,
+          p_source_app: 'mybodaguy',
+          p_reference_id: journey.id
+        });
     if (debitError || !debitResult?.success) {
       await supabaseAdmin.from('mbg_journeys').update({ status: 'failed' }).eq('id', journey.id);
       return res.status(400).json({ success: false, error: debitResult?.error || debitError?.message || 'Payment failed' });
@@ -225,7 +255,8 @@ export default async function handler(req, res) {
         p_customer_user_id: customerUserId,
         p_supermarket_id: storeOrder.supermarketId,
         p_cart: storeOrder.cart,
-        p_transport: 'air'
+        p_transport: 'air',
+        p_pay_with_company: paidByCompany
       });
       if (goodsError || !goodsResult?.success) {
         console.error('Import goods charge failed:', goodsError?.message || goodsResult?.error);
