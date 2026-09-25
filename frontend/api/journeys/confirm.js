@@ -279,6 +279,9 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('Journey confirm error:', error, paidJourneyId ? { journeyId: paidJourneyId, bookedOrderRef } : '');
+    // On a Duffel test token only, hand the real reason back so it shows in the
+    // browser console (journeyService logs `detail`) without digging through logs.
+    const detail = DUFFEL_TEST_MODE ? String(error?.message || error?.details || error).slice(0, 400) : undefined;
     if (paidJourneyId && bookedOrderRef) {
       // The airline ticket exists — a refund would be wrong; support must finish the setup.
       return res.status(500).json({
@@ -287,7 +290,8 @@ export default async function handler(req, res) {
         paymentTaken: true,
         ticketIssued: true,
         pnr: bookedOrderRef.pnr,
-        journeyId: paidJourneyId
+        journeyId: paidJourneyId,
+        detail
       });
     }
     if (paidJourneyId) {
@@ -295,7 +299,8 @@ export default async function handler(req, res) {
         success: false,
         error: 'Your payment went through but we could not finish setting up your journey — contact support for a refund',
         paymentTaken: true,
-        journeyId: paidJourneyId
+        journeyId: paidJourneyId,
+        detail
       });
     }
     res.status(500).json({ success: false, error: 'Failed to confirm journey' });
