@@ -5,7 +5,7 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { sellICAN, formatICAN, getBalance, getLiveUgxPrice, SELL_FEE_RATE } from '../services/icanWalletService';
+import { sellICAN, formatICAN, getBalance, getMyTradingInfo, SELL_FEE_RATE, type TradingInfo } from '../services/icanWalletService';
 import { useEffect } from 'react';
 
 interface SellIcanProps {
@@ -17,16 +17,19 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
   const [icanAmount, setIcanAmount] = useState('');
   const [processing, setProcessing] = useState(false);
   const [balance, setBalance] = useState(0);
-  // Sales pay at icaneracoin's live value, so nothing is quoted until it is known.
-  const [livePrice, setLivePrice] = useState<number | null>(null);
+  // Sales pay at icaneracoin's live value in the user's own currency, so nothing is quoted until it is known.
+  const [info, setInfo] = useState<TradingInfo | null>(null);
   const [priceFailed, setPriceFailed] = useState(false);
+  const livePrice = info?.price ?? null;
+  const currency = info?.currency ?? '';
+  const money = (n: number) => `${currency} ${n.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 
   useEffect(() => {
     let cancelled = false;
-    const load = () => getLiveUgxPrice().then((p) => {
+    const load = () => getMyTradingInfo().then((t) => {
       if (cancelled) return;
-      setLivePrice(p);
-      setPriceFailed(p === null);
+      setInfo(t);
+      setPriceFailed(t === null);
     });
     load();
     // The price moves slowly, but a sale should never be quoted from a stale figure.
@@ -47,7 +50,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
   }, [userId]);
 
   // What lands in the wallet: the coins at the live value, less the platform's cut — the one final number.
-  const ugxAmount = icanAmount && livePrice ? Math.round(parseFloat(icanAmount) * livePrice * (1 - SELL_FEE_RATE) * 100) / 100 : 0;
+  const payoutAmount = icanAmount && livePrice ? Math.round(parseFloat(icanAmount) * livePrice * (1 - SELL_FEE_RATE) * 100) / 100 : 0;
 
   const handleSell = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +77,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
         reference: `MBG-SELL-${Date.now()}`,
       });
 
-      toast.success(`Successfully sold ${formatICAN(parseFloat(icanAmount))} IcanEra for UGX ${result.ugx_payout.toLocaleString()} (after fees) — added to your IcanEra Wallet balance!`);
+      toast.success(`Successfully sold ${formatICAN(parseFloat(icanAmount))} IcanEra for ${result.currency} ${Number(result.payout).toLocaleString(undefined, { maximumFractionDigits: 2 })} (after fees) — added to your IcanEra Wallet balance!`);
       setIcanAmount('');
       if (onSuccess) onSuccess();
     } catch (error: any) {
@@ -94,7 +97,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
             {formatICAN(balance)} IcanEra
           </div>
           <div className="text-gray-500 text-xs mt-1">
-            {livePrice ? `≈ UGX ${Math.round(balance * livePrice).toLocaleString()}` : '…'}
+            {livePrice ? `≈ ${money(Math.round(balance * livePrice * 100) / 100)}` : '…'}
           </div>
         </div>
 
@@ -125,13 +128,13 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
           </div>
           <p className="text-xs text-gray-500 mt-1">
             {livePrice
-              ? `1 IcanEra = UGX ${livePrice.toLocaleString(undefined, { maximumFractionDigits: 2 })} (live value)`
+              ? `1 IcanEra = ${money(livePrice)} (live value)`
               : priceFailed ? "Couldn't load the live price — retrying…" : 'Loading the live price…'}
           </p>
         </div>
 
         {/* Conversion Display */}
-        {ugxAmount > 0 && (
+        {payoutAmount > 0 && (
           <div className="bg-gray-800 rounded-lg p-4 flex items-center justify-between">
             <div className="text-center flex-1">
               <div className="text-xs text-gray-400 mb-1">You Sell</div>
@@ -143,7 +146,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
             <div className="text-center flex-1">
               <div className="text-xs text-gray-400 mb-1">You Get</div>
               <div className="text-orange-400 font-bold text-lg">
-                UGX {ugxAmount.toLocaleString()}
+                {money(payoutAmount)}
               </div>
             </div>
           </div>
@@ -155,7 +158,7 @@ export default function SellIcan({ userId, onSuccess }: SellIcanProps) {
           <ul className="text-xs text-amber-200/80 space-y-1">
             <li>✓ Credited instantly to your IcanEra Wallet balance</li>
             <li>✓ To cash out to mobile money/bank, use "Send Out" instead</li>
-            <li>✓ Paid at the live value of IcanEra — never below UGX 5,000</li>
+            <li>✓ Paid at the live value of IcanEra, in your own currency</li>
           </ul>
         </div>
 

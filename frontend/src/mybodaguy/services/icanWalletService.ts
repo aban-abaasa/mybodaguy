@@ -68,14 +68,21 @@ export interface BuyResult {
   success: boolean;
   tx_id: string;
   ican_bought: number;
-  ugx_paid: number;
+  /** The user's own currency, and what the purchase cost in it. */
+  currency: string;
+  paid: number;
+  price_per_ican: number;
+  wallet_balance: number;
 }
 
 export interface SellResult {
   success: boolean;
   tx_id: string;
   ican_sold: number;
-  ugx_payout: number;
+  /** The user's own currency, and what landed in their wallet in it (after the fee). */
+  currency: string;
+  payout: number;
+  price_per_ican: number;
   wallet_balance: number;
 }
 
@@ -362,7 +369,7 @@ export async function buyICANFromWallet({
   userId: string;
   icanAmount: number;
   reference?: string | null;
-}): Promise<{ success: boolean; ican_bought: number; ugx_paid: number; price_per_ican: number; wallet_balance: number }> {
+}): Promise<BuyResult> {
   const { data, error } = await supabase.rpc('buy_ican_coins_from_wallet', {
     p_user_id: userId,
     p_ican_amount: icanAmount,
@@ -374,11 +381,26 @@ export async function buyICANFromWallet({
   return data;
 }
 
-/** The money (UGX) in the user's own IcanEra Wallet — what a purchase is paid from. */
-export async function getWalletUgxBalance(): Promise<number> {
-  const { data, error } = await supabase.rpc('get_my_wallet_ugx_balance');
-  if (error) throw error;
-  return Number(data) || 0;
+export interface TradingInfo {
+  /** The user's own currency (the country they chose at sign-up — the one the wallet badge shows). */
+  currency: string;
+  /** The LIVE price of one icaneracoin in that currency. */
+  price: number;
+  /** The money they hold in that currency in their IcanEra Wallet. */
+  walletBalance: number;
+}
+
+/**
+ * What the Buy / Sell screens need, in the USER'S OWN currency. `price` is the same figure the
+ * database buys and sells with, so the number shown is the number paid. Returns null if the price
+ * engine can't be reached, so callers refuse to quote a figure rather than show a wrong one.
+ */
+export async function getMyTradingInfo(): Promise<TradingInfo | null> {
+  const { data, error } = await supabase.rpc('get_my_ican_trading_info');
+  if (error || !data) return null;
+  const price = Number(data.price_per_ican);
+  if (!data.currency || !Number.isFinite(price) || price <= 0) return null;
+  return { currency: data.currency, price, walletBalance: Number(data.wallet_balance) || 0 };
 }
 
 /**
@@ -463,20 +485,6 @@ export async function requestIcanPayout({
 
 /** The platform's cut of a sale, as a share of what is sold (mirrors sell_ican_coins in SQL). */
 export const SELL_FEE_RATE = 0.03;
-
-/**
- * The LIVE price of one icaneracoin in UGX — the same number the wallet badge shows (the ICAN app's own
- * live-engine price, never below the 5,000 launch floor). Selling pays at this,
- * not at the floor. Returns null if the price engine can't be reached, so callers can refuse
- * to quote a figure rather than show a wrong one.
- */
-export async function getLiveUgxPrice(): Promise<number | null> {
-  // The same single function the database sells and buys with, so the number shown is the number paid.
-  const { data, error } = await supabase.rpc('ican_live_ugx_price');
-  if (error) return null;
-  const price = Number(data);
-  return Number.isFinite(price) && price > 0 ? price : null;
-}
 
 export function ugxToICAN(ugx: number): number {
   return Math.floor((ugx / ICAN_TO_UGX) * 1e8) / 1e8;
