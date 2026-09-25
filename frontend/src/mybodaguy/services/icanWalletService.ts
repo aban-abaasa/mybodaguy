@@ -465,16 +465,16 @@ export async function requestIcanPayout({
 export const SELL_FEE_RATE = 0.03;
 
 /**
- * The LIVE price of one icaneracoin in UGX — the same number the wallet badge shows (FX, the
- * inflation floor and network usage; never below the 5,000 launch floor). Selling pays at this,
+ * The LIVE price of one icaneracoin in UGX — the same number the wallet badge shows (the ICAN app's own
+ * live-engine price, never below the 5,000 launch floor). Selling pays at this,
  * not at the floor. Returns null if the price engine can't be reached, so callers can refuse
  * to quote a figure rather than show a wrong one.
  */
 export async function getLiveUgxPrice(): Promise<number | null> {
-  const { data, error } = await supabase.rpc('ican_get_price_in_currency', { p_currency_code: 'UGX' });
+  // The same single function the database sells and buys with, so the number shown is the number paid.
+  const { data, error } = await supabase.rpc('ican_live_ugx_price');
   if (error) return null;
-  const row = Array.isArray(data) ? data[0] : data;
-  const price = Number(row?.price_local);
+  const price = Number(data);
   return Number.isFinite(price) && price > 0 ? price : null;
 }
 
