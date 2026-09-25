@@ -1,4 +1,4 @@
-import type { AirTicket } from './journeyService';
+import { airTicketVerifyUrl, type AirTicket } from './journeyService';
 
 const fmtDateTime = (iso: string | null) =>
   iso ? new Date(iso).toLocaleString(undefined, { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'TBC';
@@ -121,10 +121,45 @@ export async function downloadAirTicketPdf(ticket: AirTicket): Promise<void> {
   label('Fare paid to the airline', M, y);
   value(`${ticket.totalCurrency} ${ticket.totalAmount}`, M, y + 6, 11);
   if (ticket.totalPaidIcan != null) {
-    label('Journey total paid (ICAN wallet)', W / 2, y);
-    value(`${Number(ticket.totalPaidIcan).toFixed(4)} ICAN${ticket.totalPaidUgx ? `  (UGX ${Number(ticket.totalPaidUgx).toLocaleString()})` : ''}`, W / 2, y + 6, 10);
+    label('Journey total paid (icaneracoin wallet)', W / 2, y);
+    value(`${Number(ticket.totalPaidIcan).toFixed(4)} icaneracoin${ticket.totalPaidUgx ? `  (UGX ${Number(ticket.totalPaidUgx).toLocaleString()})` : ''}`, W / 2, y + 6, 10);
   }
   y += 18;
+
+  // Proof-of-authenticity QR. It holds only a link to a random 128-bit code;
+  // the check itself runs live on the server (mbg_verify_air_ticket), so it
+  // can't be forged and stops verifying if the booking is cancelled.
+  if (ticket.verifyCode) {
+    const QR = 34;
+    ensureRoom(QR + 12);
+    const url = airTicketVerifyUrl(ticket.verifyCode);
+    try {
+      const QRCode = (await import('qrcode')).default;
+      const qrPng = await QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 1, width: 400 });
+      doc.setDrawColor(226, 232, 240);
+      doc.line(M, y, W - M, y);
+      y += 6;
+      doc.addImage(qrPng, 'PNG', W - M - QR, y, QR, QR);
+      label('Proof of authenticity', M, y + 3);
+      value('Scan to verify this ticket', M, y + 11, 13);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(71, 85, 105);
+      const how = doc.splitTextToSize(
+        'The QR code checks this ticket live against the BodaGoEra booking record: it confirms the passenger, flight and payment, and shows if the booking has since been cancelled or the flight rescheduled.',
+        W - 2 * M - QR - 8,
+      ) as string[];
+      doc.text(how, M, y + 18);
+      doc.setFontSize(7.5);
+      doc.setTextColor(120, 113, 108);
+      doc.text(`Verification code ${ticket.verifyCode.slice(0, 8).toUpperCase()}`, M, y + QR - 5);
+      doc.text(url.replace(/^https?:\/\//, ''), M, y + QR - 1);
+      y += QR + 8;
+    } catch (qrError) {
+      // A QR failure must never block the ticket download itself.
+      console.error('Air ticket QR could not be generated:', qrError);
+    }
+  }
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);

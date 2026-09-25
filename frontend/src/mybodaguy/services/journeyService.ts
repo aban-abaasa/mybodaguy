@@ -279,7 +279,12 @@ export interface AirTicket {
   totalPaidIcan: number | null;
   totalPaidUgx: number | null;
   bookedAt: string | null;
+  /** Random code behind the ticket's QR (mbg_journeys.ticket_verify_code); null until ADD_AIR_TICKET_VERIFICATION.sql is run. */
+  verifyCode?: string | null;
 }
+
+/** Where a ticket's QR points — always the live site, since a printed/PDF ticket is scanned in the real world. */
+export const airTicketVerifyUrl = (code: string) => `${MBG_API_BASE_URL}/ticket/${code}`;
 
 /** The customer's air ticket for a booked journey, read live from the airline order. */
 export async function getAirTicket(journeyId: string): Promise<AirTicket> {

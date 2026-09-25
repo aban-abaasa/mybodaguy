@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     }
     const { getOrderTicket } = await import('../_lib/duffel.js');
     const airTicket = await getOrderTicket(booking.provider_order_id);
-    res.status(200).json({ success: true, ticket: { ...airTicket, journeyId: journey.id, totalPaidIcan: journey.total_fare_ican, totalPaidUgx: journey.total_fare_ugx } });
+    res.status(200).json({ success: true, ticket: { ...airTicket, journeyId: journey.id, totalPaidIcan: journey.total_fare_ican, totalPaidUgx: journey.total_fare_ugx, verifyCode: journey.ticket_verify_code || null } });
   } catch (error) {
     console.error('Journey fetch error:', error.duffelResponse || error);
     res.status(500).json({ success: false, error: req.query.ticket ? 'Could not load your air ticket right now — please try again.' : 'Failed to fetch journey' });

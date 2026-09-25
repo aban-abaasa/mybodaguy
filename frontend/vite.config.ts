@@ -12,6 +12,12 @@ export default defineConfig({
       "convex/server": path.resolve(__dirname, "./src/shims/convex-server.ts"),
     },
   },
+  // jsPDF and qrcode are only imported on demand (air ticket download); listing it here
+  // pre-bundles it at startup so Vite doesn't re-optimize mid-session and
+  // leave open tabs with a stale "Outdated Optimize Dep" hash.
+  optimizeDeps: {
+    include: ["jspdf", "qrcode"],
+  },
   server: {
     port: 5177,
     proxy: {

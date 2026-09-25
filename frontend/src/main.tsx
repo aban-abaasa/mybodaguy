@@ -7,6 +7,7 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
 import PushAlertsPrompt from "./components/PushAlertsPrompt";
 import VerifyReceiptPage from "./mybodaguy/components/VerifyReceiptPage";
+import TicketVerifyPage from "./mybodaguy/components/TicketVerifyPage";
 import SupportConsole from "./mybodaguy/pages/SupportConsole";
 import { captureReferralFromUrl } from "./mybodaguy/services/referralService";
 
@@ -58,6 +59,9 @@ let verifyMatch = window.location.pathname.match(/^\/verify\/([A-Za-z0-9]+)/);
 // SupportConsole.tsx) — a password-gated link into Public Board + Messages
 // for someone with no mybodaguy account. Same plain-pathname-check
 // precedent as /verify above; no router wired up in this app.
+// Air ticket QR (https://bodagoera.icanera.space/ticket/<code>) — public, same pattern as /verify.
+const ticketMatch = window.location.pathname.match(/^\/ticket\/([A-Za-z0-9]+)/);
+
 const isSupportConsole = window.location.pathname === '/support-console';
 
 // VerifyReceiptPage's "Sign in with Google to Approve" passes
@@ -78,6 +82,8 @@ if (!verifyMatch && window.location.hash.includes('access_token')) {
 createRoot(document.getElementById("root")!).render(
   verifyMatch ? (
     <VerifyReceiptPage code={verifyMatch[1]} />
+  ) : ticketMatch ? (
+    <TicketVerifyPage code={ticketMatch[1]} />
   ) : isSupportConsole ? (
     <SupportConsole />
   ) : (
