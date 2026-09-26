@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 import { AlertCircle, ArrowLeft, Check, X } from 'lucide-react';
 
 // Presentational pieces for the "Book a full journey" page, in the same
@@ -92,6 +92,47 @@ export function StepCard({
       </header>
       {children}
     </section>
+  );
+}
+
+/**
+ * One option in a 2-up choice grid. On narrow phones (<400px) the icon sits
+ * above the text so the description gets the tile's full width instead of
+ * wrapping one word per line; wider screens keep icon and text side by side.
+ */
+export function ChoiceTile({
+  label, desc, Icon, active, disabled, onClick,
+}: {
+  label: string;
+  desc?: string;
+  Icon?: ComponentType<{ size?: number }>;
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={`classic-tile relative flex min-h-[64px] flex-col items-start gap-2 p-3 text-left disabled:cursor-not-allowed disabled:opacity-50 min-[400px]:flex-row min-[400px]:items-center min-[400px]:gap-3 ${active ? 'is-active' : ''}`}
+    >
+      {active && (
+        <span aria-hidden className="absolute right-2 top-2 grid h-5 w-5 place-items-center rounded-full bg-[#c4a052] text-white">
+          <Check size={12} strokeWidth={3} />
+        </span>
+      )}
+      {Icon && (
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40 min-[400px]:h-10 min-[400px]:w-10">
+          <Icon size={18} />
+        </span>
+      )}
+      <span className="min-w-0 pr-5 min-[400px]:pr-4">
+        <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800">{label}</span>
+        {desc && <span className="mt-0.5 block text-[11px] leading-snug text-slate-500">{desc}</span>}
+      </span>
+    </button>
   );
 }
 
