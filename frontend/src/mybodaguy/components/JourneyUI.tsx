@@ -76,7 +76,7 @@ export function StepCard({
   children: ReactNode;
 }) {
   return (
-    <section className="classic-card animate-step-in space-y-5 p-4 min-[420px]:p-5">
+    <section className="classic-card animate-step-in space-y-5 p-3.5 sm:p-5">
       <header className="space-y-2">
         {onBack && (
           <button type="button" onClick={onBack} className="classic-btn classic-btn-ghost -ml-2">
@@ -96,10 +96,11 @@ export function StepCard({
 }
 
 /**
- * One option in a 2-up choice grid. On narrow phones (<400px) it stays
+ * One option in a 2-up choice grid. On phones (below `sm`) it stays
  * compact: a small icon inline with the title and the description on its own
- * line underneath at the tile's full width. Wider screens put a larger icon
- * beside both lines.
+ * line underneath at the tile's full width. Tablets and up put a larger
+ * icon beside both lines. Keyed to `sm`, not a phone width, because the tile
+ * sits inside several padded containers and is far narrower than the screen.
  */
 export function ChoiceTile({
   label, desc, Icon, active, disabled, onClick,
@@ -117,7 +118,7 @@ export function ChoiceTile({
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
-      className={`classic-tile relative grid grid-cols-[auto_1fr] content-center items-center gap-x-2 gap-y-1 px-2.5 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-50 min-[400px]:gap-x-3 min-[400px]:p-3 ${active ? 'is-active' : ''}`}
+      className={`classic-tile relative grid grid-cols-[auto_1fr] content-center items-center gap-x-2 gap-y-1 px-2.5 py-2.5 text-left disabled:cursor-not-allowed disabled:opacity-50 sm:gap-x-3 sm:p-3 ${active ? 'is-active' : ''}`}
     >
       {active && (
         <span aria-hidden className="absolute right-1.5 top-1.5 grid h-4 w-4 place-items-center rounded-full bg-[#c4a052] text-white">
@@ -125,15 +126,15 @@ export function ChoiceTile({
         </span>
       )}
       {Icon && (
-        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40 min-[400px]:row-span-2 min-[400px]:h-10 min-[400px]:w-10">
-          <Icon size={15} className="min-[400px]:h-5 min-[400px]:w-5" />
+        <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40 sm:row-span-2 sm:h-10 sm:w-10">
+          <Icon size={15} className="sm:h-5 sm:w-5" />
         </span>
       )}
-      <span className={`min-w-0 pr-4 font-classic-display text-[14px] font-semibold leading-tight text-slate-800 min-[400px]:self-end min-[400px]:text-[15px] ${Icon ? '' : 'col-span-2'}`}>
+      <span className={`min-w-0 pr-4 font-classic-display text-[14px] font-semibold leading-tight text-slate-800 sm:self-end sm:text-[15px] ${Icon ? '' : 'col-span-2'}`}>
         {label}
       </span>
       {desc && (
-        <span className={`col-span-2 block text-[11px] leading-snug text-slate-500 min-[400px]:self-start ${Icon ? 'min-[400px]:col-span-1 min-[400px]:col-start-2' : ''}`}>
+        <span className={`col-span-2 block text-[11px] leading-snug text-slate-500 sm:self-start ${Icon ? 'sm:col-span-1 sm:col-start-2' : ''}`}>
           {desc}
         </span>
       )}
