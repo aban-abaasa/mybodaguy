@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { chairpersonService, SubordinateChairperson, CommitteeMember, CommissionRecord } from '../services/chairpersonService';
@@ -815,7 +816,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
       {showAssignRiderModal && selectedAssignment && selectedAssignment.region_type === 'stage' && (
         <AssignRiderModal
           stageId={selectedAssignment.region_id}
-          stageName={formatRegionType(selectedAssignment.region_type)}
+          stageName={selectedAssignment.region_name || undefined}
           onClose={() => setShowAssignRiderModal(false)}
           onSuccess={() => {
             setShowAssignRiderModal(false);
@@ -1524,227 +1525,265 @@ function AssignRiderModal({ stageId, stageName, onClose, onSuccess }: AssignRide
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full my-8 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-xl font-bold text-slate-800">Assign Rider to Stage</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <X size={24} />
-          </button>
+  const selectedUser = users.find(u => u.id === selectedUserId);
+  const displayName = (u: any) => u?.mbg_user_profiles?.[0]?.full_name || u?.email?.split('@')[0] || 'User';
+  const canSubmit = !assigning && !!selectedUserId && !!plateNumber && !!licenseNumber;
+  const vehicleOptions: { value: 'motorcycle' | 'bicycle' | 'tuktuk'; label: string; emoji: string }[] = [
+    { value: 'motorcycle', label: 'Boda', emoji: '🏍️' },
+    { value: 'bicycle', label: 'Bicycle', emoji: '🚲' },
+    { value: 'tuktuk', label: 'Tuktuk', emoji: '🛺' },
+  ];
+
+  // Lock background scroll while the sheet is open so the page behind it
+  // can't drift and push the sheet's top out of view on small phones.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, []);
+
+  // Portal to <body> so no transformed/sticky ancestor or the z-50 header can
+  // clip or cover the top of the sheet.
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[1000] flex items-end justify-center bg-black/50 sm:items-center sm:p-4"
+      onClick={(e) => { if (e.target === e.currentTarget && !assigning) onClose(); }}
+    >
+      <form
+        onSubmit={handleSubmit}
+        className="classic-card flex w-full max-h-[92vh] max-h-[92dvh] flex-col overflow-hidden !rounded-b-none sm:max-w-2xl sm:max-h-[90vh] sm:max-h-[90dvh] sm:!rounded-b-[20px]"
+      >
+        {/* Header — stays put while the form scrolls */}
+        <div className="shrink-0 border-b border-slate-200 px-4 pb-3 pt-2 sm:px-6 sm:pt-5">
+          <div className="mx-auto mb-2 h-1 w-10 rounded-full bg-slate-300 sm:hidden" />
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="classic-eyebrow">Stage chairperson</p>
+              <h3 className="font-classic-display text-lg font-bold leading-tight text-slate-800 sm:text-xl">Assign Rider</h3>
+              {stageName && <p className="mt-0.5 truncate text-xs text-slate-500">{stageName}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={assigning}
+              aria-label="Close"
+              className="-mr-1 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            >
+              <X size={22} />
+            </button>
+          </div>
         </div>
 
-        <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
-          <p className="text-sm text-green-700">
-            <strong>Stage Chairperson:</strong> Assign riders who will operate in your stage area
-          </p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Scrollable body */}
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
           {/* User Selection */}
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Select User *
-            </label>
-            
+          <section>
+            <label className="classic-label">Select user *</label>
+
             {loadingUsers ? (
-              <div className="w-full px-4 py-3 border border-slate-300 rounded-lg bg-slate-50 text-slate-600 text-sm">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                <div className="h-4 w-4 animate-spin rounded-full border-b-2 border-orange-500" />
                 Loading users...
+              </div>
+            ) : selectedUser ? (
+              <div className="flex items-center gap-3 rounded-xl border border-green-300 bg-green-50 p-3">
+                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-green-500 font-bold text-white">
+                  {displayName(selectedUser).charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold text-slate-800">{displayName(selectedUser)}</p>
+                  <p className="truncate text-xs text-slate-600">{selectedUser.email}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedUserId('')}
+                  className="flex-shrink-0 rounded-full px-3 py-2 text-xs font-semibold text-green-700 hover:bg-green-100"
+                >
+                  Change
+                </button>
               </div>
             ) : (
               <>
                 <div className="relative mb-2">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
+                  <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                   <input
-                    type="text"
+                    type="search"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by name or email..."
-                    className="w-full pl-10 pr-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                    placeholder="Search name or email"
+                    className="classic-input !pl-10"
                   />
                 </div>
-                
-                <div className="border border-slate-300 rounded-lg max-h-48 overflow-y-auto">
+
+                <div className="max-h-[38vh] overflow-y-auto overscroll-contain rounded-xl border border-slate-200 sm:max-h-56">
                   {filteredUsers.length === 0 ? (
-                    <div className="p-4 text-sm text-slate-500 text-center">
+                    <div className="p-4 text-center text-sm text-slate-500">
                       {searchQuery ? 'No users found' : 'No users available'}
                     </div>
                   ) : (
-                    <div className="divide-y divide-slate-200">
+                    <div className="divide-y divide-slate-100">
                       {filteredUsers.map((user) => (
                         <button
                           key={user.id}
                           type="button"
                           onClick={() => setSelectedUserId(user.id)}
-                          className={`w-full px-4 py-3 text-left hover:bg-slate-50 transition-colors ${
-                            selectedUserId === user.id ? 'bg-green-50 border-l-4 border-green-500' : ''
-                          }`}
+                          className="flex w-full items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-slate-50 active:bg-slate-100"
                         >
-                          <div className="flex items-center justify-between">
-                            <div className="flex-1">
-                              <p className="font-medium text-slate-800">
-                                {user.mbg_user_profiles?.[0]?.full_name || user.email.split('@')[0]}
-                              </p>
-                              <p className="text-sm text-slate-600">{user.email}</p>
-                              <p className="text-xs text-slate-500 mt-0.5">
-                                Current role: <span className="font-medium">{user.role_type}</span>
-                              </p>
-                            </div>
-                            {selectedUserId === user.id && (
-                              <Check size={20} className="text-green-600" />
-                            )}
+                          <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-slate-200 text-sm font-bold text-slate-600">
+                            {displayName(user).charAt(0).toUpperCase()}
                           </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-medium text-slate-800">{displayName(user)}</p>
+                            <p className="truncate text-xs text-slate-500">{user.email}</p>
+                          </div>
+                          <span className="flex-shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium capitalize text-slate-600">
+                            {user.role_type}
+                          </span>
                         </button>
                       ))}
                     </div>
                   )}
                 </div>
-                
-                {selectedUserId && (
-                  <p className="text-xs text-green-600 mt-2 flex items-center gap-1">
-                    <Check size={14} />
-                    User selected: {users.find(u => u.id === selectedUserId)?.email}
-                  </p>
-                )}
               </>
             )}
-          </div>
+          </section>
 
           {/* Vehicle Information */}
-          <div className="border-t border-slate-200 pt-4">
-            <h4 className="font-semibold text-slate-700 mb-3">Vehicle Information</h4>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Vehicle Type *
-                </label>
-                <select
-                  value={vehicleType}
-                  onChange={(e) => setVehicleType(e.target.value as any)}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  required
-                >
-                  <option value="motorcycle">Motorcycle (Boda Boda)</option>
-                  <option value="bicycle">Bicycle</option>
-                  <option value="tuktuk">Tuktuk</option>
-                </select>
-              </div>
+          <section className="space-y-4 border-t border-slate-200 pt-4">
+            <h4 className="text-sm font-semibold text-slate-700">Vehicle information</h4>
 
+            <div>
+              <label className="classic-label">Vehicle type *</label>
+              <div className="grid grid-cols-3 gap-2">
+                {vehicleOptions.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setVehicleType(opt.value)}
+                    aria-pressed={vehicleType === opt.value}
+                    className={`flex min-h-[56px] flex-col items-center justify-center rounded-xl border px-1 py-2 text-xs font-semibold transition-colors ${
+                      vehicleType === opt.value
+                        ? 'border-orange-400 bg-orange-50 text-orange-700 ring-1 ring-orange-400'
+                        : 'border-slate-200 text-slate-600 hover:border-orange-200'
+                    }`}
+                  >
+                    <span className="text-lg leading-none">{opt.emoji}</span>
+                    <span className="mt-1">{opt.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Plate Number *
-                </label>
+                <label className="classic-label">Plate number *</label>
                 <input
                   type="text"
                   value={plateNumber}
                   onChange={(e) => setPlateNumber(e.target.value.toUpperCase())}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent uppercase"
+                  className="classic-input uppercase"
                   placeholder="UBD 123A"
+                  autoCapitalize="characters"
+                  autoComplete="off"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  License Number *
-                </label>
+                <label className="classic-label">License number *</label>
                 <input
                   type="text"
                   value={licenseNumber}
                   onChange={(e) => setLicenseNumber(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  className="classic-input"
                   placeholder="License number"
+                  autoComplete="off"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  License Expiry
-                </label>
+                <label className="classic-label">License expiry</label>
                 <input
                   type="date"
                   value={licenseExpiry}
                   onChange={(e) => setLicenseExpiry(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  className="classic-input"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Vehicle Model
-                </label>
+                <label className="classic-label">Vehicle model</label>
                 <input
                   type="text"
                   value={vehicleModel}
                   onChange={(e) => setVehicleModel(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  className="classic-input"
                   placeholder="e.g., Bajaj Boxer"
                 />
               </div>
+            </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Vehicle Year
-                </label>
+            <div className="grid grid-cols-2 gap-3 sm:gap-4">
+              <div className="min-w-0">
+                <label className="classic-label">Year</label>
                 <input
                   type="number"
+                  inputMode="numeric"
                   value={vehicleYear}
                   onChange={(e) => setVehicleYear(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                  className="classic-input"
                   placeholder="2023"
                   min="1990"
                   max={new Date().getFullYear() + 1}
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">
-                  Vehicle Color
-                </label>
+              <div className="min-w-0">
+                <label className="classic-label">Color</label>
                 <input
                   type="text"
                   value={vehicleColor}
                   onChange={(e) => setVehicleColor(e.target.value)}
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 focus:border-transparent"
-                  placeholder="e.g., Red, Blue"
+                  className="classic-input"
+                  placeholder="e.g., Red"
                 />
               </div>
             </div>
-          </div>
+          </section>
+        </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={assigning}
-              className="flex-1 px-4 py-2 border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={assigning || !selectedUserId || !plateNumber || !licenseNumber}
-              className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors disabled:opacity-50"
-            >
-              {assigning ? (
-                <>
-                  <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                  <span>Assigning...</span>
-                </>
-              ) : (
-                <>
-                  <Bike size={18} />
-                  <span>Assign Rider</span>
-                </>
-              )}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+        {/* Footer — always reachable above the keyboard / home indicator */}
+        <div className="flex shrink-0 gap-2 border-t border-slate-200 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:gap-3 sm:px-6 sm:pb-4">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={assigning}
+            className="classic-btn classic-btn-outline !w-auto flex-shrink-0 !px-4"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!canSubmit}
+            className="classic-btn classic-btn-primary min-w-0 flex-1"
+          >
+            {assigning ? (
+              <>
+                <div className="inline-block h-4 w-4 animate-spin rounded-full border-b-2 border-white" />
+                <span>Assigning...</span>
+              </>
+            ) : (
+              <>
+                <Bike size={18} />
+                <span className="truncate">Assign Rider</span>
+              </>
+            )}
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body
   );
 }
 
