@@ -965,7 +965,7 @@ export default function JourneyBookingFlow({
   };
 
   return (
-    <div ref={containerRef} className="mx-auto max-w-2xl scroll-mt-4 space-y-5 px-4 py-6">
+    <div ref={containerRef} className="mx-auto max-w-2xl scroll-mt-4 space-y-5 py-4 sm:px-4 sm:py-6">
       <header className="text-center">
         <p className="classic-eyebrow">Door to door</p>
         <h2 className="mt-1 font-classic-display text-[28px] font-bold leading-tight text-slate-800">Book a full journey</h2>
@@ -1607,7 +1607,7 @@ export default function JourneyBookingFlow({
 
           {/* Sticks to the bottom of the screen so "Continue" is always one
               tap away on a phone, however long this step gets. */}
-          <div className="sticky bottom-0 z-10 -mx-4 space-y-2 border-t border-[#c4a052]/25 bg-white/95 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur min-[420px]:-mx-5 min-[420px]:px-5 dark:bg-slate-800/95">
+          <div className="sticky bottom-0 z-10 -mx-3.5 space-y-2 border-t border-[#c4a052]/25 bg-white/95 px-3.5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:-mx-5 sm:px-5 dark:bg-slate-800/95">
             <button
               disabled={(wantPickupRide && ((!selectedAreaId && !manualAddress.trim()) || geocoding)) || (parcelMode && !parcelDescription.trim())}
               onClick={goToFlightStep}
