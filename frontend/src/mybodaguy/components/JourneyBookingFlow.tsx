@@ -991,13 +991,13 @@ export default function JourneyBookingFlow({
                 type="button"
                 aria-pressed={active}
                 onClick={() => changeBookingKind(kind)}
-                className={`flex min-h-[48px] flex-col items-center justify-center gap-0.5 whitespace-nowrap rounded-xl px-1 text-[12px] font-bold leading-none transition-all min-[400px]:flex-row min-[400px]:gap-2 min-[400px]:text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c4a052] ${
+                className={`flex min-h-[40px] items-center justify-center gap-1 whitespace-nowrap rounded-xl px-1 text-[12px] font-bold leading-none transition-all min-[400px]:min-h-[44px] min-[400px]:gap-2 min-[400px]:text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c4a052] ${
                   active
                     ? 'bg-gradient-to-br from-[#231b12] to-[#3d2e18] text-[#f6e7bd] shadow-md ring-1 ring-inset ring-[#c4a052]/50'
                     : 'text-slate-500 hover:bg-[#c4a052]/10 hover:text-[#7a5a12]'
                 }`}
               >
-                <Icon size={16} /> {label}
+                <Icon size={14} className="shrink-0 max-[359px]:hidden min-[400px]:h-4 min-[400px]:w-4" /> {label}
               </button>
             );
           })}
