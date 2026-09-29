@@ -4,6 +4,9 @@ import {
   Smartphone, Sparkles, Wallet, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { jsPDF } from 'jspdf';
+import QRCode from 'qrcode';
+import { QRCodeCanvas as ReceiptQrCode } from 'qrcode.react';
 import { supabase } from '../../services/supabaseClient';
 import {
   getOrCreateWallet,
@@ -421,6 +424,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const [modal, setModal] = useState<WalletAction | 'qr' | null>(null);
   const [selectedTx, setSelectedTx] = useState<ICANTransaction | null>(null);
   const [paymentReceipt, setPaymentReceipt] = useState<any>(null);
+  const [paymentReceiptWebsite, setPaymentReceiptWebsite] = useState(typeof window !== 'undefined' ? window.location.origin : 'https://bodagoera.icanera.space');
   const [balanceHidden, setBalanceHidden] = useState<boolean>(() => {
     try { return localStorage.getItem(HIDE_KEY) === '1'; } catch { return false; }
   });
@@ -504,26 +508,53 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
     }
   };
 
-  const downloadPaymentReceipt = () => {
+  const resolvePaymentReceiptWebsite = useCallback(async () => {
+    if (!paymentReceipt?.recipientUserId) return window.location.origin;
+    try {
+      const { data: business } = await supabase.from('business_profiles')
+        .select('id, website').eq('user_id', paymentReceipt.recipientUserId).limit(1).maybeSingle();
+      if (!business?.id) return window.location.origin;
+      const { data: company } = await supabase.from('cmms_company_profiles')
+        .select('id').eq('pichin_business_profile_id', business.id).maybeSingle();
+      const website = company?.id ? `${window.location.origin}/notices/${company.id}` : business.website;
+      return website ? (/^https?:\/\//i.test(website) ? website : `https://${website}`) : window.location.origin;
+    } catch (error) {
+      console.warn('Could not resolve public payment recipient website:', error);
+      return window.location.origin;
+    }
+  }, [paymentReceipt]);
+
+  useEffect(() => {
     if (!paymentReceipt) return;
-    const text = [
-      'ICANERA WALLET PAYMENT RECEIPT',
-      '--------------------------------',
+    let cancelled = false;
+    resolvePaymentReceiptWebsite().then((website) => { if (!cancelled) setPaymentReceiptWebsite(website); });
+    return () => { cancelled = true; };
+  }, [paymentReceipt, resolvePaymentReceiptWebsite]);
+
+  const downloadPaymentReceipt = async () => {
+    if (!paymentReceipt) return;
+    const websiteUrl = await resolvePaymentReceiptWebsite();
+    const qr = await QRCode.toDataURL(websiteUrl, { margin: 1, width: 260 });
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+    pdf.setFillColor(49, 46, 129); pdf.rect(0, 0, 210, 38, 'F');
+    pdf.setFillColor(196, 160, 82); pdf.rect(0, 38, 210, 2, 'F');
+    pdf.setTextColor(255, 253, 248); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(22); pdf.text('BodaGoEra · ICANera receipt', 18, 24);
+    pdf.setTextColor(49, 46, 129); pdf.setFont('helvetica', 'normal'); pdf.setFontSize(12);
+    const lines = [
       `Receipt: ${paymentReceipt.receiptNumber}`,
       `Transaction: ${paymentReceipt.transactionId || 'N/A'}`,
       `Amount: ${formatICAN(paymentReceipt.amount)} ${unitLabel(paymentReceipt.currency)}`,
-      `Description: ${paymentReceipt.description}`,
-      `Payment code: ${paymentReceipt.paymentCode}`,
+      `Description: ${paymentReceipt.description || 'Payment'}`,
+      `Payment code: ${paymentReceipt.paymentCode || 'N/A'}`,
       `Date: ${new Date(paymentReceipt.issuedAt).toLocaleString('en-UG')}`,
-      '',
       'Payment successful.',
-    ].join('\n');
-    const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${paymentReceipt.receiptNumber}.txt`;
-    link.click();
-    URL.revokeObjectURL(url);
+    ];
+    pdf.text(lines, 18, 60, { lineHeightFactor: 1.8 });
+    pdf.setDrawColor(196, 160, 82); pdf.setFillColor(250, 248, 241); pdf.roundedRect(74, 210, 62, 58, 3, 3, 'FD');
+    pdf.addImage(qr, 'PNG', 89, 212, 32, 32);
+    pdf.setTextColor(49, 46, 129); pdf.setFontSize(9); pdf.text('Visit BodaGoEra', 105, 251, { align: 'center' });
+    pdf.setTextColor(71, 85, 105); pdf.setFontSize(8); pdf.text(websiteUrl, 105, 257, { align: 'center' });
+    pdf.save(`${paymentReceipt.receiptNumber}.pdf`);
   };
 
   const filteredTx = useMemo(() => transactions.filter((tx) => {
@@ -841,8 +872,13 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
               </div>
             ))}
           </div>
+          <div className="mt-4 rounded-2xl border border-[#c4a052]/40 bg-[#faf8f1] p-4 text-center dark:bg-slate-800/70">
+            <ReceiptQrCode value={paymentReceiptWebsite} size={132} includeMargin />
+            <p className="mt-2 text-xs font-semibold text-indigo-900 dark:text-amber-200">Scan to visit the BodaGoEra website</p>
+            <p className="mt-1 break-all text-[11px] text-slate-600 dark:text-slate-300">{paymentReceiptWebsite}</p>
+          </div>
           <div className="mt-5 grid grid-cols-[1.4fr_1fr] gap-3">
-            <button type="button" onClick={downloadPaymentReceipt} className="classic-btn classic-btn-ink">Download receipt</button>
+            <button type="button" onClick={downloadPaymentReceipt} className="classic-btn classic-btn-ink">Download QR receipt</button>
             <button type="button" onClick={() => setPaymentReceipt(null)} className="classic-btn classic-btn-outline">Close</button>
           </div>
         </WalletSheet>

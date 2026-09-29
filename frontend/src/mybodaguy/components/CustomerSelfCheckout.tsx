@@ -5,6 +5,8 @@ import {
   ReceiptText, QrCode, Store,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import QRCode from 'qrcode';
+import { QRCodeCanvas as ReceiptQrCode } from 'qrcode.react';
 import { supabase } from '../../services/supabaseClient';
 import {
   getBalance,
@@ -119,6 +121,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [payment, setPayment] = useState<PaymentMethod>('cash');
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<CheckoutReceipt | null>(null);
+  const [receiptWebsiteUrl, setReceiptWebsiteUrl] = useState(typeof window !== 'undefined' ? window.location.origin : 'https://bodagoera.icanera.space');
   const [icanBalance, setIcanBalance] = useState<ICANBalance | null>(null);
   const [detectorSupported, setDetectorSupported] = useState(false);
 
@@ -412,6 +415,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     // Refresh ICAN balance
     if (user?.id) getBalance(user.id).then(setIcanBalance).catch(() => {});
 
+    setReceiptWebsiteUrl(await resolveReceiptWebsite());
     setCart([]);
     setState('complete');
   }
@@ -427,6 +431,34 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     setReceipt(null);
     setPayment('cash');
     setState('idle');
+  }
+
+  async function resolveReceiptWebsite() {
+    if (!selectedSupermarketId) return window.location.origin;
+    try {
+      const { data: store } = await supabase.from('supermarkets')
+        .select('pichin_business_profile_id').eq('id', selectedSupermarketId).maybeSingle();
+      if (store?.pichin_business_profile_id) {
+        const { data: company } = await supabase.from('cmms_company_profiles')
+          .select('id').eq('pichin_business_profile_id', store.pichin_business_profile_id).maybeSingle();
+        if (company?.id) return `${window.location.origin}/notices/${company.id}`;
+      }
+    } catch (error) {
+      console.warn('Could not resolve store public website for checkout receipt QR:', error);
+    }
+    return window.location.origin;
+  }
+
+  async function printCheckoutReceipt() {
+    if (!receipt) return;
+    const website = await resolveReceiptWebsite();
+    setReceiptWebsiteUrl(website);
+    const qr = await QRCode.toDataURL(website, { margin: 1, width: 240 });
+    const printWindow = window.open('', '_blank', 'width=720,height=800');
+    if (!printWindow) return;
+    const rows = receipt.items.map((item) => `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td>${formatUGX(item.line_total)}</td></tr>`).join('');
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${receipt.receipt_number}</title><style>body{font:15px Georgia,serif;background:#f5f2e9;color:#25253f;padding:32px}.receipt{max-width:560px;margin:auto;background:#fffdf8;border:1px solid #c4a052;border-radius:16px;padding:28px}.head{margin:-28px -28px 22px;padding:22px;background:#312e81;color:#fff;border-bottom:4px solid #c4a052;border-radius:16px 16px 0 0}table{width:100%;border-collapse:collapse}td{padding:9px;border-bottom:1px solid #e8e1d0}td:last-child{text-align:right}.total{margin-top:18px;padding:14px;background:#312e81;color:white;border-radius:8px;font-size:20px;font-weight:bold;text-align:right}.qr{text-align:center;margin-top:20px;padding:16px;background:#faf8f1;border:1px solid #c4a052}.qr img{width:145px;height:145px}.qr small{display:block;color:#526176;overflow-wrap:anywhere}@media print{body{padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><main class="receipt"><header class="head"><h1>${supermarkets.find((sm) => sm.id === selectedSupermarketId)?.name || 'BodaGoEra store'}</h1><p>Customer purchase receipt</p><strong>${receipt.receipt_number}</strong><br>${new Date().toLocaleString('en-UG')}</header><table>${rows}</table><div class="total">TOTAL PAID ${formatUGX(receipt.total_ugx)}</div><section class="qr"><strong>Visit this store's public website</strong><br><img src="${qr}" alt="Store website QR"><small>${website}</small></section></main><script>window.onload=()=>window.print()</script></body></html>`);
+    printWindow.document.close();
   }
 
   // ── Computed ──────────────────────────────────────────────────────────────
@@ -511,6 +543,12 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           >
             Start New Shop
           </button>
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-center">
+            <ReceiptQrCode value={receiptWebsiteUrl} size={126} includeMargin />
+            <p className="mt-2 text-sm font-semibold text-indigo-900">Scan to visit the store's public website</p>
+            <p className="mt-1 break-all text-xs text-slate-600">{receiptWebsiteUrl}</p>
+          </div>
+          <button type="button" onClick={printCheckoutReceipt} className="mt-3 w-full rounded-xl bg-indigo-900 py-3 font-semibold text-white">Print receipt</button>
         </div>
       )}
 

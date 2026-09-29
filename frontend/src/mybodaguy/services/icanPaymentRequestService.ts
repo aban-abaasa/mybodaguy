@@ -140,6 +140,7 @@ export async function payIcanRequest({
     receiptNumber: `ICAN-RCP-${Date.now()}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`,
     paymentCode,
     transactionId: (transfer as unknown as { out_tx_id?: string }).out_tx_id || null,
+    recipientUserId: request.user_id,
     amount: icanAmount,
     currency: request.currency || 'ICAN',
     issuedAt: new Date().toISOString(),

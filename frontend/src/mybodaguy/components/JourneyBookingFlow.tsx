@@ -1985,7 +1985,7 @@ export default function JourneyBookingFlow({
             {!checkingBalance && walletIcan !== null && !hasEnoughBalance && (
               <div className="space-y-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3">
                 <p className="text-sm text-amber-800">
-                  You need {shortfallIcan.toFixed(4)} more ICAN (about UGX {Math.ceil(shortfallIcan * topUpUnitUgx).toLocaleString()} at today's live value) to complete this booking — buy it from your IcanEra Wallet.
+                  You need {shortfallIcan.toFixed(4)} more ICAN (about {quote.local ? formatMoney(Math.ceil(shortfallIcan * quote.local.pricePerIcan * 100) / 100, quote.local.currency) : `UGX ${Math.ceil(shortfallIcan * topUpUnitUgx).toLocaleString()}`} at today's live value) to complete this booking — buy it from your IcanEra Wallet.
                 </p>
                 <button type="button" disabled={toppingUp} onClick={doTopUp} className="classic-btn classic-btn-ink !min-h-[44px] !text-sm">
                   {toppingUp ? <Loader2 className="animate-spin" size={16} /> : <CreditCard size={16} />}
