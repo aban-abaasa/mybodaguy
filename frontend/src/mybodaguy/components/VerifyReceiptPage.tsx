@@ -22,6 +22,8 @@ interface VerifyResult {
   delivered_at?: string | null;
   delivered_by_email?: string | null;
   is_customer?: boolean;
+  membership_required?: boolean;
+  can_confirm_pickup?: boolean;
 }
 
 function formatUGX(n: number) {
@@ -41,12 +43,11 @@ const STATUS_LABEL: Record<string, string> = {
 // whatever the Supabase project's redirect allow-list actually covers).
 const RETURN_CODE_KEY = 'icanera_verify_return_code';
 
-// Public, unauthenticated page for https://bodagoera.icanera.space/verify/<code>
-// — what a QR scan on a DeliveryReceiptCard opens. Proves a receipt is real
-// (icanera_verify_delivery_receipt, GRANT'd to anon) for anyone, and lets
-// whoever is physically there with the code — store staff or the rider —
-// sign in with Google in one tap and Approve it, which is what actually
-// completes the payment to the store (see
+// Receipt verification page for https://bodagoera.icanera.space/verify/<code>
+// — what a QR scan on a DeliveryReceiptCard opens. An active member of the
+// issuing store verifies pickup; the assigned rider and ordering customer
+// can view their own receipt. Store approval is enforced server-side by
+// icanera_confirm_pickup, which releases the payment to the store (see
 // ICAN/backend/ADD_DELIVERY_RECEIPT_APPROVAL_TRACKING.sql). A code can only
 // ever be approved once: re-scanning an already-approved code shows exactly
 // who approved it and when, instead of letting anyone else claim it.
@@ -97,6 +98,7 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
 
     const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
       setSignedIn(!!session?.user);
+      window.setTimeout(() => { void refresh(); }, 0);
     });
 
     return () => { cancelled = true; sub.subscription.unsubscribe(); };
@@ -178,8 +180,26 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <XCircle className="text-red-500" size={32} />
             </div>
-            <h1 className="text-xl font-bold text-slate-800 mb-1">Not a valid receipt</h1>
-            <p className="text-slate-500 text-sm">This code doesn't match any ICANera delivery receipt.</p>
+            <h1 className="text-xl font-bold text-slate-800 mb-1">
+              {result?.membership_required ? 'Company member sign-in required' : 'Not a valid receipt'}
+            </h1>
+            <p className="text-slate-500 text-sm">
+              {result?.membership_required
+                ? 'Sign in with an active account for the issuing store to verify this delivery receipt. The assigned rider and ordering customer can also view their own receipt.'
+                : 'This code does not match an ICANera delivery receipt.'}
+            </p>
+            {result?.membership_required && !signedIn && (
+              <button
+                onClick={signInToApprove}
+                disabled={signingIn}
+                className="mt-4 w-full py-3 bg-white border-2 border-slate-300 text-slate-700 font-semibold rounded-xl hover:bg-slate-50 disabled:opacity-50"
+              >
+                {signingIn ? 'Redirecting to Google…' : 'Sign in to verify'}
+              </button>
+            )}
+            {result?.membership_required && signedIn && (
+              <p className="mt-3 text-xs text-slate-500">This account is not the assigned rider, ordering customer, or an active member of the issuing store.</p>
+            )}
           </>
         ) : (
           <>
@@ -290,7 +310,7 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
               </button>
             )}
 
-            {result.status === 'paid' && signedIn && (
+            {result.status === 'paid' && signedIn && result.can_confirm_pickup && (
               <>
                 <p className="text-xs text-slate-400 mb-3">
                   Approving confirms the product left the store and completes payment to the store.
@@ -304,6 +324,11 @@ export default function VerifyReceiptPage({ code }: { code: string }) {
                   {confirming ? 'Approving…' : 'Approve Pickup'}
                 </button>
               </>
+            )}
+            {result.status === 'paid' && signedIn && !result.can_confirm_pickup && (
+              <p className="text-xs text-slate-500 mb-3">
+                Only an active member of {result.store_name || 'the issuing store'} can verify pickup and release the store payment.
+              </p>
             )}
             {confirmError && <p className="text-red-500 text-xs mt-2">{confirmError}</p>}
 
