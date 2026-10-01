@@ -141,6 +141,7 @@ export default function App() {
             setIsRecoveryMode(false);
           }}
         />
+        <ChatWidget />
         <Toaster position="top-right" theme="light" />
       </>
     );
@@ -193,6 +194,7 @@ export default function App() {
             Sign Out
           </button>
         </div>
+        <ChatWidget />
       </div>
     );
   }
