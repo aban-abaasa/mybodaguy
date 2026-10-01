@@ -112,6 +112,18 @@ const CLASSIC_CHAT_CSS = `
 .ican-classic-chat textarea, .ican-classic-chat input { font-family: Georgia, "Times New Roman", serif; }
 .ican-classic-chat .overflow-y-auto > * { animation: ican-rise .35s ease both; }
 @media (prefers-reduced-motion: reduce) { .ican-classic-chat, .ican-classic-chat .overflow-y-auto > * { animation: none; } }
+.ican-classic-head { padding-top: .3rem !important; padding-bottom: .3rem !important; gap: .5rem; }
+.ican-classic-head::after { display: none; }
+.ican-sub { display: none !important; }
+.ican-title { font-size: .85rem; line-height: 1.2; }
+.ican-medallion { width: 1.6rem; height: 1.6rem; box-shadow: inset 0 0 0 2px #fff; }
+.ican-medallion svg { width: .9rem; height: .9rem; }
+.ican-classic-head button { min-height: 0 !important; min-width: 0 !important; height: auto !important; width: auto !important; padding: .3rem !important; border-radius: 8px !important; background: transparent !important; border: 0 !important; box-shadow: none !important; }
+.ican-classic-head button svg { width: 1rem; height: 1rem; }
+.ican-tabs { padding: .3rem .5rem !important; gap: .3rem !important; }
+.ican-ctab { min-height: 0 !important; height: auto !important; padding: .25rem .5rem !important; font-size: .72rem !important; line-height: 1.2; }
+.ican-fab { background: transparent !important; border: 0 !important; box-shadow: none !important; color: #b8892b !important; }
+.ican-fab > svg { filter: drop-shadow(0 0 2px #fff) drop-shadow(0 1px 2px rgba(0,0,0,.35)); }
 `;
 
 export default function ChatWidget() {
@@ -758,7 +770,7 @@ export default function ChatWidget() {
           @keyframes ican-chat-ring-spin { to { transform: rotate(360deg); } }
           @keyframes ican-chat-ring-hue { to { filter: hue-rotate(360deg); } }
           .ican-chat-ring {
-            background: conic-gradient(from 0deg, #8a6a1f, #e6c980, #c4a052, #fff3c4, #b8892b, #e6c980, #8a6a1f);
+            background: conic-gradient(from 0deg, #f43f5e, #f59e0b, #facc15, #22c55e, #06b6d4, #6366f1, #d946ef, #f43f5e);
             -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
             mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
             animation: ican-chat-ring-spin 3s linear infinite, ican-chat-ring-hue 6s linear infinite;
