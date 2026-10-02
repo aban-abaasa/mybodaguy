@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Car, Phone, Star, Ship, Plane, AlertTriangle, ChevronDown, Trash2, Smartphone, Download, Loader2, MapPin, Printer, History } from 'lucide-react';
 import { getMyJourneys, getAirTicket, deleteMyJourneys, type Journey, type JourneyLeg } from '../services/journeyService';
 import { downloadAirTicketPdf } from '../services/airTicketPdf';
-import { printShipTicket } from '../services/printTicket';
+import { printVerifiedShipTicket } from '../services/shipTicket';
 import { cancelJourney, CUSTOMER_CANCEL_REASONS } from '../services/orderActions';
 import { supabase } from '../../services/supabaseClient';
 import CancelReasonDialog from './CancelReasonDialog';
@@ -120,19 +120,14 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
   // — listed under "Past journeys" so they can be removed too. Not shown in compact mode.
   const pastJourneys = compact ? [] : journeys.filter((j) => isFinished(j) && !activeJourneys.includes(j));
 
-  /** The waybill is rebuilt from the saved journey, so it prints any time — not just right after booking. */
-  const printWaybill = (j: Journey) => {
-    const roadLegs = [...j.legs].filter((l) => l.leg_type === 'road_leg').sort((a, b) => a.leg_order - b.leg_order);
-    printShipTicket({
-      shipperName,
-      journeyId: j.id,
-      cargoDescription: j.cargo_description ?? null,
-      cargoWeightKg: j.cargo_weight_kg != null ? Number(j.cargo_weight_kg) : null,
-      pickupAddress: roadLegs[0]?.origin_city || '',
-      pickupCountry: j.origin_country || '',
-      dropoffAddress: j.destination_address || j.destination_city || '',
-      dropoffCountry: j.destination_country || '',
-    });
+  /** The waybill is read back from the server's own record (paid, carrier, status) and carries a QR to verify it — so it prints any time, not just right after booking. */
+  const printWaybill = async (j: Journey) => {
+    setNotice(null);
+    try {
+      await printVerifiedShipTicket(j, shipperName);
+    } catch (err: any) {
+      setNotice({ kind: 'error', text: err?.message || 'Could not print the ship ticket.' });
+    }
   };
 
   const confirmCancelJourney = async (reason: string) => {

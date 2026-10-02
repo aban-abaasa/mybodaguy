@@ -322,6 +322,8 @@ export interface Journey {
   origin_country?: string | null;
   cargo_description?: string | null;
   cargo_weight_kg?: number | null;
+  /** Random code on every journey: the ship/air ticket QR points at /ticket/<this>. */
+  ticket_verify_code?: string | null;
   legs: JourneyLeg[];
 }
 
