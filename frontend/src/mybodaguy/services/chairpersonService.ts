@@ -68,24 +68,12 @@ export interface SubordinateChairperson {
 export const chairpersonService = {
   // Get current user's committee member info
   async getMyCommitteeInfo(userId: string): Promise<CommitteeMember | null> {
-    const { data, error } = await supabase
-      .from('mbg_committee_members')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .maybeSingle();
-
-    if (error) {
-      console.error('[ChairpersonService] Error fetching committee info:', error);
-      return null;
-    }
-
-    return data;
+    const assignments = await this.getAllMyCommitteeAssignments(userId);
+    return assignments[0] ?? null;
   },
 
   // Get ALL committee assignments for a user, ordered highest → lowest level.
-  // If middle levels are missing from the DB (e.g. trigger not yet run), they are
-  // synthesised from the top assignment so the role selector always shows the full chain.
+  // Only real DB rows are returned — the tree is never synthesised client-side.
   async getAllMyCommitteeAssignments(userId: string): Promise<CommitteeMember[]> {
     const { data, error } = await supabase
       .from('mbg_committee_members')
@@ -104,90 +92,36 @@ export const chairpersonService = {
     const LEVEL_ORDER: Record<string, number> = {
       district: 0, division: 1, subcounty: 2, parish: 3, stage: 4,
     };
-    const FULL_HIERARCHY: { role: ChairpersonRole; region_type: RegionType }[] = [
-      { role: 'district_chairperson',  region_type: 'district'  },
-      { role: 'division_chairperson',  region_type: 'division'  },
-      { role: 'subcounty_chairperson', region_type: 'subcounty' },
-      { role: 'parish_chairperson',    region_type: 'parish'    },
-      { role: 'stage_chairperson',     region_type: 'stage'     },
-    ];
 
-    // Sort real records: highest level first
-    const sorted = [...assignments].sort(
-      (a, b) => (LEVEL_ORDER[a.region_type] ?? 5) - (LEVEL_ORDER[b.region_type] ?? 5)
+    // Highest level first
+    return [...assignments].sort(
+      (x, y) => (LEVEL_ORDER[x.region_type] ?? 5) - (LEVEL_ORDER[y.region_type] ?? 5)
     );
-
-    const topAssignment = sorted[0];
-    const topIdx = LEVEL_ORDER[topAssignment.region_type] ?? 4;
-
-    // Return every level from the top down to stage.
-    // Real DB records are used where they exist; missing levels are filled in
-    // as virtual records (same region_id as top, correct role/region_type).
-    return FULL_HIERARCHY.slice(topIdx).map(({ role, region_type }) => {
-      const real = sorted.find(a => a.region_type === region_type);
-      if (real) return real;
-      return {
-        ...topAssignment,
-        id: `virtual-${role}`,   // only used as select value — not sent to DB
-        role,
-        region_type,
-      };
-    });
   },
 
   // Get subordinate chairpersons
   async getSubordinates(userId: string): Promise<SubordinateChairperson[]> {
-    // Try RPC first
+    // Source of truth: parent_chairperson_id, maintained by the database from the
+    // geography tree (see ENFORCE_CHAIRPERSON_TREE_TRUTH.sql).
     const { data: rpcData, error: rpcError } = await supabase
       .rpc('get_subordinate_chairpersons', { chairperson_user_id: userId });
-    if (!rpcError && rpcData && rpcData.length > 0) return rpcData;
-    if (rpcError) console.error('[ChairpersonService] RPC error:', rpcError);
+    if (!rpcError) return rpcData || [];
+    console.error('[ChairpersonService] RPC error:', rpcError);
 
-    // Fallback: region hierarchy — find committee members in sub-regions of this user's regions
-    const myAssignments = await this.getAllMyCommitteeAssignments(userId);
-
-    // Map each region level to its sub-region table and FK column
-    const subRegionConfig: Record<string, { table: string; fk: string; childType: string }> = {
-      district:  { table: 'mbg_divisions',   fk: 'district_id',  childType: 'division' },
-      division:  { table: 'mbg_subcounties', fk: 'division_id',  childType: 'subcounty' },
-      subcounty: { table: 'mbg_parishes',    fk: 'subcounty_id', childType: 'parish' },
-      parish:    { table: 'mbg_stages',      fk: 'parish_id',    childType: 'stage' },
-    };
-
-    const seenIds = new Set<string>();
-    const allMembers: any[] = [];
-
-    for (const assignment of myAssignments) {
-      const cfg = subRegionConfig[assignment.region_type];
-      if (!cfg) continue;
-
-      // Get IDs of immediate sub-regions
-      const { data: subRegions } = await supabase
-        .from(cfg.table)
-        .select('id')
-        .eq(cfg.fk, assignment.region_id);
-
-      const subIds = (subRegions || []).map((r: any) => r.id);
-      if (subIds.length === 0) continue;
-
-      // Find committee members in those sub-regions (exclude self)
-      const { data: members } = await supabase
-        .from('mbg_committee_members')
-        .select('id, user_id, role, region_type, region_id, commission_rate, is_active, appointed_at')
-        .eq('region_type', cfg.childType)
-        .in('region_id', subIds)
-        .eq('is_active', true)
-        .neq('user_id', userId);
-
-      for (const m of members || []) {
-        if (!seenIds.has(m.id)) {
-          seenIds.add(m.id);
-          allMembers.push(m);
-        }
-      }
+    // Fallback: same rule, expressed as direct queries on parent links.
+    const mine = await this.getAllMyCommitteeAssignments(userId);
+    if (mine.length === 0) return [];
+    const { data: members, error } = await supabase
+      .from('mbg_committee_members')
+      .select('id, user_id, role, region_type, region_id, commission_rate, is_active, appointed_at')
+      .in('parent_chairperson_id', mine.map(m => m.id))
+      .eq('is_active', true)
+      .neq('user_id', userId);
+    if (error) {
+      console.error('[ChairpersonService] Error fetching subordinates:', error);
+      return [];
     }
-
-    return this._enrichMembers(allMembers);
+    return this._enrichMembers(members || []);
   },
 
   // Attach user email + full_name to raw committee member rows
@@ -396,22 +330,22 @@ export const chairpersonService = {
       switch (committeeInfo.role) {
         case 'district_chairperson':
           regionType = 'division';
-          tableName = 'divisions';
+          tableName = 'mbg_divisions';
           parentColumn = 'district_id';
           break;
         case 'division_chairperson':
           regionType = 'subcounty';
-          tableName = 'subcounties';
+          tableName = 'mbg_subcounties';
           parentColumn = 'division_id';
           break;
         case 'subcounty_chairperson':
           regionType = 'parish';
-          tableName = 'parishes';
+          tableName = 'mbg_parishes';
           parentColumn = 'subcounty_id';
           break;
         case 'parish_chairperson':
           regionType = 'stage';
-          tableName = 'stages';
+          tableName = 'mbg_stages';
           parentColumn = 'parish_id';
           break;
         default:
