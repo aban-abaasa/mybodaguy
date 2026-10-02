@@ -61,7 +61,7 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
   const [teamSearch, setTeamSearch] = useState('');
   const [teamRole, setTeamRole] = useState('vice_chairperson');
   const [customTeamRole, setCustomTeamRole] = useState('');
-  const [teamRate, setTeamRate] = useState('0');
+  const [teamRate, setTeamRate] = useState('5');
   const [addingTeamMember, setAddingTeamMember] = useState(false);
   const [profileData, setProfileData] = useState<ProfileData>({
     full_name: '',
@@ -214,7 +214,7 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
       }]);
       setTeamUserId('');
       setTeamSearch('');
-      setTeamRate('0');
+      setTeamRate('5');
       toast.success('Committee member added');
     }
     setAddingTeamMember(false);
@@ -578,7 +578,7 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
                 <div className="flex items-center justify-between gap-3 mb-4">
                   <div>
                     <h4 className="text-lg font-semibold text-slate-800">Committee Working Members</h4>
-                    <p className="text-sm text-slate-600">Add authenticated users who work with you, such as a vice chairperson, secretary, defence lead, treasurer, or another approved role.</p>
+                    <p className="text-sm text-slate-600">Add authenticated users who work with you, such as a vice chairperson, secretary, defence lead, treasurer, or another approved role. Each active member earns 5% of your commission share, taken out of your share.</p>
                   </div>
                   <span className="shrink-0 rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700">{teamMembers.length} active</span>
                 </div>
@@ -606,7 +606,7 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
                     </select>
                     {teamRole === 'other' && <input value={customTeamRole} onChange={event => setCustomTeamRole(event.target.value)} placeholder="Committee role" className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800" />}
                   </div>
-                  <input type="number" min="0" max="100" step="0.01" value={teamRate} onChange={event => setTeamRate(event.target.value)} disabled={addingTeamMember} placeholder="Rate %" className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800" aria-label="Commission rate share" />
+                  <input type="number" value={teamRate} readOnly disabled placeholder="Rate %" title="Fixed by the platform: each working member earns 5% of your commission share, taken out of your share" className="w-full rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-500" aria-label="Commission share, fixed by the platform" />
                   <button type="button" onClick={addTeamMember} disabled={addingTeamMember || !teamUserId || (teamRole === 'other' ? !customTeamRole.trim() : !teamRole)} className="flex items-center justify-center gap-1 rounded-lg bg-orange-500 px-3 py-2 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-50"><UserPlus size={16} /> Add</button>
                 </div>
                 <div className="mt-3 space-y-2">
