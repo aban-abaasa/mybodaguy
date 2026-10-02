@@ -11,6 +11,8 @@ import LocationPickerMap from './LocationPickerMap';
 import LiveTrackingMap from './LiveTrackingMap';
 import JourneyBookingFlow from './JourneyBookingFlow';
 import JourneyTracker from './JourneyTracker';
+import CancelReasonDialog from './CancelReasonDialog';
+import { cancelRide, CUSTOMER_CANCEL_REASONS, SUPERMARKET_CANCEL_REASONS } from '../services/orderActions';
 import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type CountryLookup } from '../services/geocodeService';
 import { verifyPin } from '../services/pinService';
 import { productService, type Product } from '../services/productService';
@@ -174,6 +176,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [matchedRiders, setMatchedRiders] = useState<MatchedRider[]>([]);
   const [selectedRider, setSelectedRider] = useState<MatchedRider | null>(null);
   const [rideStatus, setRideStatus] = useState<RideStatus | null>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
   const [waitingTimer, setWaitingTimer] = useState(30);
   // "Just Send" — customer skips picking a specific rider; the server
   // (mbg_sweep_auto_dispatch_cascade, pg_cron every 10s) offers it to the
@@ -1436,16 +1440,19 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setRouteInfo(null);
   };
 
-  const handleCancelRide = async () => {
+  const handleCancelRide = async (reason: string) => {
     if (rideId) {
+      setCancelBusy(true);
       try {
-        const { error } = await supabase.rpc('mbg_cancel_ride', { p_ride_id: rideId, p_reason: 'Cancelled by customer' });
-        if (error) throw error;
+        await cancelRide(rideId, reason);
       } catch (error: any) {
         toast.error(error?.message || 'Failed to cancel ride');
+        setCancelBusy(false);
         return;
       }
+      setCancelBusy(false);
     }
+    setCancelDialogOpen(false);
     toast.info('Ride cancelled');
     handleStartNewRide();
   };
@@ -1581,18 +1588,30 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
   if (rideStatus === 'accepted' && selectedRider) {
     return (
-      <RiderOnTheWay
-        rider={selectedRider}
-        pickup={selectedPickup!}
-        dropoff={selectedDropoff!}
-        onCancel={handleCancelRide}
-        rideId={rideId}
-        customerId={customerId}
-        customerName={customerName}
-        riderUserId={riderUserId}
-        paymentMethod={paymentMethod}
-        onChangePaymentMethod={handleChangePaymentMethod}
-      />
+      <>
+        <RiderOnTheWay
+          rider={selectedRider}
+          pickup={selectedPickup!}
+          dropoff={selectedDropoff!}
+          onCancel={() => setCancelDialogOpen(true)}
+          rideId={rideId}
+          customerId={customerId}
+          customerName={customerName}
+          riderUserId={riderUserId}
+          paymentMethod={paymentMethod}
+          onChangePaymentMethod={handleChangePaymentMethod}
+        />
+        <CancelReasonDialog
+          open={cancelDialogOpen}
+          title="Cancel this ride?"
+          description={`${selectedRider.full_name || 'Your rider'} is on the way.`}
+          reasons={serviceType === 'delivery' ? SUPERMARKET_CANCEL_REASONS : CUSTOMER_CANCEL_REASONS}
+          confirmLabel="Cancel ride"
+          busy={cancelBusy}
+          onConfirm={handleCancelRide}
+          onClose={() => setCancelDialogOpen(false)}
+        />
+      </>
     );
   }
 

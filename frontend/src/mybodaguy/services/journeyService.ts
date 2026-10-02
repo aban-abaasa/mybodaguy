@@ -266,6 +266,8 @@ export interface JourneyLeg {
   leg_order: number;
   leg_type: 'local_pickup' | 'flight' | 'local_dropoff' | 'road_leg' | 'sea_leg';
   status: string;
+  /** Where the leg starts (for a road leg: the pickup address). */
+  origin_city?: string | null;
   ride_id: string | null;
   dispatch_after: string | null;
   flight_booking?: {
@@ -311,6 +313,10 @@ export interface Journey {
   ican_journey_tx_id?: string | null;
   /** Set when a failed booking's payment was automatically returned to the wallet. */
   refunded_at?: string | null;
+  /** Shipments only (ship-cargo journeys). */
+  origin_country?: string | null;
+  cargo_description?: string | null;
+  cargo_weight_kg?: number | null;
   legs: JourneyLeg[];
 }
 

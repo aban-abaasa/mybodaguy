@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Car, Phone, Star, Ship, Plane, AlertTriangle, ChevronDown, Trash2, Smartphone, Download, Loader2, MapPin } from 'lucide-react';
+import { Car, Phone, Star, Ship, Plane, AlertTriangle, ChevronDown, Trash2, Smartphone, Download, Loader2, MapPin, Printer, History } from 'lucide-react';
 import { getMyJourneys, getAirTicket, deleteMyJourneys, type Journey, type JourneyLeg } from '../services/journeyService';
 import { downloadAirTicketPdf } from '../services/airTicketPdf';
+import { printShipTicket } from '../services/printTicket';
+import { cancelJourney, CUSTOMER_CANCEL_REASONS } from '../services/orderActions';
+import { supabase } from '../../services/supabaseClient';
+import CancelReasonDialog from './CancelReasonDialog';
 import {
   loadSavedJourneys, saveJourneysLocally, removeSavedJourney, snapshotJourney, downloadJourneySummaries,
   type SavedJourney,
@@ -41,6 +45,10 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
   const [clearPromptDismissed, setClearPromptDismissed] = useState(false);
   // Compact mode only: the whole My Journeys card is one collapsed line until tapped.
   const [sectionOpen, setSectionOpen] = useState(false);
+  // Cancel-with-reason, the printed ship ticket's shipper name, and the "Past journeys" fold.
+  const [cancelling, setCancelling] = useState<Journey | null>(null);
+  const [shipperName, setShipperName] = useState('BodaGoEra customer');
+  const [pastOpen, setPastOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -68,6 +76,20 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
     };
   }, [customerId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    supabase
+      .from('mbg_users')
+      .select('email, mbg_user_profiles(full_name)')
+      .eq('id', customerId)
+      .maybeSingle()
+      .then(({ data }) => {
+        const name = (data as any)?.mbg_user_profiles?.[0]?.full_name || (data as any)?.email?.split('@')[0];
+        if (!cancelled && name) setShipperName(name);
+      });
+    return () => { cancelled = true; };
+  }, [customerId]);
+
   // A booked flight stays listed after the trip so its air ticket can still be
   // downloaded, and a failed booking stays listed when money was taken for it
   // (ican_journey_tx_id is only set once the wallet was actually debited) so the
@@ -77,7 +99,9 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
   const paidButFailed = (j: Journey) => j.status === 'failed' && !!j.ican_journey_tx_id && !j.refunded_at;
   const activeJourneys = journeys.filter((j) => {
     if (paidButFailed(j)) return true;
-    if (j.status === 'cancelled' || j.status === 'failed') return false;
+    // A cancelled journey keeps its (non-refunded) air ticket, so it stays listed for the download.
+    if (j.status === 'cancelled') return hasTicket(j);
+    if (j.status === 'failed') return false;
     return j.status !== 'completed' || hasTicket(j);
   });
 
@@ -89,6 +113,48 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
   const dueForClearing = journeys.filter((j) => isFinished(j) && !!j.updated_at && Date.now() - new Date(j.updated_at).getTime() > CLEAR_AFTER_MS);
   const isOpen = (j: Journey) => openOverride[j.id] ?? (!compact && !isFinished(j));
   const toggle = (j: Journey) => setOpenOverride((prev) => ({ ...prev, [j.id]: !isOpen(j) }));
+  const isShip = (j: Journey) => j.legs.some((l) => l.leg_type === 'sea_leg');
+  // Still running and not a paid-but-failed booking (that one needs support, not a cancel).
+  const canCancel = (j: Journey) => !isFinished(j) && !paidButFailed(j);
+  // Finished journeys that the main list hides (cancelled, refunded, completed without a ticket)
+  // — listed under "Past journeys" so they can be removed too. Not shown in compact mode.
+  const pastJourneys = compact ? [] : journeys.filter((j) => isFinished(j) && !activeJourneys.includes(j));
+
+  /** The waybill is rebuilt from the saved journey, so it prints any time — not just right after booking. */
+  const printWaybill = (j: Journey) => {
+    const roadLegs = [...j.legs].filter((l) => l.leg_type === 'road_leg').sort((a, b) => a.leg_order - b.leg_order);
+    printShipTicket({
+      shipperName,
+      journeyId: j.id,
+      cargoDescription: j.cargo_description ?? null,
+      cargoWeightKg: j.cargo_weight_kg != null ? Number(j.cargo_weight_kg) : null,
+      pickupAddress: roadLegs[0]?.origin_city || '',
+      pickupCountry: j.origin_country || '',
+      dropoffAddress: j.destination_address || j.destination_city || '',
+      dropoffCountry: j.destination_country || '',
+    });
+  };
+
+  const confirmCancelJourney = async (reason: string) => {
+    if (!cancelling) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const { hasAirTicket } = await cancelJourney(cancelling.id, reason);
+      setJourneys((prev) => prev.map((j) => (j.id === cancelling.id ? { ...j, status: 'cancelled' } : j)));
+      setNotice({
+        kind: 'ok',
+        text: hasAirTicket
+          ? 'Journey cancelled. Your air ticket is not refunded — you can still download it.'
+          : 'Journey cancelled.',
+      });
+      setCancelling(null);
+    } catch (err: any) {
+      setNotice({ kind: 'error', text: err?.message || 'Could not cancel the journey.' });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   /**
    * Removes journeys from the server, first saving a copy on the phone if
@@ -144,7 +210,7 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
   // The clear-out banner and the phone copies belong on the Orders tab, not above a booking form.
   const savedOnly = compact ? [] : saved.filter((s) => !serverIds.has(s.id));
   const showClearPrompt = !compact && dueForClearing.length > 0 && !clearPromptDismissed;
-  if (activeJourneys.length === 0 && savedOnly.length === 0 && !showClearPrompt && !notice) return null;
+  if (activeJourneys.length === 0 && pastJourneys.length === 0 && savedOnly.length === 0 && !showClearPrompt && !notice) return null;
 
   const inProgress = activeJourneys.filter((j) => !isFinished(j));
   const placeOf = (j: Journey) => j.destination_city || j.destination_country;
@@ -262,6 +328,15 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
                   className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-orange-500 px-4 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-60"
                 />
               )}
+              {isShip(journey) && !paidButFailed(journey) && (
+                <button
+                  type="button"
+                  onClick={() => printWaybill(journey)}
+                  className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-orange-500 px-4 text-sm font-semibold text-white hover:bg-orange-600"
+                >
+                  <Printer size={15} /> Print ship ticket
+                </button>
+              )}
             </div>
             {open && (
               <>
@@ -270,6 +345,15 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
                     <JourneyLegRow key={leg.id} leg={leg} customerId={customerId} />
                   ))}
                 </div>
+                {canCancel(journey) && (
+                  <button
+                    type="button"
+                    onClick={() => setCancelling(journey)}
+                    className="inline-flex min-h-[40px] items-center gap-2 rounded-lg border border-red-200 px-4 text-sm font-semibold text-red-600 hover:bg-red-50"
+                  >
+                    Cancel this journey
+                  </button>
+                )}
                 {isFinished(journey) && (
                   <button
                     type="button"
@@ -284,6 +368,51 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
           </div>
         );
       })}
+
+      {pastJourneys.length > 0 && (
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={() => setPastOpen((v) => !v)}
+            aria-expanded={pastOpen}
+            className="flex w-full items-center justify-between gap-2 text-sm font-bold text-slate-600"
+          >
+            <span className="flex items-center gap-2"><History size={15} /> Past journeys ({pastJourneys.length})</span>
+            <ChevronDown size={16} className={`text-slate-400 transition-transform ${pastOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {pastOpen && pastJourneys.map((j) => (
+            <div key={j.id} className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-slate-700">To {placeOf(j)}</div>
+                <div className="text-xs text-slate-400">
+                  <span className="font-semibold uppercase">{j.status.replace(/_/g, ' ')}</span>
+                  {j.created_at && <> · Booked {fmtDate(j.created_at)}</>}
+                </div>
+              </div>
+              {isShip(j) && (
+                <button type="button" onClick={() => printWaybill(j)} aria-label="Print ship ticket" className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50">
+                  <Printer size={15} />
+                </button>
+              )}
+              <button type="button" onClick={() => setConfirming(j)} aria-label="Remove this journey" className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50">
+                <Trash2 size={15} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <CancelReasonDialog
+        open={!!cancelling}
+        title="Cancel this journey?"
+        description={cancelling ? `To ${placeOf(cancelling)}. Rides that have not finished will be cancelled.` : undefined}
+        reasons={CUSTOMER_CANCEL_REASONS}
+        warning={cancelling && hasTicket(cancelling) ? 'Air tickets are not refunded. Your flight stays booked and the ticket stays valid — only the rides are cancelled.' : undefined}
+        confirmLabel="Cancel journey"
+        busy={busy}
+        onConfirm={confirmCancelJourney}
+        onClose={() => setCancelling(null)}
+      />
 
       {savedOnly.length > 0 && (
         <div className="space-y-3">

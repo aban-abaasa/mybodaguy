@@ -1,0 +1,339 @@
+-- ============================================================================
+-- CANCEL WITH A REASON + DELETE ORDERS (customers, riders, supermarket orders)
+-- Run after CREATE_REAL_RIDE_MATCHING_ENGINE.sql, CREATE_JOURNEY_BOOKING_ENGINE.sql,
+-- ADD_AIR_TICKET_VERIFICATION.sql and ADD_JOURNEY_SELF_DELETE.sql (safe to re-run).
+--
+-- 1. mbg_cancel_ride now insists on a reason (the apps send one picked from a
+--    list, or typed under "Other"). Everything else it did is unchanged.
+-- 2. mbg_cancel_journey(journey, reason): the customer cancels a journey that
+--    is not finished yet. Unfinished ground rides are cancelled and their
+--    drivers freed. THE AIR TICKET IS NOT REFUNDED — airline fares are final
+--    here, the flight booking is left alone and the ticket stays valid, so the
+--    customer can still fly or download it. Journey money is not touched.
+-- 3. mbg_verify_air_ticket: a CANCELLED journey no longer voids a ticket the
+--    airline still honours (only a failed journey or a cancelled booking does).
+-- 4. "Delete" an order = remove it from MY history. mbg_rides rows carry money
+--    and rider earnings, so they are hidden per side (customer_hidden_at /
+--    rider_hidden_at) instead of being deleted: mbg_hide_my_rides(ids) works
+--    for both customers and riders, and only for finished rides.
+-- ============================================================================
+
+ALTER TABLE public.mbg_rides
+  ADD COLUMN IF NOT EXISTS customer_hidden_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS rider_hidden_at    TIMESTAMPTZ;
+
+ALTER TABLE public.mbg_journeys
+  ADD COLUMN IF NOT EXISTS cancellation_reason TEXT,
+  ADD COLUMN IF NOT EXISTS cancelled_at        TIMESTAMPTZ;
+
+-- ----------------------------------------------------------------------------
+-- 1. Cancel a ride — a reason is now required.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.mbg_cancel_ride(p_ride_id UUID, p_reason TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_ride public.mbg_rides%ROWTYPE;
+  v_customer_id UUID;
+  v_rider_id UUID;
+  v_by public.mbg_cancellation_by;
+  v_reason TEXT := btrim(COALESCE(p_reason, ''));
+BEGIN
+  IF length(v_reason) < 3 THEN
+    RAISE EXCEPTION 'Please tell us why you are cancelling';
+  END IF;
+  v_reason := left(v_reason, 300);
+
+  SELECT id INTO v_customer_id FROM public.mbg_customers WHERE user_id = auth.uid();
+
+  SELECT * INTO v_ride FROM public.mbg_rides WHERE id = p_ride_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Ride not found';
+  END IF;
+  IF v_ride.status IN ('completed', 'cancelled', 'failed') THEN
+    RAISE EXCEPTION 'Ride cannot be cancelled from its current status';
+  END IF;
+
+  -- A person can hold several rider rows (one per vehicle), so match on any of them.
+  SELECT id INTO v_rider_id FROM public.mbg_riders WHERE user_id = auth.uid() AND id = v_ride.rider_id;
+
+  IF v_customer_id IS NOT NULL AND v_ride.customer_id = v_customer_id THEN
+    v_by := 'customer';
+  ELSIF v_rider_id IS NOT NULL THEN
+    v_by := 'rider';
+  ELSE
+    RAISE EXCEPTION 'You are not part of this ride';
+  END IF;
+
+  UPDATE public.mbg_rides
+  SET status = 'cancelled', cancelled_at = now(), cancelled_by = v_by, cancellation_reason = v_reason, updated_at = now()
+  WHERE id = p_ride_id;
+
+  IF v_ride.rider_id IS NOT NULL THEN
+    PERFORM set_config('mbg.trusted_write', 'true', true);
+    UPDATE public.mbg_riders SET is_available = true, cancelled_rides = cancelled_rides + 1, updated_at = now()
+    WHERE id = v_ride.rider_id;
+  END IF;
+  IF v_ride.customer_id IS NOT NULL THEN
+    UPDATE public.mbg_customers SET cancelled_rides = cancelled_rides + 1, updated_at = now() WHERE id = v_ride.customer_id;
+  END IF;
+
+  UPDATE public.mbg_payments SET status = 'refunded', refunded_at = now(), refund_reason = v_reason, updated_at = now()
+  WHERE ride_id = p_ride_id AND status = 'pending';
+
+  RETURN jsonb_build_object('success', true);
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.mbg_cancel_ride(UUID, TEXT) TO authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 2. Cancel a journey (customer). Air tickets are NOT refunded.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.mbg_cancel_journey(p_journey_id UUID, p_reason TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid       UUID := auth.uid();
+  v_customer  UUID;
+  v_journey   public.mbg_journeys%ROWTYPE;
+  v_reason    TEXT := btrim(COALESCE(p_reason, ''));
+  v_leg       RECORD;
+  v_has_flight BOOLEAN;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Please sign in again.');
+  END IF;
+  IF length(v_reason) < 3 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Please tell us why you are cancelling.');
+  END IF;
+  v_reason := left(v_reason, 300);
+
+  SELECT id INTO v_customer FROM public.mbg_customers WHERE user_id = v_uid;
+  IF v_customer IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No customer account found.');
+  END IF;
+
+  SELECT * INTO v_journey FROM public.mbg_journeys
+  WHERE id = p_journey_id AND customer_id = v_customer FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Journey not found.');
+  END IF;
+  IF v_journey.status IN ('completed', 'cancelled', 'failed') THEN
+    RETURN jsonb_build_object('success', false, 'error', 'This journey is already finished.');
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.mbg_journey_legs l
+    JOIN public.mbg_flight_bookings fb ON fb.id = l.flight_booking_id
+    WHERE l.journey_id = p_journey_id AND fb.status <> 'cancelled'
+  ) INTO v_has_flight;
+
+  -- Cancel every leg that is not already over. The flight booking row itself is
+  -- deliberately left alone: the ticket was issued by the airline and is not refunded.
+  FOR v_leg IN
+    SELECT l.id, l.ride_id, l.leg_type
+    FROM public.mbg_journey_legs l
+    WHERE l.journey_id = p_journey_id AND l.status NOT IN ('completed', 'cancelled', 'failed')
+    FOR UPDATE
+  LOOP
+    IF v_leg.leg_type = 'flight' AND v_has_flight THEN
+      CONTINUE;
+    END IF;
+
+    -- Close the leg and detach its ride FIRST: mbg_sync_journey_leg_with_ride_trg
+    -- re-queues a dispatched leg whose ride is cancelled (the driver-declined
+    -- case) and would otherwise send a new driver to a journey that is over.
+    UPDATE public.mbg_journey_legs SET status = 'cancelled', ride_id = NULL, updated_at = now() WHERE id = v_leg.id;
+    IF v_leg.ride_id IS NOT NULL THEN
+      PERFORM public.mbg_cancel_journey_ride(v_leg.ride_id, v_reason);
+    END IF;
+  END LOOP;
+
+  UPDATE public.mbg_journeys
+  SET status = 'cancelled', cancellation_reason = v_reason, cancelled_at = now(), updated_at = now()
+  WHERE id = p_journey_id;
+
+  RETURN jsonb_build_object(
+    'success', true,
+    'air_ticket_refunded', false,
+    'has_air_ticket', v_has_flight
+  );
+END;
+$$;
+REVOKE ALL ON FUNCTION public.mbg_cancel_journey(UUID, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.mbg_cancel_journey(UUID, TEXT) TO authenticated;
+
+-- Internal: cancel a journey leg's ride on the customer's behalf (the caller has
+-- already been checked as the journey's owner), freeing the driver.
+CREATE OR REPLACE FUNCTION public.mbg_cancel_journey_ride(p_ride_id UUID, p_reason TEXT)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_ride public.mbg_rides%ROWTYPE;
+BEGIN
+  SELECT * INTO v_ride FROM public.mbg_rides WHERE id = p_ride_id FOR UPDATE;
+  IF NOT FOUND OR v_ride.status IN ('completed', 'cancelled', 'failed') THEN
+    RETURN;
+  END IF;
+
+  UPDATE public.mbg_rides
+  SET status = 'cancelled', cancelled_at = now(), cancelled_by = 'customer', cancellation_reason = p_reason, updated_at = now()
+  WHERE id = p_ride_id;
+
+  IF v_ride.rider_id IS NOT NULL THEN
+    PERFORM set_config('mbg.trusted_write', 'true', true);
+    UPDATE public.mbg_riders SET is_available = true, cancelled_rides = cancelled_rides + 1, updated_at = now()
+    WHERE id = v_ride.rider_id;
+  END IF;
+  IF v_ride.customer_id IS NOT NULL THEN
+    UPDATE public.mbg_customers SET cancelled_rides = cancelled_rides + 1, updated_at = now() WHERE id = v_ride.customer_id;
+  END IF;
+  UPDATE public.mbg_payments SET status = 'refunded', refunded_at = now(), refund_reason = p_reason, updated_at = now()
+  WHERE ride_id = p_ride_id AND status = 'pending';
+END;
+$$;
+REVOKE ALL ON FUNCTION public.mbg_cancel_journey_ride(UUID, TEXT) FROM PUBLIC, anon, authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 3. A cancelled journey no longer voids an airline ticket that is still live.
+--    Same function as ADD_AIR_TICKET_VERIFICATION.sql with one CASE line changed.
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.mbg_verify_air_ticket(p_code TEXT)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_journey  RECORD;
+  v_booking  RECORD;
+  v_pax      JSONB := '[]'::jsonb;
+  v_p        JSONB;
+  v_given    TEXT;
+  v_family   TEXT;
+  v_pnr      TEXT;
+  v_state    TEXT;
+BEGIN
+  IF p_code IS NULL OR length(p_code) < 16 OR length(p_code) > 64 OR p_code !~ '^[A-Za-z0-9]+$' THEN
+    RETURN jsonb_build_object('is_valid', false);
+  END IF;
+
+  SELECT j.id, j.status, j.created_at, j.ican_journey_tx_id
+  INTO v_journey
+  FROM public.mbg_journeys j
+  WHERE j.ticket_verify_code = p_code;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('is_valid', false);
+  END IF;
+
+  SELECT fb.*
+  INTO v_booking
+  FROM public.mbg_journey_legs l
+  JOIN public.mbg_flight_bookings fb ON fb.id = l.flight_booking_id
+  WHERE l.journey_id = v_journey.id AND l.leg_type = 'flight'
+  LIMIT 1;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('is_valid', false);
+  END IF;
+
+  FOR v_p IN SELECT * FROM jsonb_array_elements(COALESCE(v_booking.passenger_details, '[]'::jsonb))
+  LOOP
+    v_given  := btrim(COALESCE(v_p->>'given_name', ''));
+    v_family := btrim(COALESCE(v_p->>'family_name', ''));
+    IF v_family <> '' THEN
+      v_pax := v_pax || jsonb_build_array(
+        upper(CASE WHEN v_given <> '' THEN left(v_given, 1) || '. ' ELSE '' END || v_family)
+      );
+    END IF;
+  END LOOP;
+
+  v_pnr := COALESCE(v_booking.pnr, '');
+  IF length(v_pnr) > 2 THEN
+    v_pnr := left(v_pnr, 2) || repeat('•', length(v_pnr) - 2);
+  END IF;
+
+  v_state := CASE
+    -- Only a failed journey or a cancelled airline booking voids the ticket: a
+    -- customer cancelling the journey is not refunded, so the ticket stays valid.
+    WHEN v_journey.status = 'failed' OR v_booking.status = 'cancelled' THEN 'cancelled'
+    WHEN v_booking.status = 'completed' THEN 'flown'
+    WHEN v_booking.status IN ('booked', 'ticketed', 'delayed', 'rescheduled') THEN 'valid'
+    ELSE 'pending'
+  END;
+
+  RETURN jsonb_build_object(
+    'is_valid', v_state IN ('valid', 'flown'),
+    'state', v_state,
+    'flight_status', v_booking.status,
+    'passengers', v_pax,
+    'booking_reference_masked', v_pnr,
+    'carrier', v_booking.carrier,
+    'flight_number', v_booking.flight_number,
+    'origin_iata', v_booking.origin_iata,
+    'destination_iata', v_booking.destination_iata,
+    'departs_at', COALESCE(v_booking.current_departure_at, v_booking.scheduled_departure_at),
+    'arrives_at', COALESCE(v_booking.current_arrival_at, v_booking.scheduled_arrival_at),
+    'is_rescheduled', v_booking.status IN ('delayed', 'rescheduled'),
+    'paid', v_journey.ican_journey_tx_id IS NOT NULL,
+    'booked_at', v_journey.created_at
+  );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.mbg_verify_air_ticket(TEXT) TO anon, authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 4. Delete orders from MY history (customer side or rider side).
+-- ----------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.mbg_hide_my_rides(p_ride_ids UUID[])
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid       UUID := auth.uid();
+  v_customer  UUID;
+  v_hidden    UUID[] := '{}';
+  v_skipped   JSONB  := '[]'::jsonb;
+  v_r         RECORD;
+  v_is_cust   BOOLEAN;
+  v_is_rider  BOOLEAN;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Please sign in again.');
+  END IF;
+  IF p_ride_ids IS NULL OR cardinality(p_ride_ids) = 0 THEN
+    RETURN jsonb_build_object('success', true, 'hidden_ids', '[]'::jsonb, 'skipped', '[]'::jsonb);
+  END IF;
+
+  SELECT id INTO v_customer FROM public.mbg_customers WHERE user_id = v_uid;
+
+  -- Only rides this person is actually part of are even looked at.
+  FOR v_r IN
+    SELECT r.id, r.status, r.customer_id, r.rider_id
+    FROM public.mbg_rides r
+    WHERE r.id = ANY(p_ride_ids)
+      AND (
+        (v_customer IS NOT NULL AND r.customer_id = v_customer)
+        OR EXISTS (SELECT 1 FROM public.mbg_riders rd WHERE rd.id = r.rider_id AND rd.user_id = v_uid)
+      )
+    FOR UPDATE
+  LOOP
+    IF v_r.status NOT IN ('completed', 'cancelled', 'failed') THEN
+      v_skipped := v_skipped || jsonb_build_array(jsonb_build_object('id', v_r.id, 'reason', 'This order is still running — cancel it first.'));
+      CONTINUE;
+    END IF;
+
+    v_is_cust  := v_customer IS NOT NULL AND v_r.customer_id = v_customer;
+    v_is_rider := EXISTS (SELECT 1 FROM public.mbg_riders rd WHERE rd.id = v_r.rider_id AND rd.user_id = v_uid);
+
+    UPDATE public.mbg_rides
+    SET customer_hidden_at = CASE WHEN v_is_cust  THEN COALESCE(customer_hidden_at, now()) ELSE customer_hidden_at END,
+        rider_hidden_at    = CASE WHEN v_is_rider THEN COALESCE(rider_hidden_at, now())    ELSE rider_hidden_at END
+    WHERE id = v_r.id;
+    v_hidden := v_hidden || v_r.id;
+  END LOOP;
+
+  RETURN jsonb_build_object('success', true, 'hidden_ids', to_jsonb(v_hidden), 'skipped', v_skipped);
+END;
+$$;
+REVOKE ALL ON FUNCTION public.mbg_hide_my_rides(UUID[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.mbg_hide_my_rides(UUID[]) TO authenticated;
+
+NOTIFY pgrst, 'reload schema';
+
+DO $$
+BEGIN
+  RAISE NOTICE '✅ Cancel with a reason (mbg_cancel_ride, mbg_cancel_journey) and delete orders (mbg_hide_my_rides) are ready. Air tickets are not refunded on cancel.';
+END $$;
