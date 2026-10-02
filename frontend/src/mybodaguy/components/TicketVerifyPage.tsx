@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle, XCircle, AlertTriangle, Clock, Plane, ShieldCheck, Ship, Truck } from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
-import type { ShipTicketProof } from '../services/printTicket';
+import { describeCarrier, type ShipTicketProof } from '../services/printTicket';
 
 interface TicketProof {
   is_valid: boolean;
@@ -202,9 +202,7 @@ function ShipProofCard({ proof }: { proof: ShipTicketProof }) {
                 <div className="min-w-0">
                   <p className="font-semibold text-slate-700">{l.type === 'sea_leg' ? 'Sea' : 'Road'}: {l.from} → {l.to}</p>
                   <p className="text-slate-500">
-                    {l.carrier || l.vessel
-                      ? [l.carrier, l.carrier_registration && `reg. ${l.carrier_registration}`, l.vessel].filter(Boolean).join(' · ')
-                      : 'Carrier being assigned'}
+                    {describeCarrier(l)}
                     {' · '}<span className="capitalize">{l.status.replace(/_/g, ' ')}</span>
                   </p>
                 </div>
