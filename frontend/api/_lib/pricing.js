@@ -123,7 +123,7 @@ export async function getUserCurrency(db, userId) {
  * `*Ugx` figures are the ICAN amounts valued at the live UGX price — kept for
  * the journey records, which are UGX-denominated.
  */
-export async function priceJourney(db, { pickupFareUgx, dropoffFareUgx, cargoFareUgx, offer, userId, goodsIcan = 0 }) {
+export async function priceJourney(db, { pickupFareUgx, dropoffFareUgx, pickupFareIcan = null, dropoffFareIcan = null, cargoFareUgx, offer, userId, goodsIcan = 0 }) {
   const [ugxPrice, flight] = await Promise.all([
     getIcanPrice(db, 'UGX'),
     fiatToIcan(db, offer.totalAmount, offer.totalCurrency),
@@ -131,9 +131,11 @@ export async function priceJourney(db, { pickupFareUgx, dropoffFareUgx, cargoFar
   const icanPriceUgx = ugxPrice.pricePerIcan;
   const ugxToIcan = (ugx) => round8(Number(ugx) / icanPriceUgx);
 
-  const pickupIcan = ugxToIcan(pickupFareUgx);
+  // A leg already priced in coins (a global journey) is used as it is — converting it
+  // to UGX and back would only add rounding.
+  const pickupIcan = pickupFareIcan ?? ugxToIcan(pickupFareUgx);
   const cargoIcan = ugxToIcan(cargoFareUgx);
-  const dropoffIcan = ugxToIcan(dropoffFareUgx);
+  const dropoffIcan = dropoffFareIcan ?? ugxToIcan(dropoffFareUgx);
   const flightIcan = flight.ican;
   // Goods bought from a store abroad are priced in ICAN already (at the live value of the
   // store's own currency), so they join the total as they are.

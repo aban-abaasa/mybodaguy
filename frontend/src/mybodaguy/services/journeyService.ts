@@ -80,6 +80,11 @@ export interface JourneyQuote {
   /** Distance to the departure airport the ride fare was priced on (null = unknown, minimum fare applied). */
   pickupKm?: number | null;
   pickupAirport?: { iataCode: string | null; name: string } | null;
+  /** Road distance from the arrival airport to the destination the last-mile fare was priced on (null = no pin, flat estimate applied). */
+  dropoffKm?: number | null;
+  /** Global (cross-border) journey: the airport rides are priced in ICAN, not in shillings. */
+  groundPricedInIcan?: boolean;
+  dropoffAirport?: { iataCode: string | null; name: string } | null;
   flightFareUgx: number;
   cargoFareUgx: number;
   dropoffFareUgx: number;
@@ -266,6 +271,8 @@ export interface JourneyLeg {
   leg_order: number;
   leg_type: 'local_pickup' | 'flight' | 'local_dropoff' | 'road_leg' | 'sea_leg';
   status: string;
+  /** Where the leg starts (for a road leg: the pickup address). */
+  origin_city?: string | null;
   ride_id: string | null;
   dispatch_after: string | null;
   flight_booking?: {
@@ -311,6 +318,10 @@ export interface Journey {
   ican_journey_tx_id?: string | null;
   /** Set when a failed booking's payment was automatically returned to the wallet. */
   refunded_at?: string | null;
+  /** Shipments only (ship-cargo journeys). */
+  origin_country?: string | null;
+  cargo_description?: string | null;
+  cargo_weight_kg?: number | null;
   legs: JourneyLeg[];
 }
 

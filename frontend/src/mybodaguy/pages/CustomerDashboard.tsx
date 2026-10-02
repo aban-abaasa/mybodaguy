@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Bike, Clock, LogOut, Package, History, Gift, User, Wallet,
   X, CheckCircle, ChevronDown, ArrowRight, Home, ClipboardList, MapPin,
-  CalendarDays, Truck, Building2, LayoutGrid, ScanLine,
+  CalendarDays, Truck, Building2, LayoutGrid, ScanLine, Trash2,
   type LucideIcon,
 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
+import { toast } from 'sonner';
 import EnhancedRideRequest from '../components/EnhancedRideRequest';
 import BecomeOperatorForm from '../components/BecomeOperatorForm';
 import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
@@ -19,6 +20,11 @@ import RideTrackingModal from '../components/RideTrackingModal';
 import ManageBusinessPanel from '../components/ManageBusinessPanel';
 import JourneyTracker from '../components/JourneyTracker';
 import RefundableDeliveries from '../components/RefundableDeliveries';
+import CancelReasonDialog from '../components/CancelReasonDialog';
+import {
+  cancelRide, hideMyRides, isCancellableRideStatus, isFinishedRideStatus,
+  CUSTOMER_CANCEL_REASONS, SUPERMARKET_CANCEL_REASONS,
+} from '../services/orderActions';
 import { computeOrderInsights, shortenLocation } from '../utils/orderInsights';
 import NearbyRidersMap, { type NearbyRider } from '../components/NearbyRidersMap';
 import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
@@ -73,7 +79,7 @@ const ALL_TABS: { id: TabType; label: string; emoji: string; icon: LucideIcon }[
 // markup. Live map tracking still opens via onOpenTracking from inside the
 // expanded row, rather than firing straight from a row tap.
 function RideListItem({
-  ride, expanded, onToggle, selfUserId, selfName, contact, escortStatus, onOpenTracking, statusColor, serviceIcon,
+  ride, expanded, onToggle, selfUserId, selfName, contact, escortStatus, onOpenTracking, statusColor, serviceIcon, onCancel, onDelete,
 }: {
   ride: any;
   expanded: boolean;
@@ -85,6 +91,10 @@ function RideListItem({
   onOpenTracking: () => void;
   statusColor: (s: string) => string;
   serviceIcon?: React.ReactNode;
+  /** Cancel (asks for a reason first) — offered while the order is still running. */
+  onCancel?: () => void;
+  /** Remove from my history — offered once the order is over. */
+  onDelete?: () => void;
 }) {
   return (
     <div className="border-b border-slate-100 last:border-0">
@@ -142,6 +152,24 @@ function RideListItem({
               />
             </>
           )}
+          {(onCancel && isCancellableRideStatus(ride.status)) && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="mt-1 w-full py-2 text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            >
+              Cancel this {ride.service_type === 'delivery' ? 'order' : 'ride'}
+            </button>
+          )}
+          {(onDelete && isFinishedRideStatus(ride.status)) && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="mt-1 inline-flex w-full items-center justify-center gap-1.5 py-2 text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={13} /> Delete this {ride.service_type === 'delivery' ? 'order' : 'ride'}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -169,6 +197,10 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   // that component's in-memory state while actively booking, and is lost on
   // navigation or refresh.
   const [trackedRide, setTrackedRide] = useState<any>(null);
+  // Cancel-with-reason and delete-from-history for the ride/delivery lists.
+  const [cancelTarget, setCancelTarget] = useState<any>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [orderActionBusy, setOrderActionBusy] = useState(false);
   // A booked journey chosen from My Journeys (Orders) to open on the Book a
   // Ride tab, where its live tracking screen lives.
   const [openJourneyId, setOpenJourneyId] = useState<string | null>(null);
@@ -223,12 +255,26 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
     const load = async () => {
       const { data: cr } = await supabase.from('mbg_customers').select('id').eq('user_id', user.id).maybeSingle();
       if (!cr?.id) { setRidesLoading(false); return; }
-      const { data } = await supabase
+      const rideCols = 'id, created_at, pickup_location, dropoff_location, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, status, fare, service_type, rider_id';
+      // Orders the customer deleted are hidden (customer_hidden_at). If the
+      // ADD_CANCEL_WITH_REASON_AND_DELETE_ORDERS.sql migration has not been run
+      // yet the column does not exist — fall back to the plain list rather than
+      // showing the customer no orders at all.
+      let { data, error: ridesError } = await supabase
         .from('mbg_rides')
-        .select('id, created_at, pickup_location, dropoff_location, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, status, fare, service_type, rider_id')
+        .select(rideCols)
         .eq('customer_id', cr.id)
+        .is('customer_hidden_at', null)
         .order('created_at', { ascending: false })
         .limit(20);
+      if (ridesError) {
+        ({ data } = await supabase
+          .from('mbg_rides')
+          .select(rideCols)
+          .eq('customer_id', cr.id)
+          .order('created_at', { ascending: false })
+          .limit(20));
+      }
       setRides(data || []);
       setRidesLoading(false);
 
@@ -419,6 +465,37 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
     }
     return slides;
   }, [totalOrderCount, orderInsights, busiestStage, nearby, bestStockedStore]);
+
+  const confirmCancelRide = async (reason: string) => {
+    if (!cancelTarget) return;
+    setOrderActionBusy(true);
+    try {
+      await cancelRide(cancelTarget.id, reason);
+      setRides(prev => prev.map(r => (r.id === cancelTarget.id ? { ...r, status: 'cancelled' } : r)));
+      toast.success(cancelTarget.service_type === 'delivery' ? 'Order cancelled' : 'Ride cancelled');
+      setCancelTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not cancel');
+    } finally {
+      setOrderActionBusy(false);
+    }
+  };
+
+  const confirmDeleteRide = async () => {
+    if (!deleteTarget) return;
+    setOrderActionBusy(true);
+    try {
+      const { hiddenIds, skipped } = await hideMyRides([deleteTarget.id]);
+      setRides(prev => prev.filter(r => !hiddenIds.includes(r.id)));
+      if (skipped.length > 0) toast.error(skipped[0].reason);
+      else toast.success('Deleted');
+      setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not delete');
+    } finally {
+      setOrderActionBusy(false);
+    }
+  };
 
   const switchTab = (id: TabType) => { setActiveTab(id); setMobileMenu(false); };
 
@@ -647,6 +724,8 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                             onOpenTracking={() => setTrackedRide(r)}
                             statusColor={statusColor}
                             serviceIcon={r.service_type === 'delivery' ? <Package size={16} className="text-blue-500" /> : undefined}
+                            onCancel={() => setCancelTarget(r)}
+                            onDelete={() => setDeleteTarget(r)}
                           />
                         ))}
                       </div>
@@ -765,6 +844,8 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                     onOpenTracking={() => setTrackedRide(r)}
                     statusColor={statusColor}
                     serviceIcon={r.service_type === 'delivery' ? <Package size={16} className="text-blue-500" /> : <Bike size={16} className="text-orange-500" />}
+                    onCancel={() => setCancelTarget(r)}
+                    onDelete={() => setDeleteTarget(r)}
                   />
                 ))}
               </div>
@@ -821,6 +902,36 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         )}
       </div>
 
+      <CancelReasonDialog
+        open={!!cancelTarget}
+        title={cancelTarget?.service_type === 'delivery' ? 'Cancel this order?' : 'Cancel this ride?'}
+        description={cancelTarget ? `${cancelTarget.pickup_location} → ${cancelTarget.dropoff_location}` : undefined}
+        reasons={cancelTarget?.service_type === 'delivery' ? SUPERMARKET_CANCEL_REASONS : CUSTOMER_CANCEL_REASONS}
+        confirmLabel={cancelTarget?.service_type === 'delivery' ? 'Cancel order' : 'Cancel ride'}
+        busy={orderActionBusy}
+        onConfirm={confirmCancelRide}
+        onClose={() => setCancelTarget(null)}
+      />
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="delete-order-title">
+          <div className="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 text-left shadow-xl">
+            <h4 id="delete-order-title" className="text-lg font-bold text-slate-800">
+              Delete this {deleteTarget.service_type === 'delivery' ? 'order' : 'ride'}?
+            </h4>
+            <p className="text-sm text-slate-600">
+              It disappears from your list. Payment and wallet records are kept.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button type="button" disabled={orderActionBusy} onClick={confirmDeleteRide} className="min-h-[44px] rounded-lg bg-red-600 px-4 font-semibold text-white hover:bg-red-700 disabled:opacity-60">
+                {orderActionBusy ? 'Deleting…' : 'Delete'}
+              </button>
+              <button type="button" disabled={orderActionBusy} onClick={() => setDeleteTarget(null)} className="min-h-[44px] rounded-lg px-4 font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-60">
+                Keep it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {trackedRide && (
         <RideTrackingModal
           ride={trackedRide}

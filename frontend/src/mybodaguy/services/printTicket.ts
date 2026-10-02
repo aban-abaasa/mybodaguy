@@ -4,6 +4,10 @@
  * "Save as PDF" print target already covers that. Self-contained inline CSS
  * so nothing from the app's own stylesheet leaks into the printed page.
  */
+/** Escapes user-supplied text (names, addresses, cargo notes) before it is written into the print page. */
+const esc = (v: unknown) =>
+  String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+
 function openAndPrint(title: string, bodyHtml: string) {
   const win = window.open('', '_blank', 'width=480,height=720');
   if (!win) return; // popup blocked — nothing we can do without a user gesture retry
@@ -55,12 +59,12 @@ export function printFlightTicket(params: {
       <h1>✈️ Boarding Pass</h1>
       <p>BodaGoEra Journey — real flight, booked via Duffel</p>
     </div>
-    <div class="row"><span class="label">Passenger</span><span class="value">${params.passengerName}</span></div>
-    <div class="row"><span class="label">Carrier</span><span class="value">${params.carrier}</span></div>
-    <div class="row"><span class="label">Booking ref (PNR)</span><span class="value code">${params.pnr || 'Pending'}</span></div>
+    <div class="row"><span class="label">Passenger</span><span class="value">${esc(params.passengerName)}</span></div>
+    <div class="row"><span class="label">Carrier</span><span class="value">${esc(params.carrier)}</span></div>
+    <div class="row"><span class="label">Booking ref (PNR)</span><span class="value code">${esc(params.pnr || 'Pending')}</span></div>
     <div class="section-title">Route</div>
-    <div class="row"><span class="label">From</span><span class="value">${params.originLabel}</span></div>
-    <div class="row"><span class="label">To</span><span class="value">${params.destinationLabel}</span></div>
+    <div class="row"><span class="label">From</span><span class="value">${esc(params.originLabel)}</span></div>
+    <div class="row"><span class="label">To</span><span class="value">${esc(params.destinationLabel)}</span></div>
     <div class="row"><span class="label">Departure</span><span class="value">${fmt(params.departureAt)}</span></div>
     <div class="row"><span class="label">Arrival</span><span class="value">${fmt(params.arrivalAt)}</span></div>
     <div class="section-title">Payment</div>
@@ -83,13 +87,13 @@ export function printShipTicket(params: {
       <h1>🚢 Shipping Waybill</h1>
       <p>BodaGoEra Cargo — road → sea → road</p>
     </div>
-    <div class="row"><span class="label">Shipper</span><span class="value">${params.shipperName}</span></div>
+    <div class="row"><span class="label">Shipper</span><span class="value">${esc(params.shipperName)}</span></div>
     <div class="row"><span class="label">Waybill No.</span><span class="value code">${params.journeyId.slice(0, 8).toUpperCase()}</span></div>
     <div class="section-title">Cargo</div>
-    <div class="row"><span class="label">Description</span><span class="value">${params.cargoDescription || 'Not specified'}</span></div>
+    <div class="row"><span class="label">Description</span><span class="value">${esc(params.cargoDescription || 'Not specified')}</span></div>
     <div class="row"><span class="label">Weight</span><span class="value">${params.cargoWeightKg != null ? `${params.cargoWeightKg} kg` : 'Not specified'}</span></div>
     <div class="section-title">Route</div>
-    <div class="row"><span class="label">Pickup</span><span class="value">${params.pickupAddress} (${params.pickupCountry})</span></div>
-    <div class="row"><span class="label">Destination</span><span class="value">${params.dropoffAddress} (${params.dropoffCountry})</span></div>
+    <div class="row"><span class="label">Pickup</span><span class="value">${esc(params.pickupAddress)} (${esc(params.pickupCountry)})</span></div>
+    <div class="row"><span class="label">Destination</span><span class="value">${esc(params.dropoffAddress)} (${esc(params.dropoffCountry)})</span></div>
   `);
 }

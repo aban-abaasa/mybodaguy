@@ -1919,7 +1919,7 @@ export default function JourneyBookingFlow({
                   }]
                 : []),
               ...(quote.dropoffRide !== false
-                ? [{ key: 'dropoff', icon: <Home size={16} />, title: quote.serviceMode === 'parcel' ? 'Courier on arrival' : partySize > 1 ? 'Car on arrival' : 'Driver on arrival', detail: quote.serviceMode === 'parcel' && quote.parcel?.recipientName ? `${destinationLine} · for ${quote.parcel.recipientName}` : destinationLine, ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx }]
+                ? [{ key: 'dropoff', icon: <Home size={16} />, title: quote.serviceMode === 'parcel' ? 'Courier on arrival' : partySize > 1 ? 'Car on arrival' : 'Driver on arrival', detail: [quote.dropoffAirport?.name && quote.dropoffKm ? `${quote.dropoffAirport.name} → ${quote.dropoffKm} km` : '', quote.serviceMode === 'parcel' && quote.parcel?.recipientName ? `${destinationLine} · for ${quote.parcel.recipientName}` : destinationLine].filter(Boolean).join(' · '), ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx }]
                 : []),
             ].map((leg, i, all) => (
               <li key={leg.key} className="relative flex gap-3 pb-5 last:pb-0">
@@ -1960,6 +1960,7 @@ export default function JourneyBookingFlow({
                 ? `A fixed price in ICAN, paid in full by ${companyBenefit.businessName || 'your company'} from its business wallet.`
                 : 'A fixed price in ICAN, paid in full from your wallet with no tithe.'}
               {quote.local && ` At today's live value: 1 ICAN = ${formatMoney(quote.local.pricePerIcan, quote.local.currency)}.`}
+              {quote.groundPricedInIcan && ' Because this journey crosses a border, the airport rides are priced in ICAN too, so their price keeps its value.'}
             </p>
           </div>
 
