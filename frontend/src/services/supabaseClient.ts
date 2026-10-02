@@ -145,8 +145,12 @@ export function initSupabaseClient(): SupabaseClient {
     return supabaseInstance;
   }
 
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const runtimeConfig = typeof window !== 'undefined'
+    ? ((window as any).__APP_RUNTIME_CONFIG__ || {})
+    : {};
+  const hasRuntimeSupabaseConfig = Boolean(runtimeConfig.supabaseUrl || runtimeConfig.supabaseAnonKey);
+  const supabaseUrl = hasRuntimeSupabaseConfig ? runtimeConfig.supabaseUrl : import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = hasRuntimeSupabaseConfig ? runtimeConfig.supabaseAnonKey : import.meta.env.VITE_SUPABASE_ANON_KEY;
 
   // Validation
   if (!supabaseUrl || !supabaseAnonKey) {

@@ -664,6 +664,19 @@ export default function ProfileModal({ user, userRole, userRoles = [], isOpen, o
               </div>
             </div>
 
+            <section className="rounded-xl border border-cyan-200 bg-cyan-50 p-4">
+              <h4 className="text-base font-semibold text-slate-900">Optional business offline server</h4>
+              <p className="mt-1 text-sm leading-5 text-slate-600">Business owners can set up a local server in SupermartKera settings. Staff connect over the business Wi-Fi; supported data syncs when internet returns.</p>
+              <a
+                href="https://supermartkera.icanera.space/business-local-server"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 inline-flex items-center rounded-lg bg-cyan-700 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-800"
+              >
+                Open business server settings
+              </a>
+            </section>
+
             {/* Action Buttons */}
             <div className="flex gap-3 pt-4 border-t border-slate-200">
               <button
