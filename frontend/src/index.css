@@ -393,6 +393,35 @@ textarea:-webkit-autofill:active {
 }
 .classic-btn-ghost:hover:not(:disabled) { color: #7a5a12; background: rgba(196, 160, 82, 0.1); }
 
+/* Rider incoming-job screen (ride / parcel / delivery ringing). A bottom sheet
+   on phones, a centred card from `sm` up — body scrolls, price + Accept/Decline
+   stay pinned so they are never pushed off a short screen. */
+.ring-backdrop {
+  background: rgba(35, 27, 18, 0.74);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+.ring-sheet {
+  background: linear-gradient(180deg, #fffdf8 0%, #faf8f3 100%);
+  border-top: 1px solid rgba(196, 160, 82, 0.6);
+  box-shadow: 0 -18px 50px -22px rgba(0, 0, 0, 0.6);
+  animation: ring-sheet-in 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@media (min-width: 640px) {
+  .ring-sheet {
+    border: 1px solid rgba(196, 160, 82, 0.5);
+    box-shadow: 0 30px 70px -28px rgba(0, 0, 0, 0.65);
+  }
+}
+.dark .ring-sheet { background: #1e293b; border-color: #334155; }
+@keyframes ring-sheet-in {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ring-sheet { animation: none; }
+}
+
 .classic-chip {
   display: inline-flex;
   align-items: center;

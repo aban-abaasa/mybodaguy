@@ -300,33 +300,60 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
           arrives instead of only after the rider taps into the Requests
           tab. */}
       {pending && (
-        <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden p-8 text-center">
-            <div className="w-24 h-24 mx-auto rounded-full bg-gradient-to-br from-orange-400 to-yellow-400 flex items-center justify-center text-white mb-4 animate-pulse">
-              {isPackageJob(pending) ? <Package size={36} /> : <Bike size={36} />}
+        <div className="ring-backdrop fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`New ${requestLabel(pending)} request`}
+            className="ring-sheet flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[28px] sm:max-w-md sm:rounded-3xl"
+          >
+            {/* Header — compact so the job details get the room, not the avatar. */}
+            <div className="shrink-0 px-5 pt-3 pb-4 sm:px-6 sm:pt-5">
+              <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-[#c4a052]/50 sm:hidden" />
+              <div className="flex items-center gap-3.5">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-amber-400 text-white shadow-[0_8px_18px_-8px_rgba(234,88,12,0.8)] ring-4 ring-orange-100 animate-pulse">
+                  {isPackageJob(pending) ? <Package size={26} /> : <Bike size={26} />}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-classic-display text-xl font-bold leading-tight text-slate-800">
+                    New {requestLabel(pending)} Request
+                  </h3>
+                  <p className="mt-0.5 flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                    <span className="relative flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-400 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-orange-500" />
+                    </span>
+                    Ringing…
+                  </p>
+                </div>
+              </div>
             </div>
-            <h3 className="text-lg font-bold text-slate-800">
-              New {requestLabel(pending)} Request
-            </h3>
-            <p className="text-sm text-slate-500 mb-4">Ringing…</p>
+            <div className="landing-classic-divider shrink-0" />
 
-            <RideSummary ride={pending} />
+            {/* Scrolling body — `isolate` keeps the map's z-indexes inside it. */}
+            <div className="isolate min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">
+              <RideSummary ride={pending} hidePrice />
+            </div>
 
-            <div className="flex justify-center gap-6 mt-6">
-              <button
-                onClick={() => respond(false)}
-                disabled={acting}
-                className="w-14 h-14 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-lg disabled:opacity-50"
-              >
-                <X size={22} />
-              </button>
-              <button
-                onClick={() => respond(true)}
-                disabled={acting}
-                className="w-14 h-14 rounded-full bg-green-500 hover:bg-green-600 text-white flex items-center justify-center shadow-lg disabled:opacity-50"
-              >
-                <Check size={22} />
-              </button>
+            {/* Pinned footer — price and the two actions are always on screen. */}
+            <div className="shrink-0 space-y-3 border-t border-[#c4a052]/30 px-4 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-6 sm:pb-5">
+              <TakeHome ride={pending} />
+              <div className="grid grid-cols-[1fr_1.7fr] gap-3">
+                <button
+                  onClick={() => respond(false)}
+                  disabled={acting}
+                  className="classic-btn border border-red-300 bg-white text-red-600 hover:bg-red-50 disabled:opacity-50"
+                >
+                  <X size={18} /> Decline
+                </button>
+                <button
+                  onClick={() => respond(true)}
+                  disabled={acting}
+                  className="classic-btn bg-gradient-to-r from-green-500 to-emerald-600 text-white shadow-[0_10px_22px_-12px_rgba(5,150,105,0.85)] hover:opacity-95 disabled:opacity-50"
+                >
+                  <Check size={18} /> Accept
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -477,7 +504,24 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
   );
 }
 
-function RideSummary({ ride, live }: { ride: RideRow; live?: { riderId: string; phase: 'to_pickup' | 'to_dropoff' } }) {
+// The one flat price: rider_earning is already the final take-home (all fees
+// are worked out on the server when the ride is requested), so there is
+// deliberately no fare / fee breakdown anywhere.
+function TakeHome({ ride }: { ride: RideRow }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="min-w-0">
+        <p className="classic-eyebrow">You take home</p>
+        <p className="text-xs text-slate-500">No further deductions</p>
+      </div>
+      <p className="whitespace-nowrap font-classic-display text-2xl font-bold tabular-nums text-orange-600">
+        UGX {Number(ride.rider_earning ?? 0).toLocaleString()}
+      </p>
+    </div>
+  );
+}
+
+function RideSummary({ ride, live, hidePrice = false }: { ride: RideRow; live?: { riderId: string; phase: 'to_pickup' | 'to_dropoff' }; hidePrice?: boolean }) {
   // Auto-expanded for the active ride (the one case `live` is passed) —
   // the live map is the whole point once a trip is underway, so it
   // shouldn't need an extra tap to appear. Still collapsed by default for
@@ -488,29 +532,66 @@ function RideSummary({ ride, live }: { ride: RideRow; live?: { riderId: string; 
   const dropoffLoc = hasCoords ? toLocation(ride.dropoff_location, ride.dropoff_lat, ride.dropoff_lng) : null;
 
   return (
-    <div className="bg-white rounded-lg p-4 space-y-2">
-      <div className="flex items-start gap-2">
-        <MapPin size={16} className="text-green-500 mt-0.5 flex-shrink-0" />
-        <div>
-          <p className="text-xs text-slate-400">Pickup</p>
-          <p className="text-sm font-medium text-slate-700">{ride.pickup_location}</p>
-        </div>
-      </div>
-      <div className="flex items-start gap-2">
-        <Navigation size={16} className="text-red-500 mt-0.5 flex-shrink-0" />
-        <div>
-          <p className="text-xs text-slate-400">Drop-off</p>
-          <p className="text-sm font-medium text-slate-700">{ride.dropoff_location}</p>
-        </div>
-      </div>
-      {ride.is_parcel && (
-        <div className="flex items-start gap-2 rounded-lg bg-amber-50 px-3 py-2">
-          <Package size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+    // text-left: the ringing overlay is a centred layout and this card must not inherit it.
+    <div className="classic-card space-y-4 p-4 text-left sm:p-5">
+      {/* Route — pickup to drop-off as a small timeline. */}
+      <ol className="space-y-4">
+        <li className="relative flex items-start gap-3">
+          <span className="absolute left-[11px] top-7 -bottom-4 border-l-2 border-dashed border-[#c4a052]/50" aria-hidden="true" />
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-green-100 text-green-600">
+            <MapPin size={14} />
+          </span>
           <div className="min-w-0">
-            <p className="text-xs text-amber-700">Parcel{ride.parcel_weight_kg ? ` · ${Number(ride.parcel_weight_kg)} kg` : ''}</p>
-            {ride.parcel_description && <p className="text-sm font-medium text-slate-700">{ride.parcel_description}</p>}
+            <p className="classic-eyebrow">Pickup</p>
+            <p className="break-words text-[15px] font-semibold leading-snug text-slate-800">{ride.pickup_location}</p>
+          </div>
+        </li>
+        <li className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-500">
+            <Navigation size={14} />
+          </span>
+          <div className="min-w-0">
+            <p className="classic-eyebrow">Drop-off</p>
+            <p className="break-words text-[15px] font-semibold leading-snug text-slate-800">{ride.dropoff_location}</p>
+          </div>
+        </li>
+      </ol>
+
+      {/* Trip facts */}
+      {(ride.distance_km != null || ride.duration_minutes != null || ride.power_type_requested || ride.umbrella_requested) && (
+        <div className="flex flex-wrap items-center gap-2">
+          {ride.distance_km != null && (
+            <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
+              {Number(ride.distance_km).toFixed(1)} km
+            </span>
+          )}
+          {ride.duration_minutes != null && (
+            <span className="rounded-full bg-purple-100 px-2.5 py-1 text-xs font-semibold text-purple-700">
+              ~{ride.duration_minutes} min
+            </span>
+          )}
+          {ride.power_type_requested && (
+            <span className="flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold capitalize text-emerald-700">
+              {ride.power_type_requested === 'electric' ? <Zap size={12} /> : <Fuel size={12} />}
+              {ride.power_type_requested}
+            </span>
+          )}
+          {ride.umbrella_requested && (
+            <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">
+              <Umbrella size={12} /> Rain cover
+            </span>
+          )}
+        </div>
+      )}
+
+      {ride.is_parcel && (
+        <div className="flex items-start gap-3 rounded-xl bg-amber-50 px-3.5 py-3">
+          <Package size={18} className="mt-0.5 shrink-0 text-amber-600" />
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-amber-700">Parcel{ride.parcel_weight_kg ? ` · ${Number(ride.parcel_weight_kg)} kg` : ''}</p>
+            {ride.parcel_description && <p className="break-words text-sm font-medium text-slate-700">{ride.parcel_description}</p>}
             {(ride.recipient_name || ride.recipient_phone) && (
-              <p className="text-xs text-slate-600">
+              <p className="mt-0.5 text-xs text-slate-600">
                 For {ride.recipient_name || 'the recipient'}
                 {ride.recipient_phone && <> · <a href={`tel:${ride.recipient_phone}`} className="font-semibold text-orange-600">{ride.recipient_phone}</a></>}
               </p>
@@ -518,78 +599,56 @@ function RideSummary({ ride, live }: { ride: RideRow; live?: { riderId: string; 
           </div>
         </div>
       )}
-      {hasCoords && (
-        <button
-          type="button"
-          onClick={() => setShowMap((v) => !v)}
-          className="flex items-center gap-1.5 text-xs font-semibold text-orange-600 hover:text-orange-700"
-        >
-          <Map size={14} /> {showMap ? 'Hide map' : live ? 'Show live map' : 'Show map'}
-        </button>
-      )}
-      {showMap && hasCoords && (
-        live && pickupLoc && dropoffLoc ? (
-          <LiveTrackingMap
-            riderId={live.riderId}
-            pickup={pickupLoc}
-            dropoff={dropoffLoc}
-            phase={live.phase}
-          />
-        ) : (
-          <RouteMap
-            pickup={{ lat: ride.pickup_lat as number, lng: ride.pickup_lng as number }}
-            dropoff={{ lat: ride.dropoff_lat as number, lng: ride.dropoff_lng as number }}
-          />
-        )
-      )}
-      <div className="flex items-center gap-3 flex-wrap pt-1">
-        {ride.distance_km != null && (
-          <span className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded-full font-medium">
-            {Number(ride.distance_km).toFixed(1)} km
-          </span>
-        )}
-        {ride.duration_minutes != null && (
-          <span className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded-full font-medium">
-            ~{ride.duration_minutes} min
-          </span>
-        )}
-        {ride.power_type_requested && (
-          <span className="text-xs px-2 py-1 bg-emerald-100 text-emerald-700 rounded-full font-medium flex items-center gap-1">
-            {ride.power_type_requested === 'electric' ? <Zap size={12} /> : <Fuel size={12} />}
-            {ride.power_type_requested}
-          </span>
-        )}
-        {ride.umbrella_requested && (
-          <span className="text-xs px-2 py-1 bg-sky-100 text-sky-700 rounded-full font-medium flex items-center gap-1">
-            <Umbrella size={12} /> Rain cover
-          </span>
-        )}
-      </div>
+
       {ride.order_notes && (
-        <div className="flex items-start gap-2 pt-1">
-          <Package size={16} className="text-orange-500 mt-0.5 flex-shrink-0" />
-          <div>
-            <p className="text-xs text-slate-400">Items to buy</p>
-            <p className="text-sm font-medium text-slate-700">{ride.order_notes}</p>
+        <div className="flex items-start gap-3 rounded-xl bg-orange-50 px-3.5 py-3">
+          <Package size={18} className="mt-0.5 shrink-0 text-orange-500" />
+          <div className="min-w-0">
+            <p className="classic-eyebrow">Items to buy</p>
+            <p className="break-words text-sm font-medium text-slate-700">{ride.order_notes}</p>
           </div>
         </div>
       )}
-      {/* One flat price: rider_earning is already the final take-home (all fees
-          are worked out on the server when the ride is requested), so there is
-          deliberately no fare / fee breakdown here. */}
-      <div className="pt-2 border-t border-slate-100 space-y-1">
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-500 font-medium">You take home — no further deductions</span>
-          <span className="text-lg font-bold text-orange-600">
-            UGX {Number(ride.rider_earning ?? 0).toLocaleString()}
-          </span>
+
+      {hasCoords && (
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={() => setShowMap((v) => !v)}
+            className="inline-flex min-h-[40px] items-center gap-1.5 rounded-full border border-[#c4a052]/50 px-3.5 text-xs font-semibold text-orange-600 transition-colors hover:bg-[#c4a052]/10"
+          >
+            <Map size={14} /> {showMap ? 'Hide map' : live ? 'Show live map' : 'Show map'}
+          </button>
+          {showMap && (
+            live && pickupLoc && dropoffLoc ? (
+              <LiveTrackingMap
+                riderId={live.riderId}
+                pickup={pickupLoc}
+                dropoff={dropoffLoc}
+                phase={live.phase}
+              />
+            ) : (
+              <RouteMap
+                height={190}
+                pickup={{ lat: ride.pickup_lat as number, lng: ride.pickup_lng as number }}
+                dropoff={{ lat: ride.dropoff_lat as number, lng: ride.dropoff_lng as number }}
+              />
+            )
+          )}
         </div>
-        {ride.payment_method === 'cash' && (
-          <p className="text-[11px] text-amber-600 bg-amber-50 rounded px-2 py-1 mt-1">
-            💵 Customer pays you cash directly — the price above is already your final take-home; what the platform is owed on a cash trip is settled from your wallet on your next wallet-paid trip, not on top.
-          </p>
-        )}
-      </div>
+      )}
+
+      {ride.payment_method === 'cash' && (
+        <p className="rounded-xl bg-amber-50 px-3.5 py-2.5 text-xs leading-relaxed text-amber-700">
+          💵 Customer pays you cash directly — the price shown is already your final take-home; what the platform is owed on a cash trip is settled from your wallet on your next wallet-paid trip, not on top.
+        </p>
+      )}
+
+      {!hidePrice && (
+        <div className="border-t border-[#c4a052]/25 pt-3">
+          <TakeHome ride={ride} />
+        </div>
+      )}
     </div>
   );
 }
