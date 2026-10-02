@@ -85,6 +85,7 @@ BEGIN
   RETURN jsonb_build_object('success', true);
 END;
 $$;
+REVOKE ALL ON FUNCTION public.mbg_cancel_ride(UUID, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.mbg_cancel_ride(UUID, TEXT) TO authenticated;
 
 -- ----------------------------------------------------------------------------
@@ -275,88 +276,27 @@ REVOKE ALL ON FUNCTION public.mbg_cancel_journey_ride(UUID, TEXT) FROM PUBLIC, a
 
 -- ----------------------------------------------------------------------------
 -- 3. A cancelled journey no longer voids an airline ticket that is still live.
---    Same function as ADD_AIR_TICKET_VERIFICATION.sql with one CASE line changed.
+--    Patches ONE line of the deployed mbg_verify_air_ticket (so anything else a
+--    later migration changed in it is kept): only a failed journey or a cancelled
+--    airline booking voids the ticket. Safe to re-run — once patched it is a no-op.
 -- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.mbg_verify_air_ticket(p_code TEXT)
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DO $patch$
 DECLARE
-  v_journey  RECORD;
-  v_booking  RECORD;
-  v_pax      JSONB := '[]'::jsonb;
-  v_p        JSONB;
-  v_given    TEXT;
-  v_family   TEXT;
-  v_pnr      TEXT;
-  v_state    TEXT;
+  v_def TEXT;
+  v_old CONSTANT TEXT := $$v_journey.status IN ('cancelled', 'failed') OR v_booking.status = 'cancelled'$$;
+  v_new CONSTANT TEXT := $$v_journey.status = 'failed' OR v_booking.status = 'cancelled'$$;
 BEGIN
-  IF p_code IS NULL OR length(p_code) < 16 OR length(p_code) > 64 OR p_code !~ '^[A-Za-z0-9]+$' THEN
-    RETURN jsonb_build_object('is_valid', false);
+  SELECT pg_get_functiondef(p.oid) INTO v_def
+  FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname = 'mbg_verify_air_ticket';
+  IF v_def IS NULL THEN
+    RAISE NOTICE 'mbg_verify_air_ticket not found — run ADD_AIR_TICKET_VERIFICATION.sql first.';
+  ELSIF position(v_old IN v_def) = 0 THEN
+    RAISE NOTICE 'mbg_verify_air_ticket already patched (or changed) — left as it is.';
+  ELSE
+    EXECUTE replace(v_def, v_old, v_new);
   END IF;
-
-  SELECT j.id, j.status, j.created_at, j.ican_journey_tx_id
-  INTO v_journey
-  FROM public.mbg_journeys j
-  WHERE j.ticket_verify_code = p_code;
-
-  IF NOT FOUND THEN
-    RETURN jsonb_build_object('is_valid', false);
-  END IF;
-
-  SELECT fb.*
-  INTO v_booking
-  FROM public.mbg_journey_legs l
-  JOIN public.mbg_flight_bookings fb ON fb.id = l.flight_booking_id
-  WHERE l.journey_id = v_journey.id AND l.leg_type = 'flight'
-  LIMIT 1;
-
-  IF NOT FOUND THEN
-    RETURN jsonb_build_object('is_valid', false);
-  END IF;
-
-  FOR v_p IN SELECT * FROM jsonb_array_elements(COALESCE(v_booking.passenger_details, '[]'::jsonb))
-  LOOP
-    v_given  := btrim(COALESCE(v_p->>'given_name', ''));
-    v_family := btrim(COALESCE(v_p->>'family_name', ''));
-    IF v_family <> '' THEN
-      v_pax := v_pax || jsonb_build_array(
-        upper(CASE WHEN v_given <> '' THEN left(v_given, 1) || '. ' ELSE '' END || v_family)
-      );
-    END IF;
-  END LOOP;
-
-  v_pnr := COALESCE(v_booking.pnr, '');
-  IF length(v_pnr) > 2 THEN
-    v_pnr := left(v_pnr, 2) || repeat('•', length(v_pnr) - 2);
-  END IF;
-
-  v_state := CASE
-    -- Only a failed journey or a cancelled airline booking voids the ticket: a
-    -- customer cancelling the journey is not refunded, so the ticket stays valid.
-    WHEN v_journey.status = 'failed' OR v_booking.status = 'cancelled' THEN 'cancelled'
-    WHEN v_booking.status = 'completed' THEN 'flown'
-    WHEN v_booking.status IN ('booked', 'ticketed', 'delayed', 'rescheduled') THEN 'valid'
-    ELSE 'pending'
-  END;
-
-  RETURN jsonb_build_object(
-    'is_valid', v_state IN ('valid', 'flown'),
-    'state', v_state,
-    'flight_status', v_booking.status,
-    'passengers', v_pax,
-    'booking_reference_masked', v_pnr,
-    'carrier', v_booking.carrier,
-    'flight_number', v_booking.flight_number,
-    'origin_iata', v_booking.origin_iata,
-    'destination_iata', v_booking.destination_iata,
-    'departs_at', COALESCE(v_booking.current_departure_at, v_booking.scheduled_departure_at),
-    'arrives_at', COALESCE(v_booking.current_arrival_at, v_booking.scheduled_arrival_at),
-    'is_rescheduled', v_booking.status IN ('delayed', 'rescheduled'),
-    'paid', v_journey.ican_journey_tx_id IS NOT NULL,
-    'booked_at', v_journey.created_at
-  );
-END;
-$$;
-GRANT EXECUTE ON FUNCTION public.mbg_verify_air_ticket(TEXT) TO anon, authenticated;
+END
+$patch$;
 
 -- ----------------------------------------------------------------------------
 -- 4. Delete orders from MY history (customer side or rider side).
