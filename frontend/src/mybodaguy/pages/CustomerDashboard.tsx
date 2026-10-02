@@ -200,6 +200,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   // Cancel-with-reason and delete-from-history for the ride/delivery lists.
   const [cancelTarget, setCancelTarget] = useState<any>(null);
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const [orderActionBusy, setOrderActionBusy] = useState(false);
   // A booked journey chosen from My Journeys (Orders) to open on the Book a
   // Ride tab, where its live tracking screen lives.
@@ -490,6 +491,41 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
       if (skipped.length > 0) toast.error(skipped[0].reason);
       else toast.success('Deleted');
       setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not delete');
+    } finally {
+      setOrderActionBusy(false);
+    }
+  };
+
+  // "Delete all" in Rides & Deliveries: every FINISHED order the customer has, not just the 20
+  // on screen (older ones would otherwise reappear). Running orders are never touched — the
+  // server refuses them — and payment/wallet records are kept (the orders are only hidden).
+  const finishedRideCount = rides.filter(r => isFinishedRideStatus(r.status)).length;
+  const confirmDeleteAll = async () => {
+    setOrderActionBusy(true);
+    try {
+      let ids: string[] = rides.filter(r => isFinishedRideStatus(r.status)).map(r => r.id);
+      const { data: cr } = await supabase.from('mbg_customers').select('id').eq('user_id', user.id).maybeSingle();
+      if (cr?.id) {
+        const { data: all, error: allError } = await supabase
+          .from('mbg_rides')
+          .select('id')
+          .eq('customer_id', cr.id)
+          .in('status', ['completed', 'cancelled', 'failed'])
+          .is('customer_hidden_at', null)
+          .limit(2000);
+        // Before the delete-orders migration the column is missing: fall back to what is on screen.
+        if (!allError && all) ids = all.map((r: any) => r.id);
+      }
+      const hidden = new Set<string>();
+      for (let i = 0; i < ids.length; i += 200) {
+        const { hiddenIds } = await hideMyRides(ids.slice(i, i + 200));
+        hiddenIds.forEach(id => hidden.add(id));
+      }
+      setRides(prev => prev.filter(r => !hidden.has(r.id)));
+      toast.success(hidden.size === 0 ? 'Nothing to delete' : `Deleted ${hidden.size} ${hidden.size === 1 ? 'order' : 'orders'}`);
+      setDeleteAllOpen(false);
     } catch (e: any) {
       toast.error(e?.message || 'Could not delete');
     } finally {
@@ -815,8 +851,17 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             />
           )}
           <div className="classic-card p-5">
-            <div className="mb-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
               <SectionHeading>Rides &amp; Deliveries</SectionHeading>
+              {finishedRideCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setDeleteAllOpen(true)}
+                  className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={13} /> Delete all
+                </button>
+              )}
             </div>
             {ridesLoading ? (
               <p className="text-slate-400 text-sm">Loading…</p>
@@ -912,6 +957,25 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         onConfirm={confirmCancelRide}
         onClose={() => setCancelTarget(null)}
       />
+      {deleteAllOpen && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="delete-all-title">
+          <div className="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 text-left shadow-xl">
+            <h4 id="delete-all-title" className="text-lg font-bold text-slate-800">Delete all finished rides &amp; deliveries?</h4>
+            <p className="text-sm text-slate-600">
+              Every completed, cancelled or failed ride and delivery disappears from your list. Anything still running is kept,
+              and payment and wallet records are not touched. This can't be undone.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button type="button" disabled={orderActionBusy} onClick={confirmDeleteAll} className="min-h-[44px] rounded-lg bg-red-600 px-4 font-semibold text-white hover:bg-red-700 disabled:opacity-60">
+                {orderActionBusy ? 'Deleting…' : 'Delete all'}
+              </button>
+              <button type="button" disabled={orderActionBusy} onClick={() => setDeleteAllOpen(false)} className="min-h-[44px] rounded-lg px-4 font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-60">
+                Keep them
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {deleteTarget && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="delete-order-title">
           <div className="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 text-left shadow-xl">
