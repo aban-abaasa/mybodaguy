@@ -55,7 +55,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'No BodaGoEra customer profile for this user yet' });
     }
 
-    const { airport, arrivalAirport, pickupFareUgx, pickupKm, dropoffKm, dropoffFareUgx, cargoFareUgx, weightKg, priced, partySize } =
+    const { airport, arrivalAirport, isGlobal, pickupFareUgx, pickupKm, dropoffKm, dropoffFareUgx, cargoFareUgx, weightKg, priced, partySize } =
       await computeQuoteAmounts(supabaseAdmin, { pickup, destination, offer, cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide, parcel: parcelMode, goodsIcan: storeOrder?.goodsIcan ?? 0 });
 
     res.status(200).json({
@@ -68,6 +68,8 @@ export default async function handler(req, res) {
         local: priced.local,
         pickupKm, pickupAirport: airport,
         dropoffKm, dropoffAirport: arrivalAirport,
+        // Global journey: the ground legs are priced in coins (ICAN rates), not in shillings.
+        groundPricedInIcan: isGlobal,
         pickup, destination, offer, cargoWeightKg: weightKg,
         pickupRide, dropoffRide, partySize,
         serviceMode: parcelMode ? 'parcel' : 'travel',

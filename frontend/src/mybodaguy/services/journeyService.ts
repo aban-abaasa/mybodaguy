@@ -82,6 +82,8 @@ export interface JourneyQuote {
   pickupAirport?: { iataCode: string | null; name: string } | null;
   /** Road distance from the arrival airport to the destination the last-mile fare was priced on (null = no pin, flat estimate applied). */
   dropoffKm?: number | null;
+  /** Global (cross-border) journey: the airport rides are priced in ICAN, not in shillings. */
+  groundPricedInIcan?: boolean;
   dropoffAirport?: { iataCode: string | null; name: string } | null;
   flightFareUgx: number;
   cargoFareUgx: number;

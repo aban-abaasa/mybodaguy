@@ -358,6 +358,8 @@ export default async function handler(req, res) {
         umbrella_requested: prefs.umbrella === true,
         preferred_business_profile_id: uuid.test(prefs.companyId || '') ? prefs.companyId : null,
         fare_ugx: amounts.pickupFareUgx,
+        // What the leg cost in coins — a refund returns coins, not shillings.
+        fare_ican: amounts.priced.pickupIcan,
         dispatch_after: plan.dispatchAt.toISOString()
       }] : []),
       // A bulk insert sends every column named on ANY row as null on the rest, so
@@ -374,6 +376,7 @@ export default async function handler(req, res) {
         destination_country: destinationCountry, destination_city: destinationCity,
         destination_lat: quote.destination.lat ?? null, destination_lng: quote.destination.lng ?? null,
         fare_ugx: amounts.dropoffFareUgx,
+        fare_ican: amounts.priced.dropoffIcan,
         dispatch_after: bookedFlight.arrivalAt
       }] : [])
     ];

@@ -91,7 +91,7 @@ GRANT EXECUTE ON FUNCTION public.mbg_cancel_ride(UUID, TEXT) TO authenticated;
 -- 2. Cancel a journey (customer).
 --    * Air tickets are NOT refunded: the flight booking is left alone.
 --    * The prepaid GROUND legs (ride to the airport, ride on arrival, cargo
---      road/sea legs) are refunded in proportion to what each was priced at,
+--      road/sea legs) are refunded in coins, exactly what each was priced at,
 --      as long as no driver has accepted that leg yet. A leg whose driver is
 --      already committed is cancelled but not refunded, and a ride that is
 --      underway has to be finished (or cancelled by the driver) first.
@@ -99,6 +99,10 @@ GRANT EXECUTE ON FUNCTION public.mbg_cancel_ride(UUID, TEXT) TO authenticated;
 --      company-paid journey, otherwise the customer's own wallet.
 -- ----------------------------------------------------------------------------
 ALTER TABLE public.mbg_journey_legs ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMPTZ;
+-- What a ground leg cost in COINS. Global journeys are priced in ICAN, so a refund
+-- hands back the same coins that were paid, whatever the coin is worth today.
+-- (Legs booked before this column existed are refunded pro rata from fare_ugx.)
+ALTER TABLE public.mbg_journey_legs ADD COLUMN IF NOT EXISTS fare_ican NUMERIC;
 
 CREATE OR REPLACE FUNCTION public.mbg_cancel_journey(p_journey_id UUID, p_reason TEXT)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -109,7 +113,7 @@ DECLARE
   v_reason     TEXT := btrim(COALESCE(p_reason, ''));
   v_leg        RECORD;
   v_has_flight BOOLEAN;
-  v_refund_ugx NUMERIC := 0;
+  v_refund_ugx NUMERIC := 0;   -- legs without a coin amount (booked before fare_ican existed)
   v_refund_ican NUMERIC := 0;
   v_company    UUID;
   v_debit      RECORD;
@@ -152,7 +156,7 @@ BEGIN
   ) INTO v_has_flight;
 
   FOR v_leg IN
-    SELECT l.id, l.ride_id, l.leg_type, l.fare_ugx, l.refunded_at, r.status AS ride_status
+    SELECT l.id, l.ride_id, l.leg_type, l.fare_ugx, l.fare_ican, l.refunded_at, r.status AS ride_status
     FROM public.mbg_journey_legs l
     LEFT JOIN public.mbg_rides r ON r.id = l.ride_id
     WHERE l.journey_id = p_journey_id AND l.status NOT IN ('completed', 'cancelled', 'failed')
@@ -165,10 +169,14 @@ BEGIN
 
     -- Refundable only while no driver has accepted this leg.
     IF v_leg.leg_type <> 'flight'
-       AND COALESCE(v_leg.fare_ugx, 0) > 0
+       AND (COALESCE(v_leg.fare_ican, 0) > 0 OR COALESCE(v_leg.fare_ugx, 0) > 0)
        AND v_leg.refunded_at IS NULL
        AND (v_leg.ride_status IS NULL OR v_leg.ride_status = 'pending') THEN
-      v_refund_ugx := v_refund_ugx + v_leg.fare_ugx;
+      IF COALESCE(v_leg.fare_ican, 0) > 0 THEN
+        v_refund_ican := v_refund_ican + v_leg.fare_ican;
+      ELSE
+        v_refund_ugx := v_refund_ugx + v_leg.fare_ugx;
+      END IF;
       UPDATE public.mbg_journey_legs SET refunded_at = now() WHERE id = v_leg.id;
     END IF;
 
@@ -185,11 +193,15 @@ BEGIN
   SET status = 'cancelled', cancellation_reason = v_reason, cancelled_at = now(), updated_at = now()
   WHERE id = p_journey_id;
 
-  -- Refund the unused ground legs: each is priced in UGX, the journey was paid
-  -- in ICAN at one rate, so convert at the journey's own ICAN-per-UGX ratio.
-  IF v_refund_ugx > 0 AND v_journey.ican_journey_tx_id IS NOT NULL
-     AND COALESCE(v_journey.total_fare_ugx, 0) > 0 AND COALESCE(v_journey.total_fare_ican, 0) > 0 THEN
-    v_refund_ican := LEAST(round(v_refund_ugx * v_journey.total_fare_ican / v_journey.total_fare_ugx, 8), v_journey.total_fare_ican);
+  -- Refund the unused ground legs, in coins. A leg that has its own coin amount returns
+  -- exactly that; an older leg priced only in UGX is converted at the journey's own
+  -- ICAN-per-UGX ratio (the journey was paid in ICAN at one rate).
+  IF v_refund_ugx > 0 AND COALESCE(v_journey.total_fare_ugx, 0) > 0 AND COALESCE(v_journey.total_fare_ican, 0) > 0 THEN
+    v_refund_ican := v_refund_ican + v_refund_ugx * v_journey.total_fare_ican / v_journey.total_fare_ugx;
+  END IF;
+  v_refund_ican := LEAST(round(v_refund_ican, 8), COALESCE(v_journey.total_fare_ican, 0));
+
+  IF v_refund_ican > 0 AND v_journey.ican_journey_tx_id IS NOT NULL THEN
     -- company_profile_id only exists once ADD_JOURNEY_COMPANY_PAYMENT.sql has been run.
     v_company := NULLIF(to_jsonb(v_journey)->>'company_profile_id', '')::UUID;
 
@@ -216,6 +228,8 @@ BEGIN
         v_refund_ican := 0;
       END IF;
     END IF;
+  ELSE
+    v_refund_ican := 0;  -- nothing was paid through the wallet, so nothing to give back
   END IF;
 
   RETURN jsonb_build_object(
