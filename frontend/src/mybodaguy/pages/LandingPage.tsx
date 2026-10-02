@@ -949,25 +949,6 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
           )}
         </div>
 
-        {contributors.length > 0 && (
-          <div className="mt-10 max-w-6xl mx-auto">
-            <p className="text-xs uppercase tracking-[0.3em] text-[#8B6914] font-sans">Community members</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {contributors.map((c) => (
-                <button
-                  key={c.authId || 'guests'}
-                  type="button"
-                  onClick={() => handleSelectContributor(c)}
-                  disabled={c.isGuestGroup}
-                  className="inline-flex items-center gap-2 border border-[#C4A052]/30 bg-[#FAF8F3] px-3 py-1.5 text-xs font-medium text-[#5C4D3A] transition hover:border-[#C4A052] disabled:cursor-default font-sans"
-                >
-                  <UserIcon className="h-3 w-3" /> {c.name}
-                  <span className="text-slate-400">· {c.count} {c.count === 1 ? 'message' : 'messages'}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </section>
 
       {selectedContributor && (
