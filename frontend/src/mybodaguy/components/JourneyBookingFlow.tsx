@@ -7,7 +7,7 @@ import {
 } from '../services/journeyService';
 import JourneyPayerPicker, { type JourneyPayer } from './JourneyPayerPicker';
 import { geocodeAddress, reverseGeocodeCountry, searchCities, searchAddresses, type CountryLookup, type CitySuggestion, type AddressSuggestion, type GeocodeResult } from '../services/geocodeService';
-import { printShipTicket } from '../services/printTicket';
+import { printVerifiedShipTicket } from '../services/shipTicket';
 import AirTicketButton from './AirTicketButton';
 import JourneyLegRideActions from './JourneyLegRideActions';
 import { toInternationalPhone, genderForTitle } from '../services/phone';
@@ -294,6 +294,7 @@ export default function JourneyBookingFlow({
   // an endless spinner, and stop polling when the page goes away.
   const stopPollingRef = useRef<(() => void) | null>(null);
   const [trackingError, setTrackingError] = useState<string | null>(null);
+  const [printError, setPrintError] = useState<string | null>(null);
   const startTracking = (journeyId: string) => {
     stopPollingRef.current?.();
     setTrackingError(null);
@@ -2116,27 +2117,20 @@ export default function JourneyBookingFlow({
                 />
               </div>
             )}
-            {/* The waybill is printed from the booking form's fields, which a resumed journey doesn't have. */}
-            {journey && bookingKind === 'ship' && !resumeJourneyId && (
+            {/* The waybill comes from the saved, paid booking (with a QR that proves it), so it also prints for a resumed journey. */}
+            {journey && bookingKind === 'ship' && (
               <button
                 type="button"
                 onClick={() => {
-                  printShipTicket({
-                    shipperName: customerName,
-                    journeyId: journey.id,
-                    cargoDescription: cargoDescription.trim() || null,
-                    cargoWeightKg: shipCargoWeightKg ? Number(shipCargoWeightKg) : null,
-                    pickupAddress: shipPickup?.address || '',
-                    pickupCountry: shipPickupCountry?.name || '',
-                    dropoffAddress: shipDropoff?.address || '',
-                    dropoffCountry: shipDropoffCountry?.name || '',
-                  });
+                  setPrintError(null);
+                  printVerifiedShipTicket(journey, customerName).catch((err: any) => setPrintError(err?.message || 'Could not print the ship ticket.'));
                 }}
                 className="classic-btn relative mt-4 !min-h-[42px] !text-[13px] text-[#f6e7bd] ring-1 ring-inset ring-[#c4a052]/50 hover:bg-white/5"
               >
                 <Printer size={15} /> Print shipping waybill
               </button>
             )}
+            {printError && <p role="alert" className="relative mt-2 text-xs text-red-300">{printError}</p>}
           </div>
 
           {!journey ? (
