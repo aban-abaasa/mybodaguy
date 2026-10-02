@@ -286,3 +286,9 @@ ALTER VIEW public.mbg_committee_tree_audit SET (security_invoker = true);
 
 GRANT EXECUTE ON FUNCTION public.mbg_region_parent(text, uuid) TO authenticated;
 REVOKE EXECUTE ON FUNCTION public.mbg_relink_chairperson_tree() FROM PUBLIC, anon, authenticated;
+
+-- 6. One active chairperson per region above stage level ---------------------
+-- (stages may legitimately have several chairpersons, so they are excluded)
+CREATE UNIQUE INDEX IF NOT EXISTS mbg_one_active_chair_per_region
+  ON public.mbg_committee_members (region_type, region_id)
+  WHERE is_active AND region_type <> 'stage';
