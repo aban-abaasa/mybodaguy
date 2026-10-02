@@ -80,6 +80,9 @@ export interface JourneyQuote {
   /** Distance to the departure airport the ride fare was priced on (null = unknown, minimum fare applied). */
   pickupKm?: number | null;
   pickupAirport?: { iataCode: string | null; name: string } | null;
+  /** Road distance from the arrival airport to the destination the last-mile fare was priced on (null = no pin, flat estimate applied). */
+  dropoffKm?: number | null;
+  dropoffAirport?: { iataCode: string | null; name: string } | null;
   flightFareUgx: number;
   cargoFareUgx: number;
   dropoffFareUgx: number;

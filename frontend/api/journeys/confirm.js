@@ -136,7 +136,7 @@ export default async function handler(req, res) {
     const liveOffer = { ...quote.offer, totalAmount: live.totalAmount, totalCurrency: live.totalCurrency };
     let amounts;
     try {
-      amounts = await computeQuoteAmounts(supabaseAdmin, { pickup: quote.pickup, offer: liveOffer, cargoWeightKg: quote.cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide, partySize, parcel: parcelMode, goodsIcan });
+      amounts = await computeQuoteAmounts(supabaseAdmin, { pickup: quote.pickup, destination: quote.destination, offer: liveOffer, cargoWeightKg: quote.cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide, partySize, parcel: parcelMode, goodsIcan });
     } catch (err) {
       if (err instanceof RideCapacityError) {
         return res.status(422).json({ success: false, error: `${err.message} You have not been charged.`, code: 'ride_capacity' });
@@ -366,7 +366,11 @@ export default async function handler(req, res) {
       ...(dropoffRide ? [{
         journey_id: journey.id, leg_order: 3, leg_type: 'local_dropoff', status: 'pending', umbrella_requested: false,
         preferred_vehicle_type: parcel ? parcel.vehicleType : (partySize > 1 ? 'car' : null),
-        origin_country: destinationCountry, origin_city: destinationCity,
+        // The driver collects the customer at the airport the flight lands at — the same
+        // point the last-mile fare was measured from (mbg_dispatch_journey_leg matches
+        // drivers near origin_lat/lng and the ride's pickup is built from it).
+        origin_country: destinationCountry, origin_city: amounts.arrivalAirport?.name || destinationCity,
+        origin_lat: amounts.arrivalAirport?.lat ?? null, origin_lng: amounts.arrivalAirport?.lng ?? null,
         destination_country: destinationCountry, destination_city: destinationCity,
         destination_lat: quote.destination.lat ?? null, destination_lng: quote.destination.lng ?? null,
         fare_ugx: amounts.dropoffFareUgx,

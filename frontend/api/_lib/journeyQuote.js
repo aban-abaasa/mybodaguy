@@ -1,7 +1,7 @@
-import { originAirportOf, priceAirportTransferUgx } from './transfer.js';
+import { originAirportOf, arrivalAirportOf, priceAirportTransferUgx, priceLastMileUgx } from './transfer.js';
 import { priceJourney } from './pricing.js';
 
-/** Flat estimate for the ride from the arrival airport (real per-country fare models are Phase 2). */
+/** Flat estimate for the ride from the arrival airport — used ONLY when the destination has no pin, so no real distance exists. */
 export const DROPOFF_FARE_UGX = 20000;
 
 /** Most travellers Duffel will book on one offer. */
@@ -94,7 +94,7 @@ export function partySizeOf(offer) {
  * confirm endpoint recomputes them before charging, so what is debited never
  * depends on figures the browser sent.
  */
-export async function computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoWeightKg, userId, pickupRide = true, dropoffRide = true, partySize = partySizeOf(offer), parcel = false, goodsIcan = 0 }) {
+export async function computeQuoteAmounts(supabaseAdmin, { pickup, destination, offer, cargoWeightKg, userId, pickupRide = true, dropoffRide = true, partySize = partySizeOf(offer), parcel = false, goodsIcan = 0 }) {
   // One car per ride: refuse a party it can't carry rather than sending a driver who can't take them all.
   // A parcel journey's ground legs carry goods, not the travellers, so seats don't limit them.
   if (!parcel && (pickupRide || dropoffRide) && partySize > CAR_SEATS) throw new RideCapacityError(partySize);
@@ -104,11 +104,16 @@ export async function computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoW
   // re-charged as a normal ride booking — see _lib/transfer.js). A customer who
   // has their own car, or a friend driving them, skips it and is not charged.
   const airport = originAirportOf(offer);
-  const { fareUgx: pickupFareUgx, distanceKm: pickupKm } = pickupRide
+  const { fareUgx: pickupFareUgx, distanceKm: pickupKm, source: pickupDistanceSource } = pickupRide
     ? await priceAirportTransferUgx(supabaseAdmin, pickup, airport)
-    : { fareUgx: 0, distanceKm: null };
+    : { fareUgx: 0, distanceKm: null, source: null };
 
-  const dropoffFareUgx = dropoffRide ? DROPOFF_FARE_UGX : 0;
+  // The last mile: from the airport the flight lands at to the customer's pin,
+  // priced on the real road distance exactly like the ride to the airport.
+  const arrivalAirport = arrivalAirportOf(offer);
+  const { fareUgx: dropoffFareUgx, distanceKm: dropoffKm, source: dropoffDistanceSource } = dropoffRide
+    ? await priceLastMileUgx(supabaseAdmin, arrivalAirport, destination, DROPOFF_FARE_UGX)
+    : { fareUgx: 0, distanceKm: null, source: null };
 
   // Extra baggage the party brings beyond its free allowance (each traveller has
   // their own) — a per-kg platform surcharge, not a real airline ancillary-baggage booking.
@@ -124,5 +129,5 @@ export async function computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoW
   // unreachable price engine are refused rather than guessed.
   const priced = await priceJourney(supabaseAdmin, { pickupFareUgx, dropoffFareUgx, cargoFareUgx, offer, userId, goodsIcan });
 
-  return { airport, pickupFareUgx, pickupKm, dropoffFareUgx, cargoFareUgx, weightKg, priced, pickupRide, dropoffRide, partySize, parcel };
+  return { airport, arrivalAirport, pickupFareUgx, pickupKm, pickupDistanceSource, dropoffKm, dropoffDistanceSource, dropoffFareUgx, cargoFareUgx, weightKg, priced, pickupRide, dropoffRide, partySize, parcel };
 }

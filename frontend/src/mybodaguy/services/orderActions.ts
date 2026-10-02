@@ -34,16 +34,16 @@ export async function cancelRide(rideId: string, reason: string): Promise<void> 
 }
 
 /**
- * Cancels an unfinished journey. Unfinished ground rides are cancelled; the air
- * ticket is NOT refunded and stays valid.
+ * Cancels an unfinished journey. Unfinished ground rides are cancelled and, when no
+ * driver had accepted them yet, refunded; the air ticket is NOT refunded and stays valid.
  */
-export async function cancelJourney(journeyId: string, reason: string): Promise<{ hasAirTicket: boolean }> {
+export async function cancelJourney(journeyId: string, reason: string): Promise<{ hasAirTicket: boolean; refundedIcan: number }> {
   const { data, error } = await supabase.rpc('mbg_cancel_journey', { p_journey_id: journeyId, p_reason: reason });
   if (error) {
     throw new Error(/mbg_cancel_journey/.test(error.message) ? 'Cancelling journeys is not switched on yet.' : error.message);
   }
   if (!data?.success) throw new Error(data?.error || 'Could not cancel the journey right now.');
-  return { hasAirTicket: !!data.has_air_ticket };
+  return { hasAirTicket: !!data.has_air_ticket, refundedIcan: Number(data.refunded_ican) || 0 };
 }
 
 /**

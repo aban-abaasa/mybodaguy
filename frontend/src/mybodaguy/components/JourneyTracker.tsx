@@ -140,13 +140,14 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
     setBusy(true);
     setNotice(null);
     try {
-      const { hasAirTicket } = await cancelJourney(cancelling.id, reason);
+      const { hasAirTicket, refundedIcan } = await cancelJourney(cancelling.id, reason);
       setJourneys((prev) => prev.map((j) => (j.id === cancelling.id ? { ...j, status: 'cancelled' } : j)));
+      const refundText = refundedIcan > 0 ? ` ${refundedIcan.toFixed(4)} ₡ for the unused rides was refunded.` : '';
       setNotice({
         kind: 'ok',
         text: hasAirTicket
-          ? 'Journey cancelled. Your air ticket is not refunded — you can still download it.'
-          : 'Journey cancelled.',
+          ? `Journey cancelled.${refundText} Your air ticket is not refunded — you can still download it.`
+          : `Journey cancelled.${refundText}`,
       });
       setCancelling(null);
     } catch (err: any) {
@@ -407,7 +408,9 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
         title="Cancel this journey?"
         description={cancelling ? `To ${placeOf(cancelling)}. Rides that have not finished will be cancelled.` : undefined}
         reasons={CUSTOMER_CANCEL_REASONS}
-        warning={cancelling && hasTicket(cancelling) ? 'Air tickets are not refunded. Your flight stays booked and the ticket stays valid — only the rides are cancelled.' : undefined}
+        warning={cancelling
+          ? `${hasTicket(cancelling) ? 'Air tickets are not refunded — your flight stays booked and the ticket stays valid. ' : ''}Rides that no driver has accepted yet are refunded to the wallet that paid; a ride whose driver is already coming is not.`
+          : undefined}
         confirmLabel="Cancel journey"
         busy={busy}
         onConfirm={confirmCancelJourney}

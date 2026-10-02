@@ -1919,7 +1919,7 @@ export default function JourneyBookingFlow({
                   }]
                 : []),
               ...(quote.dropoffRide !== false
-                ? [{ key: 'dropoff', icon: <Home size={16} />, title: quote.serviceMode === 'parcel' ? 'Courier on arrival' : partySize > 1 ? 'Car on arrival' : 'Driver on arrival', detail: quote.serviceMode === 'parcel' && quote.parcel?.recipientName ? `${destinationLine} · for ${quote.parcel.recipientName}` : destinationLine, ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx }]
+                ? [{ key: 'dropoff', icon: <Home size={16} />, title: quote.serviceMode === 'parcel' ? 'Courier on arrival' : partySize > 1 ? 'Car on arrival' : 'Driver on arrival', detail: [quote.dropoffAirport?.name && quote.dropoffKm ? `${quote.dropoffAirport.name} → ${quote.dropoffKm} km` : '', quote.serviceMode === 'parcel' && quote.parcel?.recipientName ? `${destinationLine} · for ${quote.parcel.recipientName}` : destinationLine].filter(Boolean).join(' · '), ican: quote.dropoffIcan, local: quote.local?.dropoff, ugx: quote.dropoffFareUgx }]
                 : []),
             ].map((leg, i, all) => (
               <li key={leg.key} className="relative flex gap-3 pb-5 last:pb-0">

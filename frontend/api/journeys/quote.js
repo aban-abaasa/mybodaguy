@@ -55,8 +55,8 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'No BodaGoEra customer profile for this user yet' });
     }
 
-    const { airport, pickupFareUgx, pickupKm, dropoffFareUgx, cargoFareUgx, weightKg, priced, partySize } =
-      await computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide, parcel: parcelMode, goodsIcan: storeOrder?.goodsIcan ?? 0 });
+    const { airport, arrivalAirport, pickupFareUgx, pickupKm, dropoffKm, dropoffFareUgx, cargoFareUgx, weightKg, priced, partySize } =
+      await computeQuoteAmounts(supabaseAdmin, { pickup, destination, offer, cargoWeightKg, userId: customerUserId, pickupRide, dropoffRide, parcel: parcelMode, goodsIcan: storeOrder?.goodsIcan ?? 0 });
 
     res.status(200).json({
       success: true,
@@ -67,6 +67,7 @@ export default async function handler(req, res) {
         icanPriceUgx: priced.icanPriceUgx,
         local: priced.local,
         pickupKm, pickupAirport: airport,
+        dropoffKm, dropoffAirport: arrivalAirport,
         pickup, destination, offer, cargoWeightKg: weightKg,
         pickupRide, dropoffRide, partySize,
         serviceMode: parcelMode ? 'parcel' : 'travel',
