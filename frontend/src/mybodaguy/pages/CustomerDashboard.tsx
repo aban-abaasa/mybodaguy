@@ -20,6 +20,7 @@ import ManageBusinessPanel from '../components/ManageBusinessPanel';
 import JourneyTracker from '../components/JourneyTracker';
 import RefundableDeliveries from '../components/RefundableDeliveries';
 import { computeOrderInsights, shortenLocation } from '../utils/orderInsights';
+import NearbyRidersMap, { type NearbyRider } from '../components/NearbyRidersMap';
 import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { ThemeToggle } from '../../components/ThemeToggle';
@@ -190,6 +191,12 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   // on where to expect the fastest (and, thanks to more riders competing
   // for the same jobs, often cheapest) pickup.
   const [busiestStage, setBusiestStage] = useState<{ stage_name: string; available_riders: number } | null>(null);
+  // Real GPS: the customer's position, and the live riders around it.
+  const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [nearby, setNearby] = useState<{
+    count: number; nearest_km: number | null; eta_min: number | null;
+    stage_name: string | null; stage_lat: number | null; stage_lng: number | null; riders: NearbyRider[];
+  } | null>(null);
   // Best-stocked shop right now — the same "live availability" idea as
   // busiestStage, but for goods instead of riders.
   const [bestStockedStore, setBestStockedStore] = useState<{ store_name: string; location: string | null; available_stock: number } | null>(null);
@@ -316,6 +323,35 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
     return () => { cancelled = true; clearInterval(interval); };
   }, [user?.id]);
 
+  // Watch the customer's GPS (silently skipped if denied/unavailable — the
+  // greeting then falls back to the stage-level hint).
+  useEffect(() => {
+    if (!user?.id || !navigator.geolocation) return;
+    const id = navigator.geolocation.watchPosition(
+      p => setMyPos(prev => {
+        const next = { lat: p.coords.latitude, lng: p.coords.longitude };
+        // ignore sub-~50m jitter so we don't refetch on every GPS tick
+        return prev && Math.abs(prev.lat - next.lat) < 0.0005 && Math.abs(prev.lng - next.lng) < 0.0005 ? prev : next;
+      }),
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, [user?.id]);
+
+  // Live riders around the customer's real position, refreshed every 20s.
+  useEffect(() => {
+    if (!user?.id || !myPos) return;
+    let cancelled = false;
+    const load = () => {
+      supabase.rpc('mbg_get_nearby_riders', { p_lat: myPos.lat, p_lng: myPos.lng, p_radius_km: 5 })
+        .then(({ data }) => { if (!cancelled && data) setNearby(data); });
+    };
+    load();
+    const interval = setInterval(load, 20000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [user?.id, myPos]);
+
   useEffect(() => {
     if (!user?.id) return;
     supabase
@@ -364,7 +400,12 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         content: <>Mostly from <strong>{shortenLocation(orderInsights.topLocation)}</strong></>,
       });
     }
-    if (busiestStage) {
+    if (nearby && nearby.count > 0) {
+      slides.push({
+        key: 'riders', emoji: '🏍️', tint: 'bg-emerald-50 text-emerald-700',
+        content: <><strong>{nearby.count}</strong> {nearby.count === 1 ? 'rider' : 'riders'} online near {nearby.stage_name ? <strong>{nearby.stage_name}</strong> : 'you'}{nearby.eta_min != null && <> — nearest ~<strong>{nearby.eta_min} min</strong> away</>}</>,
+      });
+    } else if (busiestStage) {
       slides.push({
         key: 'riders', emoji: '🏍️', tint: 'bg-emerald-50 text-emerald-700',
         content: <><strong>{busiestStage.available_riders}</strong> riders online near <strong>{busiestStage.stage_name}</strong> — fastest pickup</>,
@@ -377,7 +418,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
       });
     }
     return slides;
-  }, [totalOrderCount, orderInsights, busiestStage, bestStockedStore]);
+  }, [totalOrderCount, orderInsights, busiestStage, nearby, bestStockedStore]);
 
   const switchTab = (id: TabType) => { setActiveTab(id); setMobileMenu(false); };
 
@@ -496,6 +537,16 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
               {insightSlides.length > 0 && (
                 <div className="mt-3">
                   <InsightSlider slides={insightSlides} />
+                </div>
+              )}
+              {myPos && (
+                <div className="mt-3">
+                  <NearbyRidersMap
+                    me={myPos}
+                    riders={nearby?.riders ?? []}
+                    stage={nearby?.stage_lat != null && nearby?.stage_lng != null && nearby.stage_name
+                      ? { name: nearby.stage_name, lat: nearby.stage_lat, lng: nearby.stage_lng } : null}
+                  />
                 </div>
               )}
             </div>
