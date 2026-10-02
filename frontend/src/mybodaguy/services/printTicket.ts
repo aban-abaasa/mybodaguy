@@ -106,6 +106,24 @@ export interface ShipTicketProofLeg {
   carrier: string | null;
   carrier_registration: string | null;
   vessel: string | null;
+  /** A booking with a shipping line: who ('maersk', or 'mock' for a TEST booking), its reference and status. */
+  carrier_provider?: string | null;
+  carrier_booking_ref?: string | null;
+  carrier_booking_status?: string | null;
+}
+
+const PROVIDER_LABEL: Record<string, string> = { maersk: 'Maersk' };
+
+/** One line saying who carries a leg, from the server's proof. A mock booking is always labelled as a test. */
+export function describeCarrier(l: ShipTicketProofLeg): string {
+  if (l.carrier_booking_ref && l.carrier_provider === 'mock') {
+    return `TEST booking ${l.carrier_booking_ref} — not a real shipment`;
+  }
+  const booked = l.carrier_booking_ref
+    ? `${PROVIDER_LABEL[l.carrier_provider || ''] || l.carrier_provider || 'Carrier'} booking ${l.carrier_booking_ref}${l.carrier_booking_status ? ` (${l.carrier_booking_status.toLowerCase().replace(/_/g, ' ')})` : ''}`
+    : '';
+  const operator = [l.carrier, l.carrier_registration && `reg. ${l.carrier_registration}`, l.vessel && `vessel/vehicle ${l.vessel}`].filter(Boolean).join(' · ');
+  return [booked, operator].filter(Boolean).join(' · ') || 'carrier being assigned';
 }
 
 /** What mbg_verify_ship_ticket proves about a shipment — the same answer the QR gives. */
@@ -146,9 +164,7 @@ export function printShipTicket(win: Window, params: {
     ? `<span class="badge paid">PAID${proof.paid_via === 'company' ? ' — by company' : ''}</span>`
     : '<span class="badge unpaid">NOT PAID</span>';
   const legRows = legs.map((l) => {
-    const who = l.carrier || l.vessel
-      ? [l.carrier, l.vessel && `vessel/vehicle ${l.vessel}`].filter(Boolean).map(esc).join(' · ')
-      : 'carrier being assigned';
+    const who = esc(describeCarrier(l));
     return `<div class="leg"><div class="route">${legTitle(l.type)}: ${esc(l.from || '')} → ${esc(l.to || '')}</div><div class="who">${who}</div></div>`;
   }).join('');
   const heading = proof.state === 'delivered' ? 'Delivered' : proof.state === 'in_transit' ? 'In transit' : proof.state === 'cancelled' ? 'Cancelled' : 'Booked';
@@ -176,6 +192,6 @@ export function printShipTicket(win: Window, params: {
       <img src="${esc(params.qrDataUrl)}" alt="QR code to verify this waybill" />
       <small><strong>Scan to verify payment.</strong> The QR opens a live check against the BodaGoEra record, which says whether this shipment is really paid, who carries it and where it is.<br />${esc(params.verifyUrl.replace(/^https?:\/\//, ''))}</small>
     </div>
-    <p class="note">This waybill is issued by BodaGoEra from its booking record. The carrier shown is the registered operator that accepted each leg; until one accepts, the leg shows “carrier being assigned”.</p>
+    <p class="note">This waybill is issued by BodaGoEra from its booking record. The carrier shown is the shipping line booking or the registered operator that accepted each leg; until there is one, the leg shows “carrier being assigned”. A TEST booking is not a real shipment.</p>
   `);
 }

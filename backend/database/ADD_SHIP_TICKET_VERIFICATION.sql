@@ -71,14 +71,22 @@ BEGIN
            'to', x.destination_city,
            'carrier', x.carrier_name,
            'carrier_registration', x.carrier_reg,
-           'vessel', x.vessel
+           'vessel', x.vessel,
+           -- A booking with a shipping line (ADD_CARRIER_BOOKING.sql); 'mock' means a TEST booking.
+           'carrier_provider', x.carrier_provider,
+           'carrier_booking_ref', x.carrier_booking_ref,
+           'carrier_booking_status', x.carrier_booking_status
          ) ORDER BY x.leg_order), '[]'::jsonb),
-         COALESCE(bool_or(x.carrier_name IS NOT NULL OR x.vessel IS NOT NULL), false)
+         COALESCE(bool_or(x.carrier_name IS NOT NULL OR x.vessel IS NOT NULL OR (x.carrier_booking_ref IS NOT NULL AND x.carrier_provider <> 'mock')), false)
   INTO v_legs, v_carrier
   FROM (
     SELECT l.leg_order, l.leg_type, l.status, l.origin_city, l.destination_city,
            bp.business_name AS carrier_name,
            bp.registration_number AS carrier_reg,
+           -- read through jsonb so this works before ADD_CARRIER_BOOKING.sql has been run
+           to_jsonb(l) ->> 'carrier_provider' AS carrier_provider,
+           to_jsonb(l) ->> 'carrier_booking_ref' AS carrier_booking_ref,
+           to_jsonb(l) ->> 'carrier_booking_status' AS carrier_booking_status,
            NULLIF(btrim(concat_ws(' ', rd.vehicle_model, CASE WHEN rd.plate_number IS NOT NULL THEN '(' || rd.plate_number || ')' END)), '') AS vessel
     FROM public.mbg_journey_legs l
     LEFT JOIN public.mbg_rides r ON r.id = l.ride_id
