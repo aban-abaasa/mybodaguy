@@ -9,6 +9,7 @@ import RiderModeSelector from '../components/RiderModeSelector';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
 import RiderICANEarnings from '../components/RiderICANEarnings';
+import RiderMyCard from '../components/RiderMyCard';
 import IcanCoinCard from '../components/IcanCoinCard';
 import RewardsPointsCard from '../components/RewardsPointsCard';
 import RiderEarningsCard, { buildWeekEarnings, type DayEarning } from '../components/RiderEarningsCard';
@@ -439,6 +440,8 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const { stats: riderStats, loading: riderStatsLoading, allVehicles, activeVehicleType, activeRiderId, reload: reloadRiderStats } = useRiderStats(user?.id);
+  // Bumped after the rider pays for their ID card so the wallet cards re-read the balance.
+  const [walletRefresh, setWalletRefresh] = useState(0);
   const { totalCount: totalJobsCount, insights: demandInsights, week, pendingCount, activeCount } =
     useRiderActivity(activeRiderId, riderStats?.operatorType === 'escort');
   const [switchingVehicle, setSwitchingVehicle] = useState(false);
@@ -745,6 +748,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
               </span>
             </button>
 
+            {/* ID card — appears once a district chairperson has issued one; the
+                rider pays for it here and shows its QR to chairpersons and customers. */}
+            <RiderMyCard onPaid={() => setWalletRefresh(n => n + 1)} />
+
             {/* Earnings — today as the headline, the week as the shape of it */}
             <RiderEarningsCard week={weekForCard} loading={weekForCard === null} />
 
@@ -790,12 +797,12 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
 
             {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
             <div className="grid grid-cols-2 gap-3">
-              <IcanCoinCard variant="premium" userId={user?.id} onGoToWallet={onGoToWallet} />
+              <IcanCoinCard key={walletRefresh} variant="premium" userId={user?.id} onGoToWallet={onGoToWallet} />
               <RewardsPointsCard variant="premium" userId={user?.id} onOpen={() => setActiveTab('rewards')} />
             </div>
 
             {/* ICAN Wallet Earnings */}
-            <RiderICANEarnings user={user} />
+            <RiderICANEarnings key={walletRefresh} user={user} />
 
             {/* Quick actions */}
             <div className="space-y-3">
