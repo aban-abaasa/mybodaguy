@@ -1,32 +1,66 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { ChevronDown, IdCard } from 'lucide-react';
-import RiderIdCard, { FeesChip, PermitChip } from './RiderIdCard';
-import { riderCardService, type RiderCard } from '../services/riderCardService';
+import { ChevronDown, IdCard, Sparkles } from 'lucide-react';
+import RiderIdCard, { FeesChip, PermitChip, RiderCardVisual } from './RiderIdCard';
+import {
+  DEFAULT_RIDER_CARD_FEE_ICAN,
+  riderCardService,
+  type RequestableRider,
+  type RiderCard,
+} from '../services/riderCardService';
 
 interface Props {
   // Called after a payment goes through so the wallet balance on screen can refresh.
   onPaid?: () => void;
 }
 
-// The rider's own ID card on their dashboard. Renders nothing until a district
-// chairperson has issued them one. An unpaid card shows what it costs and who
-// the fee is shared with; paying it from their own wallet activates the QR.
+const vehicleLabel = (type: string) => type.charAt(0).toUpperCase() + type.slice(1);
+
+// The rider's own ID card on their dashboard.
+//  * No card yet: a rider whose account is active can request one. It is issued
+//    on the spot, no approval, as an unpaid card.
+//  * Unpaid card: shows what it costs and who the fee is shared with; paying it
+//    from their own wallet activates the QR.
+//  * Active card: the credit-card-style ID, tap to flip it for the QR.
+// Renders nothing for a rider who has no card and cannot request one yet.
 export default function RiderMyCard({ onPaid }: Props) {
   const [cards, setCards] = useState<RiderCard[]>([]);
+  const [requestable, setRequestable] = useState<RequestableRider[]>([]);
+  const [fee, setFee] = useState(DEFAULT_RIDER_CARD_FEE_ICAN);
   const [open, setOpen] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [paying, setPaying] = useState<string | null>(null);
+  const [requesting, setRequesting] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    const { cards: mine, error } = await riderCardService.getMyCards();
+    const [{ cards: mine, error }, { riders }, cardFee] = await Promise.all([
+      riderCardService.getMyCards(),
+      riderCardService.getRequestable(),
+      riderCardService.getFee(),
+    ]);
     if (error) console.error('[RiderMyCard]', error);
     setCards(mine);
+    setRequestable(riders);
+    setFee(cardFee);
   }, []);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const request = async (rider: RequestableRider) => {
+    setRequesting(rider.rider_id);
+    const result = await riderCardService.requestCard(rider.rider_id);
+    if (result.success) {
+      toast.success(`Your card is issued. Pay ${result.card?.fee_ican ?? fee} ICAN to activate it.`);
+      await load();
+      // Straight on to the payment step; nothing is charged until they confirm.
+      if (result.card) setConfirming(result.card.card_id);
+    } else {
+      toast.error(result.error || 'Could not request the card');
+    }
+    setRequesting(null);
+  };
 
   const pay = async (card: RiderCard) => {
     setPaying(card.card_id);
@@ -43,10 +77,41 @@ export default function RiderMyCard({ onPaid }: Props) {
     }
   };
 
-  if (cards.length === 0) return null;
+  if (cards.length === 0 && requestable.length === 0) return null;
 
   return (
     <div className="space-y-3">
+      {requestable.map((rider) => (
+        <div key={rider.rider_id} className="classic-card overflow-hidden">
+          <div className="flex items-center gap-3 p-4">
+            <span className="grid h-12 w-12 flex-shrink-0 place-items-center rounded-full bg-violet-50 ring-1 ring-inset ring-violet-100">
+              <Sparkles size={20} className="text-violet-600" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="font-classic-display text-lg font-semibold leading-tight text-slate-800">Get your rider ID card</p>
+              <p className="mt-0.5 truncate text-xs text-slate-500">
+                {requestable.length > 1 ? `${vehicleLabel(rider.vehicle_type)} · ` : ''}
+                <span className="uppercase">{rider.plate_number}</span>
+                {rider.stage ? ` · ${rider.stage}` : ''}
+              </p>
+            </div>
+          </div>
+          <div className="space-y-3 border-t border-[#c4a052]/25 px-4 pb-4 pt-3">
+            <p className="text-sm text-slate-600">
+              A credit-card-style ID with a QR code that shows your details, driving permit status and fees. It is issued the moment you ask; you pay <span className="font-semibold text-slate-800">{fee} ICAN</span> to activate it.
+            </p>
+            <button
+              type="button"
+              onClick={() => request(rider)}
+              disabled={requesting === rider.rider_id}
+              className="classic-btn classic-btn-primary !rounded-full"
+            >
+              {requesting === rider.rider_id ? 'Issuing…' : 'Request my card'}
+            </button>
+          </div>
+        </div>
+      ))}
+
       {cards.map((card) => {
         const pending = card.status === 'pending_payment';
         const expanded = open === card.card_id;
@@ -85,18 +150,20 @@ export default function RiderMyCard({ onPaid }: Props) {
 
             {pending && (
               <div className="space-y-3 border-t border-[#c4a052]/25 px-4 pb-4 pt-3">
+                <RiderCardVisual data={card} status="pending" />
                 <p className="text-sm text-slate-600">
-                  Your district chairperson issued you a QR ID card. Pay <span className="font-semibold text-slate-800">{card.fee_ican} ICAN</span> from your wallet to activate it.
+                  {card.requested_by_rider ? 'Your QR ID card has been issued.' : 'Your district chairperson issued you a QR ID card.'}{' '}
+                  Pay <span className="font-semibold text-slate-800">{card.fee_ican} ICAN</span> from your wallet to activate it.
                 </p>
                 <p className="text-xs text-slate-500">
                   The fee is shared equally between the chairpersons of your stage, parish, subcounty, division and district.
                 </p>
                 {confirming === card.card_id ? (
                   <div className="flex gap-2">
-                    <button type="button" onClick={() => setConfirming(null)} disabled={paying === card.card_id} className="classic-btn classic-btn-outline !rounded-full">
+                    <button type="button" onClick={() => setConfirming(null)} disabled={paying === card.card_id} className="classic-btn classic-btn-outline !w-auto !flex-none !rounded-full !px-6">
                       Not now
                     </button>
-                    <button type="button" onClick={() => pay(card)} disabled={paying === card.card_id} className="classic-btn classic-btn-primary !rounded-full">
+                    <button type="button" onClick={() => pay(card)} disabled={paying === card.card_id} className="classic-btn classic-btn-primary !rounded-full whitespace-nowrap">
                       {paying === card.card_id ? 'Paying…' : `Confirm ${card.fee_ican} ICAN`}
                     </button>
                   </div>

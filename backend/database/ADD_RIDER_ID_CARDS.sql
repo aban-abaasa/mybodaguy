@@ -2,16 +2,26 @@
 -- RIDER ID CARDS — issued by the district chairperson, paid by the rider,
 -- verified by QR
 --
--- The district chairperson (the top of the hierarchy: district -> division ->
--- subcounty -> parish -> stage) can issue a QR ID card to any ACTIVE rider in
--- their district. The card has two steps so nobody is ever charged without
--- agreeing to it:
+-- A QR ID card reaches a rider in one of two ways, and either way it is issued
+-- instantly (no approval queue):
 --
---   1. ISSUE  (district chairperson)  mbg_issue_rider_card(rider_id)
---        creates the card as 'pending_payment'. No money moves yet.
---   2. PAY    (the rider)             mbg_pay_rider_card(card_id)
---        the rider pays the card fee from their own ICAN wallet
---        (rider_card.fee_ican, default 2 ICAN) and the card turns 'active'.
+--   * the rider REQUESTS it from their own dashboard — mbg_request_rider_card —
+--     and the card is auto-issued on the spot, or
+--   * the district chairperson (the top of the hierarchy: district -> division
+--     -> subcounty -> parish -> stage) ISSUES it to any ACTIVE rider in their
+--     district — mbg_issue_rider_card.
+--
+-- Both create the card as 'pending_payment' and move no money, so nobody is
+-- ever charged without agreeing to it. A card remembers whether the rider
+-- asked for it (requested_by_rider / requested_at). Then:
+--
+--   PAY (the rider)  mbg_pay_rider_card(card_id)
+--     the rider pays the card fee from their own ICAN wallet
+--     (rider_card.fee_ican, default 2 ICAN) and the card turns 'active'.
+--
+-- The stage chairperson (and any chairperson above the stage) can open the
+-- cards of the riders under them, read-only — including a card a rider has
+-- just requested — through mbg_get_stage_rider_cards.
 --
 -- THE FEE IS SHARED THROUGH THE TREE. It is cut into 5 equal parts, one per
 -- level of the rider's chain, and each part goes to the active chairperson(s)
@@ -99,6 +109,12 @@ CREATE TABLE IF NOT EXISTS public.mbg_rider_cards (
 CREATE UNIQUE INDEX IF NOT EXISTS mbg_rider_cards_one_live_per_rider
   ON public.mbg_rider_cards (rider_id)
   WHERE status IN ('pending_payment', 'active');
+
+-- Did the rider ask for this card themselves (auto-issued on request)?
+-- NULL issued_by + requested_by_rider = issued by the system on the rider's request.
+ALTER TABLE public.mbg_rider_cards
+  ADD COLUMN IF NOT EXISTS requested_by_rider BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS requested_at       TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS mbg_rider_cards_rider_user_idx ON public.mbg_rider_cards (rider_user_id);
 CREATE INDEX IF NOT EXISTS mbg_rider_cards_district_idx   ON public.mbg_rider_cards (district_id);
@@ -229,6 +245,8 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     'fee_ican',        c.fee_ican,
     'issued_at',       c.issued_at,
     'paid_at',         c.paid_at,
+    'requested_by_rider', c.requested_by_rider,
+    'requested_at',    c.requested_at,
     'rider_id',        r.id,
     'full_name',       COALESCE(NULLIF(btrim(up.full_name), ''), split_part(u.email, '@', 1)),
     'avatar_url',      up.avatar_url,
@@ -360,38 +378,35 @@ END;
 $$;
 
 -- ----------------------------------------------------------------------------
--- 7. District chairperson: issue a card (no money moves — the rider pays next)
+-- 7. Issuing a card — shared by the district chairperson and by a rider's own
+--    request, so both follow exactly the same rules. Internal (not callable
+--    from the API): the callers below decide WHO may ask for it.
 -- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.mbg_issue_rider_card(p_rider_id UUID)
-RETURNS JSONB
+CREATE OR REPLACE FUNCTION public.mbg_create_rider_card(
+  p_rider_id  UUID,
+  p_issued_by UUID,
+  p_requested BOOLEAN
+) RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-  v_districts   UUID[] := public.mbg_my_district_ids();
   v_rider       RECORD;
   v_district_id UUID;
   v_fee         NUMERIC;
   v_card_id     UUID;
 BEGIN
-  IF auth.uid() IS NULL THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Please sign in');
-  END IF;
-  IF cardinality(v_districts) = 0 THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Only a district chairperson can issue rider cards');
-  END IF;
-
-  SELECT r.id, r.user_id, r.status::text AS status INTO v_rider
+  SELECT r.user_id, r.status::text AS status INTO v_rider
     FROM public.mbg_riders r WHERE r.id = p_rider_id FOR UPDATE;
   IF NOT FOUND THEN
     RETURN jsonb_build_object('success', false, 'error', 'Rider not found');
   END IF;
 
-  v_district_id := public.mbg_rider_district_id(p_rider_id);
-  IF v_district_id IS NULL OR NOT (v_district_id = ANY (v_districts)) THEN
-    RETURN jsonb_build_object('success', false, 'error', 'This rider is not in your district');
-  END IF;
-
   IF v_rider.status <> 'active' THEN
     RETURN jsonb_build_object('success', false, 'error', 'Only an active (approved) rider can get a card');
+  END IF;
+
+  v_district_id := public.mbg_rider_district_id(p_rider_id);
+  IF v_district_id IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'This rider''s stage is not linked to a district yet');
   END IF;
 
   IF EXISTS (
@@ -407,20 +422,146 @@ BEGIN
   END IF;
 
   INSERT INTO public.mbg_rider_cards (
-    rider_id, rider_user_id, issued_by, district_id, card_number, verify_code, fee_ican
+    rider_id, rider_user_id, issued_by, district_id, card_number, verify_code, fee_ican,
+    requested_by_rider, requested_at
   ) VALUES (
-    p_rider_id, v_rider.user_id, auth.uid(), v_district_id,
+    p_rider_id, v_rider.user_id, p_issued_by, v_district_id,
     'BGE-' || lpad(nextval('public.mbg_rider_card_seq')::text, 6, '0'),
     replace(gen_random_uuid()::text, '-', ''),
-    v_fee
+    v_fee,
+    p_requested, CASE WHEN p_requested THEN now() END
   )
   RETURNING id INTO v_card_id;
 
   RETURN jsonb_build_object('success', true, 'card', public.mbg_rider_card_payload(v_card_id));
 EXCEPTION
-  -- Two chairpersons issuing at the same moment: the unique index lets one win.
+  -- Two requests at the same moment: the unique index lets one win.
   WHEN unique_violation THEN
     RETURN jsonb_build_object('success', false, 'error', 'This rider already has a card');
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.mbg_create_rider_card(UUID, UUID, BOOLEAN) FROM PUBLIC, anon, authenticated;
+
+-- District chairperson: issue a card to a rider in their district.
+CREATE OR REPLACE FUNCTION public.mbg_issue_rider_card(p_rider_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_districts   UUID[] := public.mbg_my_district_ids();
+  v_district_id UUID;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Please sign in');
+  END IF;
+  IF cardinality(v_districts) = 0 THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Only a district chairperson can issue rider cards');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.mbg_riders r WHERE r.id = p_rider_id) THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Rider not found');
+  END IF;
+
+  v_district_id := public.mbg_rider_district_id(p_rider_id);
+  IF v_district_id IS NULL OR NOT (v_district_id = ANY (v_districts)) THEN
+    RETURN jsonb_build_object('success', false, 'error', 'This rider is not in your district');
+  END IF;
+
+  RETURN public.mbg_create_rider_card(p_rider_id, auth.uid(), false);
+END;
+$$;
+
+-- Rider: request my own card. It is auto-issued on the spot — no approval step —
+-- as 'pending_payment'; the rider then pays to activate it.
+CREATE OR REPLACE FUNCTION public.mbg_request_rider_card(p_rider_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Please sign in');
+  END IF;
+  -- Only ever for one of the caller's OWN rider registrations.
+  IF NOT EXISTS (SELECT 1 FROM public.mbg_riders r WHERE r.id = p_rider_id AND r.user_id = auth.uid()) THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Rider not found');
+  END IF;
+
+  RETURN public.mbg_create_rider_card(p_rider_id, NULL, true);
+END;
+$$;
+
+-- Rider: my registrations that could request a card right now (active, in a
+-- district, no live card yet).
+CREATE OR REPLACE FUNCTION public.mbg_get_my_card_requestable()
+RETURNS JSONB
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+           'rider_id',     r.id,
+           'plate_number', r.plate_number,
+           'vehicle_type', r.vehicle_type::text,
+           'stage',        st.name
+         ) ORDER BY r.created_at), '[]'::jsonb)
+    FROM public.mbg_riders r
+    LEFT JOIN public.mbg_stages st ON st.id = r.stage_id
+   WHERE r.user_id = auth.uid()
+     AND r.status::text = 'active'
+     AND public.mbg_rider_district_id(r.id) IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM public.mbg_rider_cards c
+        WHERE c.rider_id = r.id AND c.status IN ('pending_payment', 'active')
+     );
+$$;
+
+-- ----------------------------------------------------------------------------
+-- 7b. Stage chairperson: open the cards of the riders under them (read-only)
+-- ----------------------------------------------------------------------------
+
+-- Is the caller an active chairperson of this stage, or of any region above it?
+CREATE OR REPLACE FUNCTION public.mbg_chair_over_stage(p_stage_id UUID)
+RETURNS BOOLEAN
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_levels CONSTANT TEXT[] := ARRAY['stage', 'parish', 'subcounty', 'division', 'district'];
+  v_rid    UUID := p_stage_id;
+  i        INT;
+BEGIN
+  IF auth.uid() IS NULL OR p_stage_id IS NULL THEN
+    RETURN false;
+  END IF;
+  FOR i IN 1 .. cardinality(v_levels) LOOP
+    IF i > 1 THEN
+      SELECT rp.parent_id INTO v_rid FROM public.mbg_region_parent(v_levels[i - 1], v_rid) rp;
+    END IF;
+    EXIT WHEN v_rid IS NULL;
+    IF EXISTS (
+      SELECT 1 FROM public.mbg_committee_members cm
+       WHERE cm.user_id = auth.uid() AND cm.is_active = true
+         AND cm.region_type::text = v_levels[i] AND cm.region_id = v_rid
+    ) THEN
+      RETURN true;
+    END IF;
+  END LOOP;
+  RETURN false;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.mbg_chair_over_stage(UUID) FROM PUBLIC, anon, authenticated;
+
+-- Every live card (unpaid or active) of the riders in a stage — including a card
+-- a rider has just requested. Empty for anyone who is not a chairperson over it.
+CREATE OR REPLACE FUNCTION public.mbg_get_stage_rider_cards(p_stage_id UUID)
+RETURNS JSONB
+LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NOT public.mbg_chair_over_stage(p_stage_id) THEN
+    RETURN '[]'::jsonb;
+  END IF;
+
+  RETURN COALESCE((
+    SELECT jsonb_agg(public.mbg_rider_card_payload(c.id) ORDER BY c.issued_at DESC)
+      FROM public.mbg_rider_cards c
+      JOIN public.mbg_riders r ON r.id = c.rider_id
+     WHERE r.stage_id = p_stage_id
+       AND c.status IN ('pending_payment', 'active')
+  ), '[]'::jsonb);
 END;
 $$;
 
@@ -840,6 +981,9 @@ $$;
 REVOKE ALL ON FUNCTION public.mbg_get_rider_card_fee()              FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.mbg_get_district_riders_for_cards()   FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.mbg_issue_rider_card(UUID)            FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.mbg_request_rider_card(UUID)          FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.mbg_get_my_card_requestable()         FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.mbg_get_stage_rider_cards(UUID)       FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.mbg_cancel_rider_card(UUID)           FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.mbg_get_card_region_info()            FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.mbg_set_rider_permit(UUID, TEXT, DATE) FROM PUBLIC, anon;
@@ -851,6 +995,9 @@ REVOKE ALL ON FUNCTION public.mbg_verify_rider_card(TEXT)           FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.mbg_get_rider_card_fee()              TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mbg_get_district_riders_for_cards()   TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mbg_issue_rider_card(UUID)            TO authenticated;
+GRANT EXECUTE ON FUNCTION public.mbg_request_rider_card(UUID)          TO authenticated;
+GRANT EXECUTE ON FUNCTION public.mbg_get_my_card_requestable()         TO authenticated;
+GRANT EXECUTE ON FUNCTION public.mbg_get_stage_rider_cards(UUID)       TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mbg_cancel_rider_card(UUID)           TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mbg_get_card_region_info()            TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mbg_set_rider_permit(UUID, TEXT, DATE) TO authenticated;
@@ -863,5 +1010,5 @@ NOTIFY pgrst, 'reload schema';
 
 DO $$
 BEGIN
-  RAISE NOTICE '✅ Rider ID cards ready: the district chairperson issues, the rider pays rider_card.fee_ican (default 2 ICAN) and it is shared equally across the stage / parish / subcounty / division / district chairpersons. QR opens /rider-card/<code>.';
+  RAISE NOTICE '✅ Rider ID cards ready: a rider requests one (auto-issued) or the district chairperson issues it; the rider pays rider_card.fee_ican (default 2 ICAN), shared equally across the stage / parish / subcounty / division / district chairpersons, who can open the cards read-only. QR opens /rider-card/<code>.';
 END $$;
