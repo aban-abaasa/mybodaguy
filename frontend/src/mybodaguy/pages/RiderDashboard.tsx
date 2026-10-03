@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Bike, Settings, Map as MapIcon, ShoppingBag, User, Package, Bell, Car, Truck, Gift,
-  Home, LayoutGrid, X, Star, ArrowRight, type LucideIcon,
+  Home, LayoutGrid, X, Star, ArrowRight, IdCard, type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
@@ -31,7 +31,7 @@ interface RiderDashboardProps {
   onGoToWallet?: () => void;
 }
 
-type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards';
+type TabType = 'overview' | 'requests' | 'card' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards';
 
 // emoji drives the desktop tab strip; icon drives the phone section bar and
 // menu sheet. 'requests' is deliberately not in NAV_TABS — it stays a card on
@@ -40,13 +40,14 @@ type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' |
 const TAB_META: Record<TabType, { label: string; emoji: string; icon: LucideIcon }> = {
   overview:     { label: 'Overview',   emoji: '🏠', icon: Home },
   requests:     { label: 'Requests',   emoji: '🔔', icon: Bell },
+  card:         { label: 'My Card',    emoji: '💳', icon: IdCard },
   mode:         { label: 'Work Mode',  emoji: '⚙️', icon: Settings },
   locations:    { label: 'Areas',      emoji: '📍', icon: MapIcon },
   partnerships: { label: 'Markets',    emoji: '🛒', icon: ShoppingBag },
   deliveries:   { label: 'Deliveries', emoji: '📦', icon: Package },
   rewards:      { label: 'Rewards',    emoji: '🎁', icon: Gift },
 };
-const NAV_TABS: TabType[] = ['overview', 'mode', 'locations', 'partnerships', 'deliveries', 'rewards'];
+const NAV_TABS: TabType[] = ['overview', 'card', 'mode', 'locations', 'partnerships', 'deliveries', 'rewards'];
 
 // True while this user has an active (accepted/in_progress) ride that is
 // the dispatched vehicle for a journey's sea_leg — i.e. mid-voyage, departed
@@ -748,9 +749,9 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
               </span>
             </button>
 
-            {/* ID card — appears once a district chairperson has issued one; the
-                rider pays for it here and shows its QR to chairpersons and customers. */}
-            <RiderMyCard onPaid={() => setWalletRefresh(n => n + 1)} />
+            {/* ID card — a compact entry that opens the My Card tab. It only shows when
+                there is something to do (a card to pay for or show, or one to request). */}
+            <RiderMyCard variant="tile" onOpen={() => setActiveTab('card')} />
 
             {/* Earnings — today as the headline, the week as the shape of it */}
             <RiderEarningsCard week={weekForCard} loading={weekForCard === null} />
@@ -856,6 +857,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
           </div>
         ) : (
           <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} collapsed={activeTab !== 'requests'} />
+        )}
+
+        {activeTab === 'card' && (
+          <RiderMyCard variant="page" onPaid={() => setWalletRefresh(n => n + 1)} />
         )}
 
         {activeTab === 'mode' && (
