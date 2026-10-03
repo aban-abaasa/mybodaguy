@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Ban, ChevronDown, FileCheck, IdCard, Pencil, Search, X } from 'lucide-react';
+import { Ban, ChevronDown, FileCheck, IdCard, Pencil, Search, UserCheck, X } from 'lucide-react';
 import RiderIdCard, { FeesChip, PermitChip, ToneChip } from './RiderIdCard';
 import {
   DEFAULT_RIDER_CARD_FEE_ICAN,
+  isFreshRequest,
   permitDetail,
   riderCardService,
   safeAccent,
+  timeAgo,
   type CardRegionInfo,
   type CardRegionInfoSet,
   type DistrictRiderRow,
@@ -205,6 +207,11 @@ export default function RiderCardsPanel() {
                 <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                   {!card && <ToneChip tone="muted">No card</ToneChip>}
                   {card?.status === 'pending_payment' && <ToneChip tone="warn">Awaiting rider payment</ToneChip>}
+                  {card?.requested_by_rider && (
+                    <ToneChip tone={isFreshRequest(card) ? 'warn' : 'muted'}>
+                      <UserCheck size={10} /> Requested by rider{card.requested_at ? ` · ${timeAgo(card.requested_at)}` : ''}
+                    </ToneChip>
+                  )}
                   {card?.status === 'active' && <ToneChip tone="ok">Card active</ToneChip>}
                   {row.rider_status !== 'active' && <ToneChip tone="bad">Rider {row.rider_status}</ToneChip>}
                   <PermitChip status={row.permit_status} />

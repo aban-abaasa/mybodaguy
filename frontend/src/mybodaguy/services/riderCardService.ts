@@ -30,6 +30,9 @@ export interface RiderCard {
   fee_ican: number;
   issued_at: string;
   paid_at: string | null;
+  // True when the rider asked for this card themselves (it was auto-issued on request).
+  requested_by_rider: boolean;
+  requested_at: string | null;
   rider_id: string;
   full_name: string;
   avatar_url: string | null;
@@ -86,6 +89,14 @@ export interface DistrictRiderRow {
   permit_status: PermitStatus;
   permit_days_left: number | null;
   card: RiderCard | null;
+}
+
+// One of the signed-in rider's registrations that could ask for a card right now.
+export interface RequestableRider {
+  rider_id: string;
+  plate_number: string;
+  vehicle_type: string;
+  stage: string | null;
 }
 
 export interface CardRegionInfo {
@@ -183,6 +194,23 @@ export const permitDetail = (status: PermitStatus, expiry?: string | null, daysL
   return `Valid until ${when}`;
 };
 
+// "just now", "5 min ago", "3 h ago", "2 days ago" — for "requested …".
+export const timeAgo = (iso?: string | null, now: number = Date.now()) => {
+  if (!iso) return '';
+  const mins = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? '' : 's'} ago`;
+};
+
+// Requested within the last two days and still unpaid: worth pointing out to a chairperson.
+export const isFreshRequest = (card: Pick<RiderCard, 'status' | 'requested_by_rider' | 'requested_at'>, now: number = Date.now()) =>
+  card.status === 'pending_payment' && card.requested_by_rider && !!card.requested_at &&
+  now - new Date(card.requested_at).getTime() < 2 * 24 * 60 * 60 * 1000;
+
 export const formatUgx = (n: number) => `UGX ${Math.round(n).toLocaleString('en-UG')}`;
 
 const errorMessage = (e: unknown, fallback: string) =>
@@ -269,6 +297,27 @@ export const riderCardService = {
     return res?.success
       ? { success: true, permitStatus: res.permit_status }
       : { success: false, error: res?.error || 'Could not save the permit' };
+  },
+
+  // Rider: ask for my own card. It is issued on the spot (no approval), as
+  // unpaid; the rider then pays to activate it.
+  requestCard(riderId: string): Promise<CardResult> {
+    return callCardRpc('mbg_request_rider_card', { p_rider_id: riderId }, 'Could not request the card');
+  },
+
+  // Rider: my registrations that have no card yet and could request one.
+  async getRequestable(): Promise<{ riders: RequestableRider[]; error?: string }> {
+    const { data, error } = await supabase.rpc('mbg_get_my_card_requestable');
+    if (error) return { riders: [], error: error.message };
+    return { riders: (data as RequestableRider[] | null) ?? [] };
+  },
+
+  // Stage chairperson (or any chairperson above the stage): every live card of
+  // the riders in a stage, read-only — including one a rider has just requested.
+  async getStageCards(stageId: string): Promise<{ cards: RiderCard[]; error?: string }> {
+    const { data, error } = await supabase.rpc('mbg_get_stage_rider_cards', { p_stage_id: stageId });
+    if (error) return { cards: [], error: error.message };
+    return { cards: (data as RiderCard[] | null) ?? [] };
   },
 
   // Rider: my own live cards (unpaid or active).

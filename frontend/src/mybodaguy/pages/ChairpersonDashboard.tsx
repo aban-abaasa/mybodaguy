@@ -9,6 +9,8 @@ import { userService } from '../services/userService';
 import { avatarService } from '../services/avatarService';
 import ProfileModal from '../components/ProfileModal';
 import RiderCardsPanel from '../components/RiderCardsPanel';
+import RiderIdCard, { FeesChip, PermitChip, ToneChip } from '../components/RiderIdCard';
+import { riderCardService, isFreshRequest, timeAgo, type RiderCard } from '../services/riderCardService';
 import IcanCoinCard from '../components/IcanCoinCard';
 import { ThemeMenuItem } from '../../components/ThemeToggle';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
@@ -30,6 +32,8 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   const [allAssignments, setAllAssignments] = useState<CommitteeMember[]>([]);
   const [subordinates, setSubordinates] = useState<SubordinateChairperson[]>([]);
   const [riders, setRiders] = useState<Rider[]>([]);
+  // The live ID cards of the riders above, by rider id — including one a rider just requested.
+  const [riderCards, setRiderCards] = useState<Record<string, RiderCard>>({});
   const [commissions, setCommissions] = useState<CommissionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -110,6 +114,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
         }
       }
       setRiders(allRiders);
+      loadRiderCards(assignments);
 
       // Load this chairperson's own real commission earnings (mbg_commissions)
       const myCommissions = await chairpersonService.getMyCommissions(user.id);
@@ -135,6 +140,23 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
       setLoading(false);
     }
   };
+
+  // Every live card (unpaid or active) of the riders in the stages this chairperson
+  // holds, so a card a rider has just requested shows up next to that rider.
+  const loadRiderCards = async (assignments: CommitteeMember[] = allAssignments) => {
+    const stageIds = assignments.filter(a => a.region_type === 'stage').map(a => a.region_id);
+    if (stageIds.length === 0) return;
+    const results = await Promise.all(stageIds.map(id => riderCardService.getStageCards(id)));
+    const byRider: Record<string, RiderCard> = {};
+    for (const { cards } of results) for (const card of cards) byRider[card.rider_id] = card;
+    setRiderCards(byRider);
+  };
+
+  // A rider can request a card at any moment, so look again whenever the Riders tab is opened.
+  useEffect(() => {
+    if (activeTab === 'riders') loadRiderCards();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const formatRole = (role: string) => {
     return role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -584,6 +606,25 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
               ]}
             />
 
+            {/* Cards riders have just asked for — issued on the spot, waiting for the rider to pay */}
+            {(() => {
+              const fresh = riders.filter(r => riderCards[r.id] && isFreshRequest(riderCards[r.id]));
+              if (fresh.length === 0) return null;
+              return (
+                <div role="status" className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-sm text-amber-900">
+                  <CreditCard size={18} className="mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold">
+                      {fresh.length === 1 ? '1 rider has' : `${fresh.length} riders have`} just requested a rider card
+                    </p>
+                    <p className="mt-0.5 text-xs">
+                      {fresh.map(r => `${r.full_name} (${timeAgo(riderCards[r.id].requested_at)})`).join(' · ')}. Open a rider to see the card.
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Riders List */}
             {riders.length === 0 ? (
               <EmptyState
@@ -626,6 +667,15 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase text-slate-600">
                           {rider.plate_number}
                         </span>
+                        {riderCards[rider.id] && (
+                          isFreshRequest(riderCards[rider.id]) ? (
+                            <ToneChip tone="warn"><CreditCard size={10} /> Card requested</ToneChip>
+                          ) : riderCards[rider.id].status === 'pending_payment' ? (
+                            <ToneChip tone="warn"><CreditCard size={10} /> Card unpaid</ToneChip>
+                          ) : (
+                            <ToneChip tone="ok"><CreditCard size={10} /> Card active</ToneChip>
+                          )
+                        )}
                       </div>
                     </div>
 
@@ -849,6 +899,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
       {selectedRider && (
         <ManageRiderModal
           rider={selectedRider}
+          card={riderCards[selectedRider.id] ?? null}
           onClose={() => setSelectedRider(null)}
           onSuccess={() => {
             setSelectedRider(null);
@@ -1933,11 +1984,13 @@ function ManageSubordinateModal({ subordinate, onClose, onSuccess }: ManageSubor
 // Manage a specific rider — approve / suspend / reactivate
 interface ManageRiderModalProps {
   rider: Rider;
+  // The rider's live ID card, if they have one (or have just requested it).
+  card: RiderCard | null;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-function ManageRiderModal({ rider, onClose, onSuccess }: ManageRiderModalProps) {
+function ManageRiderModal({ rider, card, onClose, onSuccess }: ManageRiderModalProps) {
   const [updating, setUpdating] = useState(false);
 
   const handleSetStatus = async (status: 'active' | 'suspended' | 'inactive') => {
@@ -1954,7 +2007,7 @@ function ManageRiderModal({ rider, onClose, onSuccess }: ManageRiderModalProps) 
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-xl font-bold text-slate-800">Manage Rider</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
@@ -2004,6 +2057,20 @@ function ManageRiderModal({ rider, onClose, onSuccess }: ManageRiderModalProps) 
             <p className="text-[10px] text-slate-500 font-medium">Completed Rides</p>
             <p className="font-semibold text-slate-800">{rider.completed_rides}</p>
           </div>
+        </div>
+
+        {/* ID card — opens with the rider, including one they have just requested */}
+        <div className="mb-4 pt-3 border-t border-slate-200">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            <CreditCard size={13} /> Rider ID card
+          </p>
+          {card ? (
+            <RiderIdCard card={card} />
+          ) : (
+            <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+              No card yet. The rider can request one from their dashboard, and it is issued instantly.
+            </p>
+          )}
         </div>
 
         {/* Actions */}

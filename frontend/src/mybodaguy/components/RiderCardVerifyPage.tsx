@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Ban, CheckCircle, Clock, FileCheck, MapPin, Phone, ShieldCheck, Star, Wallet, XCircle } from 'lucide-react';
-import { FeesChip, PermitChip, ToneChip } from './RiderIdCard';
+import { FeesChip, PermitChip, RiderCardVisual, ToneChip, type CardVisualData } from './RiderIdCard';
 import {
   formatUgx,
   permitDetail,
@@ -14,7 +14,6 @@ const fmtDate = (iso?: string | null) =>
 
 const withCode = (name?: string | null, code?: string | null) => (name ? (code ? `${name} · ${code}` : name) : '—');
 
-const vehicleLabel = (type?: string) => (type ? type.charAt(0).toUpperCase() + type.slice(1) : '');
 
 function Section({ icon, title, children }: { icon: React.ReactNode; title: string; children: React.ReactNode }) {
   return (
@@ -86,6 +85,24 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
     if ((fees?.commission_owed_ugx ?? 0) > 0) warnings.push('Ride commission is still owed to the chairpersons.');
   }
   const notes = [proof?.division_notes, proof?.stage_notes].filter((n): n is string => !!n);
+  // The same credit-card visual riders carry, built from what the public page may show.
+  const visual: CardVisualData | null = proof && showDetails
+    ? {
+        card_number: proof.card_number ?? '',
+        full_name: proof.full_name ?? '',
+        avatar_url: proof.avatar_url ?? null,
+        vehicle_type: proof.vehicle_type ?? '',
+        plate_number: proof.plate_number ?? '',
+        stage: proof.stage ?? null,
+        stage_code: proof.stage_code ?? null,
+        division: proof.division ?? null,
+        division_code: proof.division_code ?? null,
+        member_since: proof.member_since ?? '',
+        license_expiry: proof.license_expiry ?? null,
+        issued_at: proof.issued_at ?? '',
+        accent_color: proof.accent_color ?? null,
+      }
+    : null;
 
   return (
     <div className="min-h-screen bg-[#f7f1e3] px-4 py-8">
@@ -122,29 +139,16 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
                   </div>
                 )}
 
-                {/* Who */}
-                <div className="flex items-center gap-3 border-t border-slate-100 p-5">
-                  {proof.avatar_url ? (
-                    <img src={proof.avatar_url} alt="" className="h-20 w-20 flex-shrink-0 rounded-full object-cover ring-2 ring-offset-2" style={{ '--tw-ring-color': accent } as React.CSSProperties} />
-                  ) : (
-                    <span className="grid h-20 w-20 flex-shrink-0 place-items-center rounded-full text-3xl font-bold text-white ring-2 ring-offset-2" style={{ background: accent, '--tw-ring-color': accent } as React.CSSProperties}>
-                      {(proof.full_name ?? '?').charAt(0).toUpperCase()}
-                    </span>
-                  )}
-                  <div className="min-w-0">
-                    <p className="break-words text-xl font-bold leading-tight text-slate-900">{proof.full_name}</p>
-                    <p className="mt-0.5 text-sm text-slate-600">
-                      {vehicleLabel(proof.vehicle_type)} · <span className="font-semibold uppercase text-slate-800">{proof.plate_number}</span>
-                    </p>
-                    {(proof.vehicle_color || proof.vehicle_model) && (
-                      <p className="text-xs text-slate-500">{[proof.vehicle_color, proof.vehicle_model].filter(Boolean).join(' · ')}</p>
-                    )}
-                    <p className="mt-1 flex items-center gap-1 text-xs text-slate-500">
+                {/* The rider's card, as they carry it */}
+                {visual && (
+                  <div className="border-t border-slate-100 p-5">
+                    <RiderCardVisual data={visual} status={state === 'valid' ? 'active' : 'suspended'} flippable={false} />
+                    <p className="mt-3 flex items-center justify-center gap-1 text-xs text-slate-500">
                       {proof.rating ? <><Star size={12} className="text-amber-500" /> {Number(proof.rating).toFixed(1)} ·</> : null}
                       {proof.completed_rides ?? 0} rides · since {fmtDate(proof.member_since)}
                     </p>
                   </div>
-                </div>
+                )}
 
                 {/* Where — this rider's own division and stage */}
                 <Section icon={<MapPin size={12} />} title="Where this rider belongs">
