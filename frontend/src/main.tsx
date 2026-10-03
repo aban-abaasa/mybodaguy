@@ -8,6 +8,7 @@ import PWAInstallPrompt from "./components/PWAInstallPrompt";
 import PushAlertsPrompt from "./components/PushAlertsPrompt";
 import VerifyReceiptPage from "./mybodaguy/components/VerifyReceiptPage";
 import TicketVerifyPage from "./mybodaguy/components/TicketVerifyPage";
+import RiderCardVerifyPage from "./mybodaguy/components/RiderCardVerifyPage";
 import SupportConsole from "./mybodaguy/pages/SupportConsole";
 import { captureReferralFromUrl } from "./mybodaguy/services/referralService";
 
@@ -62,6 +63,9 @@ let verifyMatch = window.location.pathname.match(/^\/verify\/([A-Za-z0-9]+)/);
 // Air ticket QR (https://bodagoera.icanera.space/ticket/<code>) — public, same pattern as /verify.
 const ticketMatch = window.location.pathname.match(/^\/ticket\/([A-Za-z0-9]+)/);
 
+// Rider ID card QR (https://bodagoera.icanera.space/rider-card/<code>) — public, same pattern.
+const riderCardMatch = window.location.pathname.match(/^\/rider-card\/([A-Za-z0-9]+)/);
+
 const isSupportConsole = window.location.pathname === '/support-console';
 
 // VerifyReceiptPage's "Sign in with Google to Approve" passes
@@ -84,6 +88,8 @@ createRoot(document.getElementById("root")!).render(
     <VerifyReceiptPage code={verifyMatch[1]} />
   ) : ticketMatch ? (
     <TicketVerifyPage code={ticketMatch[1]} />
+  ) : riderCardMatch ? (
+    <RiderCardVerifyPage code={riderCardMatch[1]} />
   ) : isSupportConsole ? (
     <SupportConsole />
   ) : (

@@ -8,6 +8,7 @@ import { supabase } from '../services/supabaseClient';
 import { userService } from '../services/userService';
 import { avatarService } from '../services/avatarService';
 import ProfileModal from '../components/ProfileModal';
+import RiderCardsPanel from '../components/RiderCardsPanel';
 import IcanCoinCard from '../components/IcanCoinCard';
 import { ThemeMenuItem } from '../../components/ThemeToggle';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
@@ -21,7 +22,7 @@ interface ChairpersonDashboardProps {
   onGoToWallet?: () => void;
 }
 
-type TabType = 'overview' | 'subordinates' | 'riders' | 'commission';
+type TabType = 'overview' | 'subordinates' | 'riders' | 'cards' | 'commission';
 
 export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: ChairpersonDashboardProps) {
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
@@ -265,6 +266,8 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   const displayName: string =
     user?.user_metadata?.full_name || user?.user_metadata?.name || (user?.email ? String(user.email).split('@')[0] : 'Chairperson');
   const hasStageRole = allAssignments.some(a => a.region_type === 'stage');
+  // Only the top of the hierarchy (district) issues rider ID cards.
+  const isDistrictChair = allAssignments.some(a => a.region_type === 'district');
   const activePct = stats.totalSubordinates > 0
     ? `${((stats.activeSubordinates / stats.totalSubordinates) * 100).toFixed(0)}%`
     : '0%';
@@ -273,6 +276,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
     { id: 'overview', label: 'Overview', icon: TrendingUp },
     { id: 'subordinates', label: 'Chairpersons', icon: Users },
     ...(hasStageRole ? [{ id: 'riders' as TabType, label: 'Riders', icon: Bike }] : []),
+    ...(isDistrictChair ? [{ id: 'cards' as TabType, label: 'Rider Cards', icon: CreditCard }] : []),
     { id: 'commission', label: 'Commission', icon: DollarSign },
   ];
   const activeTabMeta = tabs.find(t => t.id === activeTab) ?? tabs[0];
@@ -450,6 +454,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                 {[
                   { label: 'Manage Chairpersons', desc: 'View and assign', icon: Users, tile: 'bg-sky-50 text-sky-600', tab: 'subordinates' as TabType, show: true },
                   { label: 'Manage Riders', desc: 'View and assign', icon: Bike, tile: 'bg-emerald-50 text-emerald-600', tab: 'riders' as TabType, show: hasStageRole },
+                  { label: 'Rider Cards', desc: 'Issue QR ID cards', icon: CreditCard, tile: 'bg-violet-50 text-violet-600', tab: 'cards' as TabType, show: isDistrictChair },
                   { label: 'Commission', desc: 'Track earnings', icon: DollarSign, tile: 'bg-amber-50 text-amber-600', tab: 'commission' as TabType, show: true },
                 ].filter(a => a.show).map(a => (
                   <button
@@ -637,6 +642,8 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
             )}
           </div>
         )}
+
+        {activeTab === 'cards' && isDistrictChair && <RiderCardsPanel />}
 
         {activeTab === 'commission' && (
           <div className="space-y-5">
