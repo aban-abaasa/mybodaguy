@@ -879,7 +879,7 @@ BEGIN
       IF v_each > 0 THEN
         PERFORM public.mbg_credit_ride_earning(
           v_user, v_each, 'mybodaguy', v_ref,
-          v_levels[i] || ' chairperson share of a rider ID card fee'
+          v_levels[i] || ' chairperson share of rider ID card ' || v_card.card_number
         );
       END IF;
       INSERT INTO public.mbg_rider_card_shares (card_id, level, region_id, recipient_user_id, amount_ican)

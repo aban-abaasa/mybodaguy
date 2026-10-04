@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Ban, ChevronDown, FileCheck, IdCard, Pencil, Search, UserCheck, X } from 'lucide-react';
+import { Ban, ChevronDown, FileCheck, IdCard, Pencil, Printer, Search, UserCheck, X } from 'lucide-react';
 import RiderIdCard, { FeesChip, PermitChip, ToneChip } from './RiderIdCard';
+import { isPrintableCard, printRiderCards } from './RiderCardPrint';
 import {
   DEFAULT_RIDER_CARD_FEE_ICAN,
   isFreshRequest,
@@ -149,6 +150,16 @@ export default function RiderCardsPanel() {
         ))}
       </div>
 
+      {counts.active > 0 && (
+        <button
+          type="button"
+          onClick={() => printRiderCards(rows.map((r) => r.card).filter((c): c is RiderCard => !!c))}
+          className="classic-btn classic-btn-outline !gap-1.5 !rounded-full"
+        >
+          <Printer size={15} /> Print all active cards ({rows.filter((r) => r.card && isPrintableCard(r.card)).length})
+        </button>
+      )}
+
       {/* Search + filters */}
       <div className="space-y-3">
         <div className="relative">
@@ -291,7 +302,14 @@ export default function RiderCardsPanel() {
 
       {viewCard && (
         <Modal title="Rider card" onClose={() => setViewCard(null)}>
-          <RiderIdCard card={viewCard} />
+          <div className="space-y-3">
+            <RiderIdCard card={viewCard} />
+            {isPrintableCard(viewCard) && (
+              <button type="button" onClick={() => printRiderCards([viewCard])} className="classic-btn classic-btn-outline !gap-1.5 !rounded-full">
+                <Printer size={15} /> Print card
+              </button>
+            )}
+          </div>
         </Modal>
       )}
 

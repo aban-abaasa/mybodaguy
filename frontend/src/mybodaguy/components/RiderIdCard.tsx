@@ -145,6 +145,130 @@ function EmvChip({ idPrefix }: { idPrefix: string }) {
   );
 }
 
+// The two faces of the card. Shared by the on-screen flip card and the print
+// sheet, so what is printed is exactly what is shown.
+export function CardFront({
+  data,
+  status,
+  uid,
+  hidden = false,
+}: {
+  data: CardVisualData;
+  status: CardVisualStatus;
+  uid: string;
+  hidden?: boolean;
+}) {
+  const accent = safeAccent(data.accent_color);
+  const label = STATUS_LABEL[status];
+  return (
+    <div className={`rc-face rc-front ${status === 'pending' ? 'is-pending' : ''}`} aria-hidden={hidden}>
+      <div className="rc-pad">
+        <div className="rc-top">
+          <div className="rc-logo">
+            <WheelMark accent={accent} /> BodaGoEra
+          </div>
+          <div className="rc-top-right">
+            <span className={`rc-pill ${label.tone}`}>
+              <i /> {label.text}
+            </span>
+            <Contactless />
+          </div>
+        </div>
+      </div>
+
+      <EmvChip idPrefix={uid} />
+
+      {data.avatar_url ? (
+        <img className="rc-photo" src={data.avatar_url} alt="" />
+      ) : (
+        <div className="rc-photo" style={{ background: accent }}>
+          {data.full_name.charAt(0).toUpperCase()}
+        </div>
+      )}
+
+      <div className="rc-number rc-emboss">{formatNumber(data.card_number)}</div>
+
+      <div className="rc-place">
+        {withCode(data.stage, data.stage_code)} · {withCode(data.division, data.division_code)}
+      </div>
+      <div className="rc-holo" aria-hidden />
+
+      <div className="rc-bottom">
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <span className="rc-label">
+            {vehicleLabel(data.vehicle_type)} · {data.plate_number.toUpperCase()}
+          </span>
+          <span className="rc-name rc-emboss">{data.full_name}</span>
+        </div>
+        <div className="rc-meta">
+          <div>
+            <span className="rc-label">Since</span>
+            <b className="rc-emboss">{monthYear(data.member_since)}</b>
+          </div>
+          <div>
+            <span className="rc-label">Permit</span>
+            <b className="rc-emboss">{monthYear(data.license_expiry)}</b>
+          </div>
+        </div>
+      </div>
+
+      {status === 'pending' && <div className="rc-stamp">Unpaid</div>}
+    </div>
+  );
+}
+
+export function CardBack({
+  data,
+  status,
+  hidden = false,
+}: {
+  data: CardVisualData;
+  status: CardVisualStatus;
+  hidden?: boolean;
+}) {
+  const active = status === 'active' && !!data.verify_code;
+  return (
+    <div className="rc-face rc-back" aria-hidden={hidden}>
+      <div className="rc-stripe" />
+      <div className="rc-sign">
+        <em>{data.full_name}</em>
+        <span className="rc-cvc">{data.stage_code || 'BGE'}</span>
+      </div>
+      <div className="rc-qr-row">
+        {active ? (
+          <div className="rc-qr">
+            <QRCodeCanvas value={riderCardVerifyUrl(data.verify_code!)} size={240} level="M" fgColor="#231b12" bgColor="#ffffff" />
+          </div>
+        ) : (
+          <div className="rc-qr is-locked">
+            <Lock aria-hidden />
+          </div>
+        )}
+        <div className="rc-fine">
+          <strong>{active ? 'Scan to verify' : 'QR locked'}</strong>
+          {active
+            ? "Shows this rider's details, driving permit status and fees, live."
+            : `Pay ${data.fee_ican ?? 2} ICAN to unlock this card's QR code.`}
+          <small>
+            Issued {fullDate(data.issued_at)} · {data.card_number}
+          </small>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The CSS custom properties that give the card its division's / stage's colour.
+export const cardColourStyle = (accentColor: string | null): React.CSSProperties => {
+  const accent = safeAccent(accentColor);
+  return {
+    '--rc-a': accent,
+    '--rc-1': darken(accent, 0.5),
+    '--rc-2': darken(accent, 0.72),
+    '--rc-3': darken(accent, 0.86),
+  } as React.CSSProperties;
+};
+
 // The visual: a credit-card-style rider ID. Tap to flip to the back, which
 // carries the QR once the rider has paid. `flippable={false}` shows the front only.
 export function RiderCardVisual({
@@ -158,22 +282,11 @@ export function RiderCardVisual({
 }) {
   const [flipped, setFlipped] = useState(false);
   const uid = useId().replace(/:/g, '');
-  const accent = safeAccent(data.accent_color);
-  const label = STATUS_LABEL[status];
-  const active = status === 'active' && !!data.verify_code;
-
-  const style = {
-    '--rc-a': accent,
-    '--rc-1': darken(accent, 0.5),
-    '--rc-2': darken(accent, 0.72),
-    '--rc-3': darken(accent, 0.86),
-  } as React.CSSProperties;
-
   const toggle = () => flippable && setFlipped((f) => !f);
 
   return (
     <div className="space-y-2">
-      <div className="rc" style={style}>
+      <div className="rc" style={cardColourStyle(data.accent_color)}>
         <div
           className={`rc-flip ${flipped ? 'is-flipped' : ''} ${flippable ? '' : 'is-static'}`}
           {...(flippable
@@ -192,91 +305,8 @@ export function RiderCardVisual({
               }
             : {})}
         >
-          {/* Front */}
-          <div className={`rc-face rc-front ${status === 'pending' ? 'is-pending' : ''}`} aria-hidden={flipped}>
-            <div className="rc-pad">
-              <div className="rc-top">
-                <div className="rc-logo">
-                  <WheelMark accent={accent} /> BodaGoEra
-                </div>
-                <div className="rc-top-right">
-                  <span className={`rc-pill ${label.tone}`}>
-                    <i /> {label.text}
-                  </span>
-                  <Contactless />
-                </div>
-              </div>
-            </div>
-
-            <EmvChip idPrefix={uid} />
-
-            {data.avatar_url ? (
-              <img className="rc-photo" src={data.avatar_url} alt="" />
-            ) : (
-              <div className="rc-photo" style={{ background: accent }}>
-                {data.full_name.charAt(0).toUpperCase()}
-              </div>
-            )}
-
-            <div className="rc-number rc-emboss">{formatNumber(data.card_number)}</div>
-
-            <div className="rc-place">
-              {withCode(data.stage, data.stage_code)} · {withCode(data.division, data.division_code)}
-            </div>
-            <div className="rc-holo" aria-hidden />
-
-            <div className="rc-bottom">
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <span className="rc-label">
-                  {vehicleLabel(data.vehicle_type)} · {data.plate_number.toUpperCase()}
-                </span>
-                <span className="rc-name rc-emboss">{data.full_name}</span>
-              </div>
-              <div className="rc-meta">
-                <div>
-                  <span className="rc-label">Since</span>
-                  <b className="rc-emboss">{monthYear(data.member_since)}</b>
-                </div>
-                <div>
-                  <span className="rc-label">Permit</span>
-                  <b className="rc-emboss">{monthYear(data.license_expiry)}</b>
-                </div>
-              </div>
-            </div>
-
-            {status === 'pending' && <div className="rc-stamp">Unpaid</div>}
-          </div>
-
-          {/* Back */}
-          {flippable && (
-            <div className="rc-face rc-back" aria-hidden={!flipped}>
-              <div className="rc-stripe" />
-              <div className="rc-sign">
-                <em>{data.full_name}</em>
-                <span className="rc-cvc">{data.stage_code || 'BGE'}</span>
-              </div>
-              <div className="rc-qr-row">
-                {active ? (
-                  <div className="rc-qr">
-                    <QRCodeCanvas value={riderCardVerifyUrl(data.verify_code!)} size={240} level="M" fgColor="#231b12" bgColor="#ffffff" />
-                  </div>
-                ) : (
-                  <div className="rc-qr is-locked">
-                    <Lock aria-hidden />
-                  </div>
-                )}
-                <div className="rc-fine">
-                  <strong>{active ? 'Scan to verify' : 'QR locked'}</strong>
-                  {active
-                    ? "Shows this rider's details, driving permit status and fees, live."
-                    : `Pay ${data.fee_ican ?? 2} ICAN to unlock this card's QR code.`}
-                  <small>
-                    Issued {fullDate(data.issued_at)} · {data.card_number}
-                  </small>
-                </div>
-              </div>
-            </div>
-          )}
+          <CardFront data={data} status={status} uid={uid} hidden={flipped} />
+          {flippable && <CardBack data={data} status={status} hidden={!flipped} />}
         </div>
       </div>
 
