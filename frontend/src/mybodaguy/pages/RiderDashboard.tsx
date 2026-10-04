@@ -860,7 +860,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
         )}
 
         {activeTab === 'card' && (
-          <RiderMyCard variant="page" onPaid={() => setWalletRefresh(n => n + 1)} />
+          <RiderMyCard variant="page" userId={user?.id} onPaid={() => setWalletRefresh(n => n + 1)} onGoToWallet={onGoToWallet} />
         )}
 
         {activeTab === 'mode' && (

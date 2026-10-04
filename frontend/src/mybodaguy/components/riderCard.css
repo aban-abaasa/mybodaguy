@@ -347,3 +347,53 @@
   .rc-front::after,
   .rc-holo { animation: none; }
 }
+
+/* ── Printing ──────────────────────────────────────────────────────────────
+   printRiderCards() puts a sheet of cards in .rc-print-root and calls
+   window.print(). On screen the sheet is hidden; when printing, everything
+   else is hidden instead. The faces are the very same ones shown on screen,
+   sized to a real card (85.6 × 54 mm) — front and back side by side per
+   rider, so each can be cut out along its dashed line. */
+.rc-print-root { display: none; }
+
+@media print {
+  @page { size: A4; margin: 10mm; }
+
+  html, body { background: #fff !important; }
+  body > *:not(.rc-print-root) { display: none !important; }
+
+  .rc-print-root { display: block; color: #111; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  .rc-print-root, .rc-print-root * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .rc-print-row { break-inside: avoid; page-break-inside: avoid; margin: 0 0 7mm; }
+  .rc-print-caption { margin: 0 0 1.6mm; font-size: 8pt; color: #555; }
+  .rc-print-faces { display: flex; gap: 8mm; }
+
+  .rc-print-card {
+    flex: none;
+    width: 85.6mm;
+    max-width: none;
+    margin: 0;
+    perspective: none;
+    outline: 0.2mm dashed #999;
+    outline-offset: 0.8mm;
+    border-radius: 3.8mm;
+  }
+  .rc-print-card .rc-flip {
+    transform: none !important;
+    transform-style: flat;
+    transition: none;
+    cursor: default;
+  }
+  .rc-print-card .rc-face {
+    box-shadow: none;
+    -webkit-backface-visibility: visible;
+    backface-visibility: visible;
+  }
+  .rc-print-card .rc-back { transform: none; }
+  .rc-print-card .rc-front::after { display: none; }
+  .rc-print-card .rc-holo { animation: none; }
+}

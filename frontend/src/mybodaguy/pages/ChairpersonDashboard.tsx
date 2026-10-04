@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid } from 'lucide-react';
+import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid, Printer } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { chairpersonService, SubordinateChairperson, CommitteeMember, CommissionRecord } from '../services/chairpersonService';
 import { riderService, Rider } from '../services/riderService';
@@ -9,6 +9,7 @@ import { userService } from '../services/userService';
 import { avatarService } from '../services/avatarService';
 import ProfileModal from '../components/ProfileModal';
 import RiderCardsPanel from '../components/RiderCardsPanel';
+import { isPrintableCard, printRiderCards } from '../components/RiderCardPrint';
 import RiderIdCard, { FeesChip, PermitChip, ToneChip } from '../components/RiderIdCard';
 import { riderCardService, isFreshRequest, timeAgo, type RiderCard } from '../services/riderCardService';
 import IcanCoinCard from '../components/IcanCoinCard';
@@ -621,6 +622,34 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                       {fresh.map(r => `${r.full_name} (${timeAgo(riderCards[r.id].requested_at)})`).join(' · ')}. Open a rider to see the card.
                     </p>
                   </div>
+                </div>
+              );
+            })()}
+
+            {/* Print the ID cards of this stage's members — paid cards of active riders only */}
+            {(() => {
+              const ready = riders.map(r => riderCards[r.id]).filter((c): c is RiderCard => !!c && isPrintableCard(c));
+              const waiting = riders.filter(r => riderCards[r.id] && !isPrintableCard(riderCards[r.id])).length;
+              if (ready.length === 0 && waiting === 0) return null;
+              return (
+                <div className="classic-card flex items-center gap-3 p-3.5">
+                  <span className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-full bg-violet-50 text-violet-600 ring-1 ring-inset ring-violet-100">
+                    <Printer size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-classic-display text-base font-semibold leading-tight text-slate-800">Member ID cards</p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {ready.length} ready to print{waiting > 0 ? ` · ${waiting} waiting for the rider to pay` : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={ready.length === 0}
+                    onClick={() => printRiderCards(ready)}
+                    className="classic-btn classic-btn-primary !w-auto !min-h-[38px] !gap-1.5 !rounded-full !px-4 !py-2 !text-[13px] flex-shrink-0"
+                  >
+                    <Printer size={14} /> Print all
+                  </button>
                 </div>
               );
             })()}
@@ -2065,7 +2094,24 @@ function ManageRiderModal({ rider, card, onClose, onSuccess }: ManageRiderModalP
             <CreditCard size={13} /> Rider ID card
           </p>
           {card ? (
-            <RiderIdCard card={card} />
+            <div className="space-y-3">
+              <RiderIdCard card={card} />
+              {isPrintableCard(card) ? (
+                <button
+                  type="button"
+                  onClick={() => printRiderCards([card])}
+                  className="classic-btn classic-btn-outline !gap-1.5 !rounded-full"
+                >
+                  <Printer size={15} /> Print card
+                </button>
+              ) : (
+                <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+                  {card.status === 'pending_payment'
+                    ? 'You can print this card once the rider has paid for it.'
+                    : 'This card can’t be printed while the rider is not active.'}
+                </p>
+              )}
+            </div>
           ) : (
             <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
               No card yet. The rider can request one from their dashboard, and it is issued instantly.

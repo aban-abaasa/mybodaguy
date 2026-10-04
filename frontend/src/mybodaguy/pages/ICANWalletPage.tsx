@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import {
-  ArrowDown, ArrowUp, Banknote, CheckCircle2, ChevronDown, Gem, Landmark, Receipt, RotateCcw, Search, ShoppingCart,
+  ArrowDown, ArrowUp, Banknote, CheckCircle2, ChevronDown, Gem, IdCard, Landmark, Receipt, RotateCcw, Search, ShoppingCart,
   Smartphone, Sparkles, Wallet, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -8,6 +8,7 @@ import { jsPDF } from 'jspdf';
 import QRCode from 'qrcode';
 import { QRCodeCanvas as ReceiptQrCode } from 'qrcode.react';
 import { supabase } from '../../services/supabaseClient';
+import { isRiderCardTx, riderCardTxLabel, riderCardTxNote } from '../utils/cardTransactions';
 import {
   getOrCreateWallet,
   getBalance,
@@ -50,6 +51,12 @@ const APP_LABELS: Record<string, string> = {
   'farm-agent': 'AgriBone', mybodaguy: 'BodaGoEra',
 };
 
+// What a transaction is called. Rider ID card payments are recognised by their
+// reference (see utils/cardTransactions.ts) so they don't read as "Journey payment".
+const txLabel = (tx: ICANTransaction) =>
+  isRiderCardTx(tx) ? riderCardTxLabel(tx) : (TX_LABELS[tx.transaction_type] ?? tx.transaction_type);
+const txNote = (tx: ICANTransaction) => (isRiderCardTx(tx) ? riderCardTxNote(tx) : tx.note);
+
 /** Receipts carry the coin's code ("ICAN"); people see its name. */
 const unitLabel = (code?: string) => (!code || code === 'ICAN' ? 'IcanEra' : code);
 
@@ -74,10 +81,10 @@ function matchesQuery(tx: ICANTransaction, query: string): boolean {
   if (words.length === 0) return true;
   const d = new Date(tx.created_at);
   const hay = [
-    TX_LABELS[tx.transaction_type] ?? tx.transaction_type,
+    txLabel(tx),
     tx.transaction_type,
     APP_LABELS[tx.source_app] ?? tx.source_app,
-    tx.note,
+    txNote(tx),
     tx.direction === 'in' ? 'in received incoming' : 'out sent outgoing',
     formatICAN(tx.ican_amount),
     String(Number(tx.ican_amount)),
@@ -116,6 +123,7 @@ function TxIcon({ tx }: { tx: ICANTransaction }) {
   else if (type === 'buy' || type === 'purchase') inner = <ShoppingCart size={16} />;
   else if (type === 'sell' || type === 'sale') inner = <Banknote size={16} />;
   else if (type === 'refund') inner = <RotateCcw size={16} />;
+  else if (isRiderCardTx(tx)) inner = <IdCard size={16} />;
   else if (type === 'earn' || type === 'cashback') inner = <Sparkles size={16} />;
   else inner = tx.direction === 'in' ? <ArrowDown size={16} /> : <ArrowUp size={16} />;
   return <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${tone.bg} ${tone.text}`}>{inner}</span>;
@@ -677,7 +685,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
               {!historyOpen && (
                 <span className="mt-1 block truncate text-[12px] font-normal text-slate-500">
                   {transactions[0]
-                    ? `Latest: ${TX_LABELS[transactions[0].transaction_type] ?? transactions[0].transaction_type} · ${dayLabel(transactions[0].created_at)}, ${timeOf(transactions[0].created_at)}`
+                    ? `Latest: ${txLabel(transactions[0])} · ${dayLabel(transactions[0].created_at)}, ${timeOf(transactions[0].created_at)}`
                     : 'No transactions yet'}
                 </span>
               )}
@@ -759,9 +767,9 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
                         >
                           <TxIcon tx={tx} />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[14px] font-semibold text-slate-800 dark:text-slate-100">{TX_LABELS[tx.transaction_type] ?? tx.transaction_type}</span>
+                            <span className="block truncate text-[14px] font-semibold text-slate-800 dark:text-slate-100">{txLabel(tx)}</span>
                             <span className="mt-0.5 block truncate text-[11.5px] text-slate-500">
-                              {APP_LABELS[tx.source_app] ?? tx.source_app} · {timeOf(tx.created_at)}{tx.note ? ` · ${tx.note}` : ''}
+                              {APP_LABELS[tx.source_app] ?? tx.source_app} · {timeOf(tx.created_at)}{txNote(tx) ? ` · ${txNote(tx)}` : ''}
                             </span>
                           </span>
                           <span className="shrink-0 text-right">
@@ -793,13 +801,13 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
           ['App', APP_LABELS[tx.source_app] ?? tx.source_app],
           ['Date', formatDate(tx.created_at)],
           ['Status', String(tx.status || 'completed')],
-          ['Note', tx.note || '—'],
+          ['Note', txNote(tx) || '—'],
         ];
         return (
           <WalletSheet title="Transaction" onClose={() => setSelectedTx(null)} z={60}>
             <div className="text-center">
               <div className="mx-auto w-fit"><TxIcon tx={tx} /></div>
-              <p className="mt-2 text-[13px] font-semibold text-slate-600 dark:text-slate-300">{TX_LABELS[tx.transaction_type] ?? tx.transaction_type}</p>
+              <p className="mt-2 text-[13px] font-semibold text-slate-600 dark:text-slate-300">{txLabel(tx)}</p>
               <p className={`mt-1 font-classic-display text-[34px] font-bold leading-none tabular-nums lining-nums ${tone.text}`}>
                 {isIn ? '+' : '−'}{formatAmount(tx.ican_amount)}
               </p>

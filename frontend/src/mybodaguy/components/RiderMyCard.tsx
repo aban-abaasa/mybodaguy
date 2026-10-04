@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { ArrowRight, IdCard, Sparkles } from 'lucide-react';
+import { ArrowRight, IdCard, Receipt, Sparkles } from 'lucide-react';
 import RiderIdCard, { FeesChip, PermitChip, RiderCardVisual } from './RiderIdCard';
+import SetPinPrompt from './SetPinPrompt';
+import { supabase } from '../services/supabaseClient';
+import { hasPinSet, validatePIN, verifyPin } from '../services/pinService';
 import {
   DEFAULT_RIDER_CARD_FEE_ICAN,
   riderCardService,
@@ -12,10 +15,14 @@ import {
 interface Props {
   // 'page' is the "My Card" tab; 'tile' is the compact entry on the Overview.
   variant?: 'page' | 'tile';
+  // The signed-in rider. Needed to check the wallet balance and the transaction PIN.
+  userId?: string;
   // Called after a payment goes through so the wallet balance on screen can refresh.
   onPaid?: () => void;
   // Tile only: open the My Card tab.
   onOpen?: () => void;
+  // Opens the wallet — to top up when funds are short, or to see the payment afterwards.
+  onGoToWallet?: () => void;
 }
 
 const vehicleLabel = (type: string) => type.charAt(0).toUpperCase() + type.slice(1);
@@ -23,6 +30,188 @@ const vehicleLabel = (type: string) => type.charAt(0).toUpperCase() + type.slice
 // "The database function isn't there" — i.e. the card SQL has not been run for this feature yet.
 const looksNotSetUp = (message?: string | null) =>
   !!message && /could not find the function|schema cache|does not exist|PGRST202|42883/i.test(message);
+
+const fmtIcan = (n: number) => Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+
+// The wallet's own wording is "Insufficient ICAN. Have: 0.45714286, Need: 2.00000000".
+const friendlyPayError = (message?: string) => {
+  const m = message?.match(/Insufficient ICAN\. Have: ([\d.]+), Need: ([\d.]+)/i);
+  return m ? `Not enough IcanEra in your wallet: you have ${fmtIcan(Number(m[1]))}, you need ${fmtIcan(Number(m[2]))}.` : message || 'Payment failed';
+};
+
+// Paying for a card goes through the rider's ICAN wallet and needs their
+// transaction PIN, like every other wallet payment in the app. The PIN is
+// checked first; nothing is charged until it is right.
+function PayPanel({
+  card, userId, autoStart, onPaid, onGoToWallet,
+}: {
+  card: RiderCard;
+  userId?: string;
+  autoStart: boolean;
+  onPaid: () => void;
+  onGoToWallet?: () => void;
+}) {
+  const [step, setStep] = useState<'idle' | 'pin'>('idle');
+  const [pin, setPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [needsPin, setNeedsPin] = useState(false);
+  const [balance, setBalance] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    supabase
+      .from('ican_user_wallets')
+      .select('ican_balance')
+      .eq('user_id', userId)
+      .maybeSingle()
+      .then(({ data }) => { if (!cancelled) setBalance(Number(data?.ican_balance ?? 0)); });
+    return () => { cancelled = true; };
+  }, [userId]);
+
+  const short = balance !== null && balance < card.fee_ican;
+
+  // No PIN yet -> they set one first (same prompt as the wallet page); otherwise ask for it.
+  const start = useCallback(async () => {
+    if (!userId) {
+      toast.error('Please sign in again to pay from your wallet');
+      return;
+    }
+    try {
+      if (!(await hasPinSet(userId))) {
+        setNeedsPin(true);
+        return;
+      }
+      setStep('pin');
+    } catch {
+      toast.error("We couldn't check your PIN. Please try again.");
+    }
+  }, [userId]);
+
+  // A card the rider has just requested goes straight to the PIN step.
+  useEffect(() => {
+    if (autoStart) start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const pay = async () => {
+    if (!userId) return;
+    setBusy(true);
+    try {
+      const check = await verifyPin(userId, pin);
+      if (!check.success) {
+        toast.error(check.error || 'Incorrect PIN');
+        setPin('');
+        return;
+      }
+      const result = await riderCardService.payCard(card.card_id);
+      if (result.success) {
+        toast.success('Card paid. Your QR code is ready.', {
+          action: onGoToWallet ? { label: 'View in wallet', onClick: onGoToWallet } : undefined,
+        });
+        onPaid();
+      } else {
+        toast.error(friendlyPayError(result.error));
+      }
+    } catch {
+      toast.error("We couldn't complete the payment. Please try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3">
+      {needsPin && userId && (
+        <SetPinPrompt
+          userId={userId}
+          onDone={async () => {
+            setNeedsPin(false);
+            try {
+              if (await hasPinSet(userId)) setStep('pin');
+            } catch { /* they can tap Pay again */ }
+          }}
+        />
+      )}
+
+      {balance !== null && (
+        <p className="text-xs text-slate-500">
+          Wallet balance: <span className="font-semibold text-slate-700">{fmtIcan(balance)} ICAN</span>
+        </p>
+      )}
+
+      {short ? (
+        <div role="alert" className="space-y-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
+          <p className="font-semibold">Your wallet doesn't have enough IcanEra for this card.</p>
+          <p>
+            You have {fmtIcan(balance!)} and the card costs {card.fee_ican}. Add {fmtIcan(card.fee_ican - balance!)} more, then come back to pay.
+          </p>
+          {onGoToWallet && (
+            <button type="button" onClick={onGoToWallet} className="classic-btn classic-btn-outline !w-auto !min-h-[36px] !rounded-full !px-5 !py-1.5 !text-[13px]">
+              Open wallet
+            </button>
+          )}
+        </div>
+      ) : step === 'pin' ? (
+        <form
+          onSubmit={(e) => { e.preventDefault(); if (validatePIN(pin) && !busy) pay(); }}
+          className="space-y-3"
+        >
+          <div>
+            <label htmlFor={`card-pin-${card.card_id}`} className="classic-label">Transaction PIN</label>
+            <input
+              id={`card-pin-${card.card_id}`}
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={6}
+              autoFocus
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+              placeholder="4–6 digit PIN"
+              disabled={busy}
+              className="classic-input text-center text-lg tracking-widest"
+            />
+            <p className="mt-1 text-[11px] text-slate-400">Enter your PIN to pay {card.fee_ican} ICAN from your wallet.</p>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => { setStep('idle'); setPin(''); }} disabled={busy} className="classic-btn classic-btn-outline !w-auto !flex-none !rounded-full !px-6">
+              Not now
+            </button>
+            <button type="submit" disabled={busy || !validatePIN(pin)} className="classic-btn classic-btn-primary !rounded-full whitespace-nowrap">
+              {busy ? 'Paying…' : `Pay ${card.fee_ican} ICAN`}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button type="button" onClick={start} className="classic-btn classic-btn-primary !rounded-full">
+          Pay {card.fee_ican} ICAN to activate
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Proof that the payment went through the wallet, once the card is active.
+function PaidReceipt({ card, onGoToWallet }: { card: RiderCard; onGoToWallet?: () => void }) {
+  if (!card.paid_at) return null;
+  const when = new Date(card.paid_at).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+  return (
+    <div className="flex items-center gap-3 rounded-xl bg-white p-3 ring-1 ring-black/5">
+      <span className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-100">
+        <Receipt size={16} />
+      </span>
+      <p className="min-w-0 flex-1 text-xs text-slate-600">
+        <span className="font-semibold text-slate-800">Paid {card.fee_ican} ICAN</span> from your wallet on {when}. It is in your wallet history as “Rider ID card”.
+      </p>
+      {onGoToWallet && (
+        <button type="button" onClick={onGoToWallet} className="flex-shrink-0 text-xs font-semibold text-[#7a5a12] underline decoration-dotted">
+          View
+        </button>
+      )}
+    </div>
+  );
+}
 
 function useMyCards() {
   const [cards, setCards] = useState<RiderCard[]>([]);
@@ -59,10 +248,9 @@ function useMyCards() {
 //  * Unpaid card: shows the card, what it costs and who the fee is shared with;
 //    paying it from their own wallet activates the QR.
 //  * Active card: the credit-card-style ID, tap to flip it for the QR.
-export default function RiderMyCard({ variant = 'page', onPaid, onOpen }: Props) {
+export default function RiderMyCard({ variant = 'page', userId, onPaid, onOpen, onGoToWallet }: Props) {
   const { cards, requestable, fee, loading, cardsError, requestError, reload } = useMyCards();
-  const [confirming, setConfirming] = useState<string | null>(null);
-  const [paying, setPaying] = useState<string | null>(null);
+  const [autoStartId, setAutoStartId] = useState<string | null>(null);
   const [requesting, setRequesting] = useState<string | null>(null);
 
   // ── Compact entry on the Overview ───────────────────────────────────────
@@ -110,27 +298,13 @@ export default function RiderMyCard({ variant = 'page', onPaid, onOpen }: Props)
     const result = await riderCardService.requestCard(rider.rider_id);
     if (result.success) {
       toast.success(`Your card is issued. Pay ${result.card?.fee_ican ?? fee} ICAN to activate it.`);
+      // Straight on to the payment step (the PIN); nothing is charged until it is right.
+      if (result.card) setAutoStartId(result.card.card_id);
       await reload();
-      // Straight on to the payment step; nothing is charged until they confirm.
-      if (result.card) setConfirming(result.card.card_id);
     } else {
       toast.error(result.error || 'Could not request the card');
     }
     setRequesting(null);
-  };
-
-  const pay = async (card: RiderCard) => {
-    setPaying(card.card_id);
-    const result = await riderCardService.payCard(card.card_id);
-    setPaying(null);
-    setConfirming(null);
-    if (result.success) {
-      toast.success('Card paid. Your QR code is ready.');
-      onPaid?.();
-      await reload();
-    } else {
-      toast.error(result.error || 'Payment failed');
-    }
   };
 
   return (
@@ -196,7 +370,14 @@ export default function RiderMyCard({ variant = 'page', onPaid, onOpen }: Props)
 
           {cards.map((card) => {
             const pending = card.status === 'pending_payment';
-            if (!pending) return <RiderIdCard key={card.card_id} card={card} />;
+            if (!pending) {
+              return (
+                <div key={card.card_id} className="space-y-3">
+                  <RiderIdCard card={card} />
+                  <PaidReceipt card={card} onGoToWallet={onGoToWallet} />
+                </div>
+              );
+            }
             return (
               <div key={card.card_id} className="classic-card space-y-3 !border-orange-400 p-4 ring-2 ring-orange-200/70">
                 <RiderCardVisual data={card} status="pending" />
@@ -207,20 +388,13 @@ export default function RiderMyCard({ variant = 'page', onPaid, onOpen }: Props)
                 <p className="text-xs text-slate-500">
                   The fee is shared equally between the chairpersons of your stage, parish, subcounty, division and district.
                 </p>
-                {confirming === card.card_id ? (
-                  <div className="flex gap-2">
-                    <button type="button" onClick={() => setConfirming(null)} disabled={paying === card.card_id} className="classic-btn classic-btn-outline !w-auto !flex-none !rounded-full !px-6">
-                      Not now
-                    </button>
-                    <button type="button" onClick={() => pay(card)} disabled={paying === card.card_id} className="classic-btn classic-btn-primary !rounded-full whitespace-nowrap">
-                      {paying === card.card_id ? 'Paying…' : `Confirm ${card.fee_ican} ICAN`}
-                    </button>
-                  </div>
-                ) : (
-                  <button type="button" onClick={() => setConfirming(card.card_id)} className="classic-btn classic-btn-primary !rounded-full">
-                    Pay {card.fee_ican} ICAN to activate
-                  </button>
-                )}
+                <PayPanel
+                  card={card}
+                  userId={userId}
+                  autoStart={autoStartId === card.card_id}
+                  onPaid={() => { onPaid?.(); reload(); }}
+                  onGoToWallet={onGoToWallet}
+                />
               </div>
             );
           })}
