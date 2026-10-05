@@ -15,11 +15,12 @@
   --brand:#38bdf8; --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
   --business:#f43f5e; --icanera:#8b5cf6; --bodagoera:#f59e0b; --supermarketera:#10b981; --farmagentera:#84cc16; --platform:#38bdf8;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --serif:Georgia,"Iowan Old Style","Palatino Linotype",Palatino,"Times New Roman",serif; --gold:#c9a24b; --gold-ink:#e3c477;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --r:16px;
 }
 @media (prefers-color-scheme: light){
-  :root{ --bg:#f5f7ff; --bg2:#eaefff; --card:#ffffff; --card2:#f1f4ff; --line:#d5ddf5; --txt:#0c1330; --sub:#3d4a73; --mute:#68759c;
+  :root{ --bg:#faf6ec; --bg2:#f2ebd6; --card:#fffdf6; --card2:#f6f0dd; --line:#ddd1b0; --txt:#1b1810; --sub:#514c38; --mute:#7a735a; --gold:#a8832f; --gold-ink:#8a6a1f;
     --brand:#0369a1; --ok:#047857; --warn:#b45309; --bad:#b91c1c; --business:#be123c; --icanera:#6d28d9; --bodagoera:#b45309; --supermarketera:#047857; --farmagentera:#4d7c0f; --platform:#0369a1; }
 }
 *{box-sizing:border-box} [hidden]{display:none!important} html{scroll-behavior:smooth;scroll-padding-top:72px}
@@ -222,6 +223,59 @@ footer .apps2{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
 .appcard{border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--bg2);display:grid;gap:10px;min-width:0}
 .keyout .reveal{margin-top:4px}
 @media(max-width:560px){#account .fields{grid-template-columns:1fr!important}}
+/* ============ classic layer: serif headings, gold rules, framed cards, ivory paper in light mode ============ */
+h1,h2,h3,.logo{font-family:var(--serif)} h1,h2{font-weight:400;letter-spacing:.005em}
+.hero h1{font-weight:400;letter-spacing:-.01em} .logo{font-weight:700;letter-spacing:.01em}
+.eyebrow{font:700 11.5px/1 var(--serif);letter-spacing:.28em;color:var(--gold-ink)}
+h2{font-size:clamp(28px,4vw,40px)}
+section>.wrap>h2::after,.catalogue>.wrap>h2::after{content:"";display:block;width:84px;height:9px;margin-top:14px;background:
+  linear-gradient(var(--gold),var(--gold)) left center/34px 1px no-repeat,
+  radial-gradient(circle,var(--gold) 0 2.2px,transparent 2.6px) 41px center/9px 9px no-repeat,
+  linear-gradient(var(--gold),var(--gold)) right center/34px 1px no-repeat}
+section+section{border-top:3px double color-mix(in srgb,var(--gold) 45%,transparent)}
+.card{border-radius:10px;box-shadow:inset 0 0 0 4px var(--card),inset 0 0 0 5px color-mix(in srgb,var(--line) 70%,transparent)}
+.btn{border-radius:8px;letter-spacing:.01em}
+.btn.primary{background:linear-gradient(180deg,#d4b15c,#b08d36);border-color:#8a6a1f;color:#1c1604;box-shadow:0 6px 18px -8px #c9a24baa,inset 0 1px 0 #ffffff55}
+.btn:hover{border-color:var(--gold)}
+.grad{background:linear-gradient(100deg,#e3c477,#c9a24b 45%,#f0d98f);-webkit-background-clip:text;background-clip:text}
+nav.links a{font-family:var(--serif);font-size:15px}
+nav.links a:hover{color:var(--gold-ink)}
+.chip{border-radius:6px;font-family:var(--serif)}
+header.top{border-bottom:3px double color-mix(in srgb,var(--gold) 45%,transparent)}
+
+/* ============ the catalogue (Products) ============ */
+.catalogue .mast{position:relative;text-align:center;padding:34px 18px 24px;margin:26px 0 0;background:var(--card);border:1px solid var(--line);border-radius:6px}
+.catalogue .mast::before{content:"";position:absolute;inset:6px;border:1px solid color-mix(in srgb,var(--gold) 40%,transparent);border-radius:3px;pointer-events:none}
+.catalogue .orn{display:flex;align-items:center;gap:12px;color:var(--gold);font-size:12px;max-width:360px;margin:0 auto 12px}
+.catalogue .orn::before,.catalogue .orn::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--gold))} .catalogue .orn::after{transform:scaleX(-1)}
+.catalogue .mast h3{font:400 clamp(26px,4vw,34px)/1.15 var(--serif);letter-spacing:.03em}
+.catalogue .mast p{font:italic 15px var(--serif);color:var(--sub);margin:8px auto 0;max-width:60ch}
+.ledger{display:flex;justify-content:center;flex-wrap:wrap;margin-top:20px;padding-top:16px;border-top:1px solid var(--line)}
+.ledger>div{padding:0 26px;border-left:1px solid var(--line);min-width:110px} .ledger>div:first-child{border-left:0}
+.ledger b{display:block;font:400 30px var(--serif)} .ledger span{font:700 10px var(--sans);letter-spacing:.16em;text-transform:uppercase;color:var(--mute)}
+.ptabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-top:30px;padding:0 6px}
+.ptab{appearance:none;font:600 14px var(--serif);color:var(--sub);background:transparent;border:1px solid transparent;border-bottom:0;border-radius:10px 10px 0 0;margin-bottom:-1px;padding:10px 16px;cursor:pointer;display:inline-flex;gap:8px;align-items:center;white-space:nowrap}
+.ptab:hover{color:var(--txt)} .ptab small{font:700 10.5px var(--mono);color:var(--mute)}
+.ptab[aria-selected=true]{color:var(--txt);background:var(--card);border-color:var(--line);box-shadow:inset 0 3px 0 var(--ac,var(--gold))}
+.ppanel{background:var(--card);border:1px solid var(--line);border-top:0;border-radius:0 0 10px 10px;padding:6px 0 10px}
+.pbar{display:flex;gap:10px;align-items:center;padding:12px 18px;flex-wrap:wrap}
+.pbar input{flex:1;min-width:220px;font:14px var(--sans);color:var(--txt);background:var(--bg2);border:1px solid var(--line);border-radius:99px;padding:9px 15px;outline:none} .pbar input:focus{border-color:var(--gold)}
+.pplate{margin:8px 14px 14px;border:1px solid var(--line);border-top:3px solid var(--ac);border-radius:4px;background:var(--bg)}
+.pplate-h{display:flex;align-items:center;gap:16px;padding:14px 18px}
+.pnum{font:italic 400 30px var(--serif);color:var(--ac);min-width:48px;text-align:center;padding-right:16px;border-right:1px solid var(--line)}
+.pname{font:400 22px var(--serif);letter-spacing:.02em} .ptag{font:italic 14px/1.4 var(--serif);color:var(--sub)}
+.pmeta{margin-left:auto;text-align:right;font-size:12px;color:var(--sub);white-space:nowrap}
+.pmenu{list-style:none;margin:0;padding:2px 0 8px;border-top:1px solid var(--line)} .pmenu li+li{border-top:1px dashed color-mix(in srgb,var(--line) 80%,transparent)}
+.prow{appearance:none;background:none;border:0;color:inherit;font:inherit;text-align:left;width:100%;display:flex;align-items:baseline;gap:9px;padding:9px 18px 9px 84px;cursor:pointer}
+.prow:hover{background:var(--bg2)} .prow:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}
+.pn{font:400 16px var(--serif)} .plead{flex:1;min-width:18px;border-bottom:2px dotted var(--mute);opacity:.55;transform:translateY(-4px)}
+.ppath{font:12px var(--mono);color:var(--sub)}
+.pdetail{padding:2px 18px 16px 84px;display:grid;gap:10px}
+.pdetail p{margin:0;font:italic 15px/1.55 var(--serif);color:var(--sub);max-width:72ch}
+.pfacts{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:12.5px;color:var(--sub)} .pfacts b{color:var(--txt)}
+.pdetail pre{margin:0;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg2);overflow:auto;font:12px var(--mono)}
+@media(max-width:640px){.prow,.pdetail{padding-left:16px}.prow{flex-wrap:wrap}.plead{display:none}.pmeta{display:none}.pnum{min-width:36px;padding-right:12px;font-size:24px}.ledger>div{padding:0 14px}.ptab{padding:9px 12px}}
+
 
 textarea.t.mono{font:13px var(--mono);min-height:64px;resize:vertical}
 </style>
@@ -233,7 +287,7 @@ textarea.t.mono{font:13px var(--mono);min-height:64px;resize:vertical}
   <div class="wrap">
     <a class="logo" href="#top" aria-label="Era API home"><i aria-hidden="true"></i> Era API</a>
     <nav class="links" aria-label="Sections">
-      <a href="#playground">Playground</a><a href="#build">Build</a><a href="#business">Business</a><a href="#keys">Get a key</a><a href="#recipes">Recipes</a><a href="#reference">Reference</a><a href="#trust">Trust</a>
+      <a href="#products">Products</a><a href="#playground">Playground</a><a href="#build">Build</a><a href="#business">Business</a><a href="#keys">Get a key</a><a href="#recipes">Recipes</a><a href="#reference">Reference</a><a href="#trust">Trust</a>
     </nav>
     <div class="status" id="status" role="status" aria-live="polite"><span class="dot" id="dot"></span><span id="statusText">checking…</span></div>
     <a class="btn small" id="acctChip" href="#account" hidden>Sign in</a>
@@ -265,6 +319,23 @@ textarea.t.mono{font:13px var(--mono);min-height:64px;resize:vertical}
       <svg id="sky" class="sky" viewBox="0 0 800 440" role="img" aria-label="The four Era apps orbiting your key. Each request you send travels to its app and back."></svg>
       <p class="hint" style="text-align:center;margin:8px 0 0">Click a planet to see its endpoints. Every request you send lights up its path.</p>
     </div>
+  </div>
+</section>
+
+<!-- ============================================================ PRODUCTS -->
+<section id="products" class="catalogue">
+  <div class="wrap">
+    <div class="eyebrow">Products</div>
+    <h2>Everything we offer, in one catalogue.</h2>
+    <p class="lead">Four apps, one platform call, and a private tier for businesses. Pick a product to see its services, or search the whole list. Every service can be tried live.</p>
+    <div class="mast">
+      <div class="orn" aria-hidden="true">◆</div>
+      <h3>The Era Catalogue</h3>
+      <p>Public data for builders, and private tools for the businesses that run on it.</p>
+      <div class="ledger" id="pLedger" aria-live="polite"></div>
+    </div>
+    <div class="ptabs" id="pTabs" role="tablist" aria-label="Products"></div>
+    <div class="ppanel" id="pPanel" role="tabpanel" aria-live="polite"></div>
   </div>
 </section>
 
@@ -1226,6 +1297,70 @@ function renderCaps() {
   });
 }
 
+
+/* ------------------------------------------------------------------ products (the catalogue) */
+const PRODUCT_KIND = { business: 'owner-issued key', platform: 'any approved key' };
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI'];
+const pstate = { tab: 'all', q: '', open: new Set() };
+function renderProducts() {
+  const fid = document.activeElement && /^(ptab-|prow-|pSearch)/.test(document.activeElement.id || '') ? document.activeElement.id : null;
+  buildProducts();
+  const back = fid && document.getElementById(fid);
+  if (back) { back.focus(); if (back.type === 'search') back.setSelectionRange(back.value.length, back.value.length); }
+}
+function buildProducts() {
+  const eps = state.endpoints; if (!eps.length) return;
+  const tagOf = Object.fromEntries((state.apps || []).map((a) => [a.id, a.tagline]));
+  const apps = ORDER.filter((a) => eps.some((e) => e.app === a));
+  $('#pLedger').textContent = '';
+  [[apps.length, 'Products'], [eps.length, 'Services'], [eps.filter((e) => e.access !== 'business').length, 'Public'], [eps.filter((e) => e.access === 'business').length, 'For businesses']]
+    .forEach(([n, l]) => $('#pLedger').append(h('div', {}, h('b', {}, String(n)), h('span', {}, l))));
+  const tabs = $('#pTabs'); tabs.textContent = '';
+  const mk = (id, label, n) => h('button', { class: 'ptab', role: 'tab', type: 'button', id: 'ptab-' + id, 'aria-selected': String(pstate.tab === id), tabindex: pstate.tab === id ? '0' : '-1',
+    style: id === 'all' ? '' : '--ac:' + APPS[id].color, onclick: () => { pstate.tab = id; renderProducts(); }, onkeydown: (e) => {
+      const ids = ['all', ...apps], i = ids.indexOf(id); let j = -1;
+      if (e.key === 'ArrowRight') j = (i + 1) % ids.length; else if (e.key === 'ArrowLeft') j = (i - 1 + ids.length) % ids.length; else if (e.key === 'Home') j = 0; else if (e.key === 'End') j = ids.length - 1;
+      if (j >= 0) { e.preventDefault(); pstate.tab = ids[j]; renderProducts(); $('#ptab-' + ids[j]).focus(); } } },
+    id === 'all' ? null : h('span', { class: 'appdot', style: 'background:' + APPS[id].color }), label, h('small', {}, String(n)));
+  tabs.append(mk('all', 'All', eps.length), ...apps.map((a) => mk(a, APPS[a].name, eps.filter((e) => e.app === a).length)));
+
+  const panel = $('#pPanel'); panel.textContent = ''; panel.setAttribute('aria-labelledby', 'ptab-' + pstate.tab);
+  const q = pstate.q.trim().toLowerCase();
+  const search = h('input', { type: 'search', id: 'pSearch', 'aria-label': 'Search services', placeholder: 'Search services, paths or scopes…', value: pstate.q, oninput: (e) => { pstate.q = e.target.value; renderProducts(); } });
+  panel.append(h('div', { class: 'pbar' }, search));
+  const hit = (e) => !q || [e.summary, e.path, e.description, e.scope, e.method].some((v) => v && String(v).toLowerCase().includes(q));
+  const shown = (pstate.tab === 'all' ? apps : [pstate.tab]).map((a) => ({ a, rows: eps.filter((e) => e.app === a && hit(e)) })).filter((g) => g.rows.length);
+  if (!shown.length) { panel.append(h('div', { class: 'empty', style: 'padding:26px;text-align:center;color:var(--mute)' }, 'Nothing on the menu matches that. Try a shorter word.')); return; }
+  shown.forEach(({ a, rows }) => {
+    const i = ORDER.indexOf(a);
+    panel.append(h('div', { class: 'pplate', role: 'group', style: '--ac:' + APPS[a].color, 'aria-label': APPS[a].name },
+      h('div', { class: 'pplate-h' }, h('span', { class: 'pnum', 'aria-hidden': 'true' }, ROMAN[i] || String(i + 1)),
+        h('div', {}, h('div', { class: 'pname' }, APPS[a].name), h('div', { class: 'ptag' }, tagOf[a] || '')),
+        h('div', { class: 'pmeta' }, `${rows.length} service${rows.length === 1 ? '' : 's'}`, h('br'), PRODUCT_KIND[a] || 'approved key')),
+      h('ul', { class: 'pmenu' }, ...rows.map(productRow))));
+  });
+}
+function productRow(e) {
+  const open = pstate.open.has(e.id);
+  const key = isBiz(e) ? BUSINESS_SANDBOX_KEY : PLAYGROUND_KEY;
+  const curl = `curl -s "${state.base}${e.example_path || e.path}" -H "Authorization: Bearer ${key}"`;
+  return h('li', {},
+    h('button', { class: 'prow', id: 'prow-' + e.id, type: 'button', 'aria-expanded': String(open), onclick: () => { if (pstate.open.has(e.id)) pstate.open.delete(e.id); else pstate.open.add(e.id); renderProducts(); } },
+      h('span', { class: 'pn' }, e.summary || e.path), h('i', { class: 'plead' }),
+      h('span', { class: 'pill ' + (e.method === 'POST' ? 'badge-post' : 'badge-get') }, e.method || 'GET'), h('span', { class: 'ppath' }, e.path)),
+    open ? h('div', { class: 'pdetail' },
+      e.description ? h('p', {}, e.description) : null,
+      h('div', { class: 'pfacts' },
+        h('div', {}, 'Access: ', h('b', {}, isBiz(e) ? `owner key · ${e.scope || 'any scope'}` : 'any key approved for this app')),
+        h('div', {}, 'Cached: ', h('b', {}, e.cache_seconds ? `${e.cache_seconds}s` : 'never')),
+        (e.params || []).length ? h('div', {}, 'Inputs: ', h('b', {}, e.params.map((p) => p.name + (p.required ? '*' : '')).join(', '))) : null),
+      h('pre', {}, curl),
+      h('div', { class: 'row', style: 'display:flex;gap:8px;flex-wrap:wrap' },
+        h('button', { class: 'btn small primary', type: 'button', onclick: () => { state.focusApp = null; $('#q').value = ''; selectEndpoint(e.id); $('#playground').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' }); } }, '▶ Try it live'),
+        h('button', { class: 'btn small', type: 'button', onclick: () => copy(curl, 'curl copied') }, 'Copy curl'),
+        h('a', { class: 'btn small', href: '#ref-' + e.id.replace(/\./g, '-') }, 'Reference'))) : null);
+}
+
 /* ------------------------------------------------------------------ reference */
 function renderRef() {
   const box = $('#refList'); box.textContent = '';
@@ -1254,7 +1389,7 @@ function renderRef() {
   const returned = takeSignInReturn(); // first: coming back from Google? take the tokens out of the address bar
   buildSky(); setupPlayground(); setupKeys(); setupRecipes(); setupAccount(returned);
   await Promise.all([loadCatalog(), loadStatus()]);
-  renderList(); renderRef(); renderCaps(); renderSnippet();
+  renderList(); renderProducts(); renderRef(); renderCaps(); renderSnippet();
   const want = qs.get('try') ? state.endpoints.find((e) => e.id === qs.get('try') || e.path === qs.get('try')) : null;
   const first = want || state.endpoints.find((e) => e.id === 'icanera.coin_price') || state.endpoints[0]; if (first) selectEndpoint(first.id);
   setInterval(loadStatus, 60000);
