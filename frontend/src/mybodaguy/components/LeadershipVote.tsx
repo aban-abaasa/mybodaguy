@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Vote, ChevronDown, Search, Check, Clock, Lock, ShieldCheck, Info, UserPlus, MessageSquare, Loader2, Crown } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -56,7 +56,9 @@ export default function LeadershipVote({ userId }: { userId: string }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [showHow, setShowHow] = useState(false);
 
-  const keyOf = (s: { region_type: string; region_id: string }) => `${s.region_type}:${s.region_id}`;
+  // A region can have several chairpersons, so a seat is region + person.
+  const keyOf = (s: { region_type: string; region_id: string; holder_user_id: string }) =>
+    `${s.region_type}:${s.region_id}:${s.holder_user_id}`;
 
   const loadSeats = useCallback(async () => {
     try {
@@ -66,7 +68,7 @@ export default function LeadershipVote({ userId }: { userId: string }) {
         const needB = b.motion?.is_voter && !b.motion.has_voted ? 1 : 0;
         if (needA !== needB) return needB - needA;
         if (!!a.motion !== !!b.motion) return a.motion ? -1 : 1;
-        return b.level - a.level || a.region_name.localeCompare(b.region_name);
+        return b.level - a.level || a.region_name.localeCompare(b.region_name) || a.holder_name.localeCompare(b.holder_name);
       });
       setSeats(list);
       setError(null);
@@ -209,14 +211,22 @@ function SeatPanel({ seat, onChanged }: { seat: LeadershipSeat; onChanged: () =>
   const [showPicker, setShowPicker] = useState(false);
   const [replyText, setReplyText] = useState('');
 
+  // A vote can close while someone is watching it (the last ballot, the
+  // deadline, a majority that can no longer be reached). The seat list then
+  // changes too - a new chairperson, or a lock - so tell the parent.
+  const wasOpen = useRef(false);
   const refresh = useCallback(async () => {
     try {
-      setState(await leadershipVoteService.seatState(seat.region_type, seat.region_id));
+      const next = await leadershipVoteService.seatState(seat.region_type, seat.region_id, seat.holder_user_id);
+      const nowOpen = next.motion?.status === 'open';
+      if (wasOpen.current && !nowOpen) onChanged();
+      wasOpen.current = nowOpen;
+      setState(next);
       setErr(null);
     } catch (e: any) {
       setErr(e?.message || 'Could not load this vote');
     }
-  }, [seat.region_type, seat.region_id]);
+  }, [seat.region_type, seat.region_id, seat.holder_user_id, onChanged]);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -317,6 +327,7 @@ function SeatPanel({ seat, onChanged }: { seat: LeadershipSeat; onChanged: () =>
               <NomineePicker
                 regionType={seat.region_type}
                 regionId={seat.region_id}
+                holderUserId={seat.holder_user_id}
                 exclude={state.candidates.map(c => c.user_id)}
                 disabled={busy}
                 onPick={startNominate}
@@ -545,6 +556,7 @@ function SeatPanel({ seat, onChanged }: { seat: LeadershipSeat; onChanged: () =>
               <NomineePicker
                 regionType={seat.region_type}
                 regionId={seat.region_id}
+                holderUserId={seat.holder_user_id}
                 exclude={[]}
                 disabled={busy}
                 onPick={setSuccessor}
@@ -565,7 +577,7 @@ function SeatPanel({ seat, onChanged }: { seat: LeadershipSeat; onChanged: () =>
               onClick={async () => {
                 if (!successor) return;
                 const ok = await run(
-                  () => leadershipVoteService.open(seat.region_type as SeatRegionType, seat.region_id, reason.trim(), successor.user_id),
+                  () => leadershipVoteService.open(seat.region_type as SeatRegionType, seat.region_id, seat.holder_user_id, reason.trim(), successor.user_id),
                   'Vote started - voters have been alerted'
                 );
                 if (ok) { setShowStart(false); setReason(''); setSuccessor(null); }
@@ -582,9 +594,10 @@ function SeatPanel({ seat, onChanged }: { seat: LeadershipSeat; onChanged: () =>
 }
 
 // ── Pick a rider from the area ───────────────────────────────────────────────
-function NomineePicker({ regionType, regionId, exclude, disabled, onPick }: {
+function NomineePicker({ regionType, regionId, holderUserId, exclude, disabled, onPick }: {
   regionType: SeatRegionType;
   regionId: string;
+  holderUserId: string;
   exclude: string[];
   disabled?: boolean;
   onPick: (n: LeadershipNominee) => void;
@@ -595,11 +608,11 @@ function NomineePicker({ regionType, regionId, exclude, disabled, onPick }: {
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(async () => {
-      const list = await leadershipVoteService.nominees(regionType, regionId, q);
+      const list = await leadershipVoteService.nominees(regionType, regionId, holderUserId, q);
       if (!cancelled) setRows(list);
     }, q ? 250 : 0);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [regionType, regionId, q]);
+  }, [regionType, regionId, holderUserId, q]);
 
   const visible = useMemo(() => (rows || []).filter(r => !exclude.includes(r.user_id)), [rows, exclude]);
 

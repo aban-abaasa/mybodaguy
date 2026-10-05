@@ -127,10 +127,12 @@ export const leadershipVoteService = {
     return (data as LeadershipSeat[]) || [];
   },
 
-  async seatState(regionType: SeatRegionType, regionId: string): Promise<LeadershipState> {
+  // A seat is one chairperson in one region (a region can have several).
+  async seatState(regionType: SeatRegionType, regionId: string, holderUserId: string): Promise<LeadershipState> {
     const { data, error } = await supabase.rpc('mbg_get_leadership_state', {
       p_region_type: regionType,
       p_region_id: regionId,
+      p_holder_user_id: holderUserId,
     });
     if (error) {
       console.error('[LeadershipVote] state:', error);
@@ -139,10 +141,11 @@ export const leadershipVoteService = {
     return data as LeadershipState;
   },
 
-  async nominees(regionType: SeatRegionType, regionId: string, search: string): Promise<LeadershipNominee[]> {
+  async nominees(regionType: SeatRegionType, regionId: string, holderUserId: string, search: string): Promise<LeadershipNominee[]> {
     const { data, error } = await supabase.rpc('mbg_list_leadership_nominees', {
       p_region_type: regionType,
       p_region_id: regionId,
+      p_holder_user_id: holderUserId,
       p_search: search.trim() || null,
     });
     if (error) {
@@ -152,10 +155,11 @@ export const leadershipVoteService = {
     return (data as LeadershipNominee[]) || [];
   },
 
-  async open(regionType: SeatRegionType, regionId: string, reason: string, successorUserId: string) {
+  async open(regionType: SeatRegionType, regionId: string, holderUserId: string, reason: string, successorUserId: string) {
     const { data, error } = await supabase.rpc('mbg_open_leadership_motion', {
       p_region_type: regionType,
       p_region_id: regionId,
+      p_holder_user_id: holderUserId,
       p_reason: reason,
       p_candidate_user_id: successorUserId,
     });

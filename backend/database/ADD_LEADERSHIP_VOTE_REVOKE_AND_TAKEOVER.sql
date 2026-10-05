@@ -6,6 +6,10 @@
 -- The riders under them had no say. This adds a real, one-ballot "leadership
 -- vote" for ANY seat (stage, parish, subcounty, division, district):
 --
+--   THE SEAT       One specific chairperson in a region. A region may have any
+--                  number of chairpersons (ALLOW_MULTIPLE_CHAIRS_PER_REGION.sql),
+--                  so a vote is about one named person; their co-chairpersons
+--                  are voters, and each person can be voted on separately.
 --   WHO VOTES      Every active rider in the seat's area (a district seat =
 --                  every rider in the district), every chairperson inside that
 --                  area, and the seat's own superior chairperson. One person,
@@ -32,13 +36,16 @@
 --                  chairperson out only 24 more hours remain to pick who.
 --   FAIR PLAY      Secret ballot (nobody can see who voted what - only the
 --                  totals). Ballots are final. The chairperson can post one
---                  reply everyone sees. A seat that just had a vote is locked
---                  for 30 days so a loser can't be harassed with re-votes.
+--                  reply everyone sees. A chairperson who just had a vote - or
+--                  who was just voted in - is locked for 30 days so a loser
+--                  can't be harassed with re-votes.
 --
 -- Takeover moves everything together: the old chairperson's seat rows go
--- inactive, the winner gets the seat with the SAME seniority (so
--- ride-commission crediting - which picks the earliest active row of a
--- region - follows the seat), direct reports are re-parented to the winner,
+-- inactive and the winner takes their place in the region (ride commission is
+-- split equally between a region's active chairpersons, see
+-- ADD_CHAIN_COMMISSION_AND_COMMITTEE_SHARING.sql, so the winner simply starts
+-- receiving that share), direct reports are re-parented to the winner, the
+-- tree is re-linked from the geography (ENFORCE_CHAIRPERSON_TREE_TRUTH.sql),
 -- and user_roles / role_type are synced exactly like mbg_assign_chairperson.
 --
 -- No pg_cron job: due votes are closed lazily the next time anyone opens the
@@ -81,9 +88,10 @@ CREATE TABLE IF NOT EXISTS public.mbg_leadership_motions (
   result             JSONB
 );
 
--- Only one live vote per seat.
-CREATE UNIQUE INDEX IF NOT EXISTS mbg_leadership_one_open_per_seat
-  ON public.mbg_leadership_motions (region_type, region_id) WHERE status = 'open';
+-- Only one live vote per chairperson per region.
+DROP INDEX IF EXISTS public.mbg_leadership_one_open_per_seat;
+CREATE UNIQUE INDEX IF NOT EXISTS mbg_leadership_one_open_per_chair
+  ON public.mbg_leadership_motions (region_type, region_id, accused_user_id) WHERE status = 'open';
 CREATE INDEX IF NOT EXISTS mbg_leadership_motions_seat_idx
   ON public.mbg_leadership_motions (region_type, region_id, closed_at DESC);
 
@@ -230,16 +238,28 @@ BEGIN
 END;
 $$;
 
--- Who currently holds a seat. Same rule the ride-commission code uses to find
--- the chairperson of a region: the earliest-appointed ACTIVE row.
-CREATE OR REPLACE FUNCTION public.mbg_seat_holder(p_region_type TEXT, p_region_id UUID)
+-- The active seat a given person holds in a region (NULL fields if none).
+-- A region can have several chairpersons, so a seat is (region, person).
+DROP FUNCTION IF EXISTS public.mbg_seat_holder(TEXT, UUID);
+CREATE OR REPLACE FUNCTION public.mbg_chair_row(p_region_type TEXT, p_region_id UUID, p_user_id UUID)
 RETURNS public.mbg_committee_members
 LANGUAGE sql STABLE SET search_path = public AS $$
   SELECT cm.*
   FROM public.mbg_committee_members cm
-  WHERE cm.region_type::TEXT = p_region_type AND cm.region_id = p_region_id AND cm.is_active = true
-  ORDER BY cm.appointed_at ASC
+  WHERE cm.region_type::TEXT = p_region_type AND cm.region_id = p_region_id
+    AND cm.user_id = p_user_id AND cm.is_active = true
   LIMIT 1;
+$$;
+
+-- When a chairperson was last voted on, or voted in (drives the 30-day lock).
+CREATE OR REPLACE FUNCTION public.mbg_chair_last_vote_at(p_region_type TEXT, p_region_id UUID, p_user_id UUID)
+RETURNS TIMESTAMPTZ
+LANGUAGE sql STABLE SET search_path = public AS $$
+  SELECT max(closed_at)
+  FROM public.mbg_leadership_motions
+  WHERE region_type::TEXT = p_region_type AND region_id = p_region_id
+    AND status IN ('passed', 'failed')
+    AND (accused_user_id = p_user_id OR winner_user_id = p_user_id);
 $$;
 
 -- The electorate: active riders in the area + chairpersons in the area + the
@@ -344,9 +364,9 @@ BEGIN
   FROM public.mbg_leadership_ballots WHERE motion_id = m.id;
 
   IF v_passed THEN
-    -- The seat must still belong to the person being challenged.
-    v_holder := public.mbg_seat_holder(m.region_type::TEXT, m.region_id);
-    IF v_holder.id IS NULL OR v_holder.user_id <> m.accused_user_id THEN
+    -- The challenged person must still hold the seat.
+    v_holder := public.mbg_chair_row(m.region_type::TEXT, m.region_id, m.accused_user_id);
+    IF v_holder.id IS NULL THEN
       v_passed := false;
       v_reason := 'The seat changed hands while the vote was open';
     ELSE
@@ -378,22 +398,25 @@ BEGIN
           AND assigned_by IS NOT DISTINCT FROM v_old.assigned_by)
     );
 
-    -- 2. Winner in, keeping the seat's seniority (ride commissions credit the
-    --    earliest active row of a region, so the money follows the seat).
+    -- 2. Winner in, on the old chairperson's terms. The region's commission is
+    --    split equally between its active chairpersons, so the winner now
+    --    receives the share the old chairperson had. If the winner already
+    --    chairs this region (a co-chairperson) their existing seat is kept.
     INSERT INTO public.mbg_committee_members (
       user_id, role, region_type, region_id, assigned_by,
       parent_chairperson_id, commission_rate, is_active, appointed_at
     ) VALUES (
       v_winner, v_old.role, v_old.region_type, v_old.region_id, v_old.assigned_by,
-      v_old.parent_chairperson_id, v_old.commission_rate, true, v_old.appointed_at
+      v_old.parent_chairperson_id, v_old.commission_rate, true, NOW()
     )
     ON CONFLICT (user_id, region_type, region_id) DO UPDATE SET
       role = EXCLUDED.role,
-      assigned_by = EXCLUDED.assigned_by,
-      parent_chairperson_id = EXCLUDED.parent_chairperson_id,
-      commission_rate = EXCLUDED.commission_rate,
+      commission_rate = CASE WHEN public.mbg_committee_members.is_active
+                             THEN public.mbg_committee_members.commission_rate ELSE EXCLUDED.commission_rate END,
+      parent_chairperson_id = COALESCE(CASE WHEN public.mbg_committee_members.is_active
+                                            THEN public.mbg_committee_members.parent_chairperson_id END,
+                                       EXCLUDED.parent_chairperson_id),
       is_active = true,
-      appointed_at = EXCLUDED.appointed_at,
       updated_at = NOW()
     RETURNING id INTO v_new_id;
 
@@ -403,8 +426,9 @@ BEGIN
     WHERE parent_chairperson_id = v_old.id AND user_id <> m.accused_user_id AND id <> v_new_id;
 
     -- 4. Same convenience mbg_assign_chairperson gives every chairperson: a
-    --    stage-level row on their own stage so they can manage its riders.
-    --    Newest appointed_at so it never outranks that stage's real chairperson.
+    --    stage-level seat on their own stage so they can manage its riders.
+    --    Its parent comes from the geography tree (relinked below), as it does
+    --    for assigned chairpersons.
     IF v_old.role <> 'stage_chairperson' THEN
       SELECT r.stage_id INTO v_stage
       FROM public.mbg_riders r
@@ -414,13 +438,19 @@ BEGIN
       IF v_stage IS NOT NULL THEN
         INSERT INTO public.mbg_committee_members (
           user_id, role, region_type, region_id, assigned_by,
-          parent_chairperson_id, commission_rate, is_active, appointed_at
+          commission_rate, is_active, appointed_at
         ) VALUES (
           v_winner, 'stage_chairperson', 'stage', v_stage, v_old.assigned_by,
-          v_new_id, v_old.commission_rate, true, NOW()
+          v_old.commission_rate, true, NOW()
         )
         ON CONFLICT (user_id, region_type, region_id) DO UPDATE SET is_active = true, updated_at = NOW();
       END IF;
+    END IF;
+
+    -- Let the geography tree decide every parent link (only exists once
+    -- ENFORCE_CHAIRPERSON_TREE_TRUTH.sql has been run; the vote works without it).
+    IF to_regprocedure('public.mbg_relink_chairperson_tree()') IS NOT NULL THEN
+      PERFORM public.mbg_relink_chairperson_tree();
     END IF;
 
     -- 5. Roles, exactly as mbg_assign_chairperson syncs them.
@@ -610,8 +640,9 @@ BEGIN
 END;
 $$;
 
--- Everything the screen needs about ONE seat.
-CREATE OR REPLACE FUNCTION public.mbg_get_leadership_state(p_region_type TEXT, p_region_id UUID)
+-- Everything the screen needs about ONE seat: one chairperson in one region.
+DROP FUNCTION IF EXISTS public.mbg_get_leadership_state(TEXT, UUID);
+CREATE OR REPLACE FUNCTION public.mbg_get_leadership_state(p_region_type TEXT, p_region_id UUID, p_holder_user_id UUID)
 RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -639,15 +670,17 @@ BEGIN
 
   -- Lazily close a vote that is due.
   SELECT id INTO v_open_id FROM public.mbg_leadership_motions
-  WHERE region_type::TEXT = p_region_type AND region_id = p_region_id AND status = 'open';
+  WHERE region_type::TEXT = p_region_type AND region_id = p_region_id
+    AND accused_user_id = p_holder_user_id AND status = 'open';
   IF v_open_id IS NOT NULL THEN
     IF public.mbg_leadership_resolve(v_open_id) <> 'open' THEN v_open_id := NULL; END IF;
   END IF;
 
-  v_holder := public.mbg_seat_holder(p_region_type, p_region_id);
+  v_holder := public.mbg_chair_row(p_region_type, p_region_id, p_holder_user_id);
 
   SELECT * INTO v_last FROM public.mbg_leadership_motions
   WHERE region_type::TEXT = p_region_type AND region_id = p_region_id AND status IN ('passed', 'failed')
+    AND (accused_user_id = p_holder_user_id OR winner_user_id = p_holder_user_id)
   ORDER BY closed_at DESC LIMIT 1;
 
   IF v_open_id IS NOT NULL THEN
@@ -669,7 +702,7 @@ BEGIN
     INTO v_cands, v_cand_n, v_my_nom
     FROM public.mbg_leadership_ranking(v_open_id) rk;
   ELSIF v_holder.id IS NULL THEN
-    v_why := 'This seat has no chairperson to vote on';
+    v_why := 'This person no longer chairs this area';
   ELSIF v_holder.user_id = v_uid THEN
     v_why := 'This is your own seat';
   ELSE
@@ -681,16 +714,15 @@ BEGIN
       WHERE e.voter_id = v_uid
     );
 
-    v_unlock := (SELECT max(closed_at) + make_interval(days => (v_rules ->> 'cooldown_days')::INTEGER)
-                 FROM public.mbg_leadership_motions
-                 WHERE region_type::TEXT = p_region_type AND region_id = p_region_id AND status IN ('passed', 'failed'));
+    v_unlock := public.mbg_chair_last_vote_at(p_region_type, p_region_id, v_holder.user_id)
+                + make_interval(days => (v_rules ->> 'cooldown_days')::INTEGER);
 
     IF NOT v_is_voter THEN
       v_why := 'Only riders and chairpersons in this area can vote on this seat';
     ELSIF v_elect_n < (v_rules ->> 'min_voters')::INTEGER THEN
       v_why := 'At least ' || (v_rules ->> 'min_voters') || ' eligible voters are needed';
     ELSIF v_unlock IS NOT NULL AND v_unlock > NOW() THEN
-      v_why := 'This seat just had a vote. A new one can start after ' || to_char(v_unlock, 'DD Mon YYYY');
+      v_why := 'This chairperson just had a vote. A new one can start after ' || to_char(v_unlock, 'DD Mon YYYY');
     ELSE
       v_can_open := true;
     END IF;
@@ -702,10 +734,10 @@ BEGIN
       'region_id', p_region_id,
       'region_name', public.mbg_region_name(p_region_type, p_region_id),
       'role', v_holder.role,
-      'holder_user_id', v_holder.user_id,
-      'holder_name', CASE WHEN v_holder.id IS NULL THEN NULL ELSE public.mbg_person_name(v_holder.user_id) END,
+      'holder_user_id', p_holder_user_id,
+      'holder_name', public.mbg_person_name(p_holder_user_id),
       'since', v_holder.appointed_at,
-      'is_mine', v_holder.user_id = v_uid
+      'is_mine', p_holder_user_id = v_uid
     ),
     'rules', v_rules,
     'motion', v_summary,
@@ -727,9 +759,10 @@ BEGIN
 END;
 $$;
 
--- The caller's seats: every chairperson they can hold to account (their stage
--- and every level above it, plus their own superior and direct reports), and
--- their own seats so an accused chairperson sees a vote against them.
+-- The caller's seats: every chairperson they can hold to account (in their
+-- stage and every level above it, plus their own superior and direct reports),
+-- and their own seats so an accused chairperson sees a vote against them.
+-- A region with several chairpersons gives one entry per chairperson.
 CREATE OR REPLACE FUNCTION public.mbg_my_leadership_seats()
 RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -760,19 +793,23 @@ BEGIN
       JOIN public.mbg_committee_members c ON c.parent_chairperson_id = mine.id AND c.is_active = true
       WHERE mine.user_id = v_uid AND mine.is_active = true
     )
-    SELECT DISTINCT a.r_type, a.r_id
+    -- One seat per chairperson per region: a region can have several.
+    SELECT DISTINCT a.r_type, a.r_id, cm.user_id AS holder_user_id
     FROM base b
     CROSS JOIN LATERAL public.mbg_region_ancestors(b.t, b.i) a
+    JOIN public.mbg_committee_members cm
+      ON cm.region_type::TEXT = a.r_type AND cm.region_id = a.r_id AND cm.is_active = true
   LOOP
     -- Skip rows that don't point at a real area (legacy cascade rows).
     IF public.mbg_region_name(v_seat.r_type, v_seat.r_id) IS NULL THEN CONTINUE; END IF;
 
-    v_holder := public.mbg_seat_holder(v_seat.r_type, v_seat.r_id);
+    v_holder := public.mbg_chair_row(v_seat.r_type, v_seat.r_id, v_seat.holder_user_id);
     IF v_holder.id IS NULL THEN CONTINUE; END IF;
 
     v_open_id := NULL;
     SELECT id INTO v_open_id FROM public.mbg_leadership_motions
-    WHERE region_type::TEXT = v_seat.r_type AND region_id = v_seat.r_id AND status = 'open';
+    WHERE region_type::TEXT = v_seat.r_type AND region_id = v_seat.r_id
+      AND accused_user_id = v_seat.holder_user_id AND status = 'open';
     IF v_open_id IS NOT NULL AND public.mbg_leadership_resolve(v_open_id) <> 'open' THEN
       v_open_id := NULL;
     END IF;
@@ -798,7 +835,10 @@ END;
 $$;
 
 -- Riders you can recommend for a seat (search by name).
-CREATE OR REPLACE FUNCTION public.mbg_list_leadership_nominees(p_region_type TEXT, p_region_id UUID, p_search TEXT DEFAULT NULL)
+DROP FUNCTION IF EXISTS public.mbg_list_leadership_nominees(TEXT, UUID, TEXT);
+CREATE OR REPLACE FUNCTION public.mbg_list_leadership_nominees(
+  p_region_type TEXT, p_region_id UUID, p_holder_user_id UUID, p_search TEXT DEFAULT NULL
+)
 RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -808,7 +848,7 @@ DECLARE
   v_q      TEXT := NULLIF(btrim(COALESCE(p_search, '')), '');
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION 'Sign in first'; END IF;
-  v_holder := public.mbg_seat_holder(p_region_type, p_region_id);
+  v_holder := public.mbg_chair_row(p_region_type, p_region_id, p_holder_user_id);
   IF v_holder.id IS NULL THEN RETURN '[]'::JSONB; END IF;
   v_parent := (SELECT p.user_id FROM public.mbg_committee_members p WHERE p.id = v_holder.parent_chairperson_id AND p.is_active = true);
 
@@ -840,9 +880,11 @@ BEGIN
 END;
 $$;
 
--- Start a vote. Starting it is also your own ballot: remove + your pick.
+-- Start a vote on one chairperson. Starting it is also your own ballot:
+-- remove + your pick.
+DROP FUNCTION IF EXISTS public.mbg_open_leadership_motion(TEXT, UUID, TEXT, UUID);
 CREATE OR REPLACE FUNCTION public.mbg_open_leadership_motion(
-  p_region_type TEXT, p_region_id UUID, p_reason TEXT, p_candidate_user_id UUID
+  p_region_type TEXT, p_region_id UUID, p_holder_user_id UUID, p_reason TEXT, p_candidate_user_id UUID
 )
 RETURNS JSONB
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
@@ -866,9 +908,9 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Give a reason of 10 to 500 characters so voters know why');
   END IF;
 
-  v_holder := public.mbg_seat_holder(p_region_type, p_region_id);
+  v_holder := public.mbg_chair_row(p_region_type, p_region_id, p_holder_user_id);
   IF v_holder.id IS NULL THEN
-    RETURN jsonb_build_object('success', false, 'error', 'This seat has no chairperson to vote on');
+    RETURN jsonb_build_object('success', false, 'error', 'That person no longer chairs this area');
   END IF;
   IF v_holder.user_id = v_uid THEN
     RETURN jsonb_build_object('success', false, 'error', 'You cannot start a vote on your own seat');
@@ -890,17 +932,18 @@ BEGIN
 
   -- Settle any vote that is due before deciding there is already one running.
   PERFORM public.mbg_leadership_resolve(id) FROM public.mbg_leadership_motions
-  WHERE region_type::TEXT = p_region_type AND region_id = p_region_id AND status = 'open';
+  WHERE region_type::TEXT = p_region_type AND region_id = p_region_id
+    AND accused_user_id = v_holder.user_id AND status = 'open';
   IF EXISTS (SELECT 1 FROM public.mbg_leadership_motions
-             WHERE region_type::TEXT = p_region_type AND region_id = p_region_id AND status = 'open') THEN
-    RETURN jsonb_build_object('success', false, 'error', 'A vote is already open on this seat - join it instead');
+             WHERE region_type::TEXT = p_region_type AND region_id = p_region_id
+               AND accused_user_id = v_holder.user_id AND status = 'open') THEN
+    RETURN jsonb_build_object('success', false, 'error', 'A vote is already open on this chairperson - join it instead');
   END IF;
 
-  v_unlock := (SELECT max(closed_at) + make_interval(days => (v_rules ->> 'cooldown_days')::INTEGER)
-               FROM public.mbg_leadership_motions
-               WHERE region_type::TEXT = p_region_type AND region_id = p_region_id AND status IN ('passed', 'failed'));
+  v_unlock := public.mbg_chair_last_vote_at(p_region_type, p_region_id, v_holder.user_id)
+              + make_interval(days => (v_rules ->> 'cooldown_days')::INTEGER);
   IF v_unlock IS NOT NULL AND v_unlock > NOW() THEN
-    RETURN jsonb_build_object('success', false, 'error', 'This seat just had a vote. A new one can start after ' || to_char(v_unlock, 'DD Mon YYYY'));
+    RETURN jsonb_build_object('success', false, 'error', 'This chairperson just had a vote. A new one can start after ' || to_char(v_unlock, 'DD Mon YYYY'));
   END IF;
 
   IF p_candidate_user_id IS NULL OR NOT public.mbg_leadership_eligible_successor(p_region_type, p_region_id, v_holder.user_id, p_candidate_user_id, NOW()) THEN
@@ -936,7 +979,7 @@ BEGIN
   PERFORM public.mbg_leadership_resolve(v_id);
   RETURN jsonb_build_object('success', true, 'motion_id', v_id);
 EXCEPTION WHEN unique_violation THEN
-  RETURN jsonb_build_object('success', false, 'error', 'A vote is already open on this seat - join it instead');
+  RETURN jsonb_build_object('success', false, 'error', 'A vote is already open on this chairperson - join it instead');
 END;
 $$;
 
@@ -1063,7 +1106,8 @@ REVOKE ALL ON FUNCTION public.mbg_region_name(TEXT, UUID) FROM PUBLIC, anon, aut
 REVOKE ALL ON FUNCTION public.mbg_person_name(UUID) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mbg_region_scope(TEXT, UUID) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mbg_region_ancestors(TEXT, UUID) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.mbg_seat_holder(TEXT, UUID) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.mbg_chair_row(TEXT, UUID, UUID) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.mbg_chair_last_vote_at(TEXT, UUID, UUID) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mbg_leadership_electorate(TEXT, UUID, UUID, UUID, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mbg_leadership_eligible_successor(TEXT, UUID, UUID, UUID, TIMESTAMPTZ) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mbg_leadership_ranking(UUID) FROM PUBLIC, anon, authenticated;
@@ -1072,18 +1116,18 @@ REVOKE ALL ON FUNCTION public.mbg_leadership_close(UUID, BOOLEAN, TEXT) FROM PUB
 REVOKE ALL ON FUNCTION public.mbg_leadership_resolve(UUID) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.mbg_leadership_motion_summary(UUID, UUID) FROM PUBLIC, anon, authenticated;
 
-REVOKE ALL ON FUNCTION public.mbg_get_leadership_state(TEXT, UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.mbg_get_leadership_state(TEXT, UUID, UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.mbg_my_leadership_seats() FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.mbg_list_leadership_nominees(TEXT, UUID, TEXT) FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.mbg_open_leadership_motion(TEXT, UUID, TEXT, UUID) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.mbg_list_leadership_nominees(TEXT, UUID, UUID, TEXT) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.mbg_open_leadership_motion(TEXT, UUID, UUID, TEXT, UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.mbg_nominate_leadership_candidate(UUID, UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.mbg_cast_leadership_ballot(UUID, BOOLEAN, UUID) FROM PUBLIC, anon;
 REVOKE ALL ON FUNCTION public.mbg_reply_leadership_motion(UUID, TEXT) FROM PUBLIC, anon;
 
-GRANT EXECUTE ON FUNCTION public.mbg_get_leadership_state(TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.mbg_get_leadership_state(TEXT, UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mbg_my_leadership_seats() TO authenticated;
-GRANT EXECUTE ON FUNCTION public.mbg_list_leadership_nominees(TEXT, UUID, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.mbg_open_leadership_motion(TEXT, UUID, TEXT, UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.mbg_list_leadership_nominees(TEXT, UUID, UUID, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.mbg_open_leadership_motion(TEXT, UUID, UUID, TEXT, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mbg_nominate_leadership_candidate(UUID, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mbg_cast_leadership_ballot(UUID, BOOLEAN, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.mbg_reply_leadership_motion(UUID, TEXT) TO authenticated;
