@@ -6,6 +6,8 @@
  *   GET  /api/v1/ping                 health + whether the database layer is installed (no key)
  *   GET  /api/v1/catalog              the endpoint registry as JSON (no key)
  *   GET  /api/v1/openapi.json         the same registry as an OpenAPI 3 file (no key)
+ *   GET  /api/v1/developers/config    what the developer page needs for "Sign in with Google" (public sign-in details,
+ *                                     never a secret) and the country the caller connects from (no key)
  *   POST /api/v1/developers/register  get a ticket + an instant sandbox key (no account)
  *   POST /api/v1/developers/status    what the platform team decided about your app
  *   POST /api/v1/developers/key       issue / rotate a sandbox or live key (shown once)
@@ -269,6 +271,19 @@ export function createEraHandler({ env = process.env, fetchImpl = globalThis.fet
     const fail = (e) => { const m = mapPgError(e); return send(m.status, errorBody(m.status, m.code, m.message), {}, opts); };
     const forwardedHost = req.headers['x-forwarded-host'] || req.headers.host || 'localhost';
     const origin = `${req.headers['x-forwarded-proto'] || 'https'}://${forwardedHost}`;
+
+    // -------- developer accounts: the page signs in with the platform's own Google sign-in (Supabase Auth), straight from the
+    // browser. It only needs the PUBLIC sign-in details, which are the same ones every ICAN app already ships. The
+    // service-role key is never sent, whatever is configured. The country is a hint from the edge network (Vercel sets it).
+    if ((req.method === 'GET' || isHead) && path === '/developers/config') {
+      const url = (env.SUPABASE_URL || env.VITE_SUPABASE_URL || '').replace(/\/+$/, '');
+      const anon = env.SUPABASE_ANON_KEY || env.VITE_SUPABASE_ANON_KEY || '';
+      const geo = String(req.headers['x-vercel-ip-country'] || '').trim().toUpperCase();
+      return send(200, {
+        auth: url && anon ? { provider: 'google', url, anon_key: anon } : null,
+        detected_country: /^[A-Z]{2}$/.test(geo) && geo !== 'XX' ? geo : null,
+      }, {}, opts);
+    }
 
     // -------- no key needed
     if ((req.method === 'GET' || isHead) && (path === '' || path === '/ping' || path === '/catalog' || path === '/openapi.json')) {

@@ -22,7 +22,7 @@
   :root{ --bg:#f5f7ff; --bg2:#eaefff; --card:#ffffff; --card2:#f1f4ff; --line:#d5ddf5; --txt:#0c1330; --sub:#3d4a73; --mute:#68759c;
     --brand:#0369a1; --ok:#047857; --warn:#b45309; --bad:#b91c1c; --business:#be123c; --icanera:#6d28d9; --bodagoera:#b45309; --supermarketera:#047857; --farmagentera:#4d7c0f; --platform:#0369a1; }
 }
-*{box-sizing:border-box} html{scroll-behavior:smooth;scroll-padding-top:72px}
+*{box-sizing:border-box} [hidden]{display:none!important} html{scroll-behavior:smooth;scroll-padding-top:72px}
 body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.55 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
 a{color:var(--brand)} code,pre,kbd{font-family:var(--mono)}
 .wrap{max-width:1160px;margin:0 auto;padding:0 20px}
@@ -48,6 +48,9 @@ nav.links a:hover{color:var(--txt);background:var(--card)}
 .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
 @keyframes ping{70%{box-shadow:0 0 0 9px #34d39900}100%{box-shadow:0 0 0 0 #34d39900}}
 @media(max-width:820px){nav.links{display:none}}
+#acctChip,.logo,nav.links a{white-space:nowrap;flex:none}
+@media(max-width:1060px){#statusText{display:none}}
+@media(max-width:560px){header.top .wrap{gap:10px}#statusText{display:none}#acctChip{padding:5px 10px;white-space:nowrap}}
 
 /* buttons */
 .btn{appearance:none;border:1px solid var(--line);background:var(--card);color:var(--txt);font:600 14px var(--sans);padding:10px 16px;border-radius:12px;cursor:pointer;display:inline-flex;align-items:center;gap:8px;text-decoration:none;transition:transform .12s,border-color .12s,background .12s}
@@ -207,6 +210,19 @@ footer .apps2{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
 .two>*,.form>*,.three>*,.caps>*,.flow>*,.recipes>*,.steps>*{min-width:0}
 .three pre.code{overflow-x:auto}
 @media(max-width:560px){.apps{grid-template-columns:1fr}}
+/* developer account */
+.acct{margin-bottom:18px;display:grid;gap:16px}
+.gbtn{background:#fff;color:#1f1f1f;border-color:#dadce0;font-weight:600} .gbtn:hover{border-color:#4285f4}
+.perks{margin:0;padding:0;list-style:none;display:grid;gap:8px;color:var(--sub);font-size:14px}
+.perks li::before{content:"✓ ";color:var(--ok);font-weight:800} .perks b{color:var(--txt)}
+.who{display:flex;align-items:center;gap:12px} .av{width:40px;height:40px;border-radius:50%;object-fit:cover;background:var(--card2);border:1px solid var(--line);display:inline-grid;place-items:center;font-weight:800;flex:none}
+.cwrap{position:relative;max-width:420px} .cbx{list-style:none;margin:4px 0 0;padding:4px;position:absolute;z-index:30;left:0;right:0;background:var(--card2);border:1px solid var(--line);border-radius:12px;max-height:280px;overflow:auto;box-shadow:0 18px 40px -12px #000a}
+.cbx li{padding:8px 10px;border-radius:8px;cursor:pointer;display:flex;gap:10px;justify-content:space-between;align-items:baseline;font-size:14px} .cbx li .mute{font-size:11.5px;color:var(--mute);white-space:nowrap}
+.cbx li[aria-selected=true]{background:var(--line)} .cbx li.none{cursor:default;color:var(--mute)}
+.appcard{border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--bg2);display:grid;gap:10px;min-width:0}
+.keyout .reveal{margin-top:4px}
+@media(max-width:560px){#account .fields{grid-template-columns:1fr!important}}
+
 textarea.t.mono{font:13px var(--mono);min-height:64px;resize:vertical}
 </style>
 </head>
@@ -220,6 +236,7 @@ textarea.t.mono{font:13px var(--mono);min-height:64px;resize:vertical}
       <a href="#playground">Playground</a><a href="#build">Build</a><a href="#business">Business</a><a href="#keys">Get a key</a><a href="#recipes">Recipes</a><a href="#reference">Reference</a><a href="#trust">Trust</a>
     </nav>
     <div class="status" id="status" role="status" aria-live="polite"><span class="dot" id="dot"></span><span id="statusText">checking…</span></div>
+    <a class="btn small" id="acctChip" href="#account" hidden>Sign in</a>
   </div>
 </header>
 
@@ -365,11 +382,12 @@ textarea.t.mono{font:13px var(--mono);min-height:64px;resize:vertical}
     <h2>From idea to first call in ten seconds.</h2>
     <p class="lead">Tell us what you are building. You get a sandbox key instantly. When you are ready, the platform team approves live access to exactly the apps you need.</p>
     <div class="steps">
-      <div class="card step" id="step1"><b class="num">1</b><h3>Register your app</h3><p>No account needed. Sandbox key appears immediately.</p></div>
+      <div class="card step" id="step1"><b class="num">1</b><h3>Register your app</h3><p>Sign in with Google, or skip the account. Your sandbox key appears immediately.</p></div>
       <div class="card step" id="step2"><b class="num">2</b><h3>Get approved for live</h3><p>A person reviews it. Check back here with your ticket.</p></div>
       <div class="card step" id="step3"><b class="num">3</b><h3>Reveal your live key</h3><p>Shown once. Rotate it any time.</p></div>
     </div>
-    <div class="two">
+    <div class="card acct" id="account" hidden aria-live="polite"></div>
+    <div class="two" id="legacy">
       <form class="card form" id="regForm" autocomplete="off">
         <h3>Register an app</h3>
         <label class="f"><span class="n">App name <em>required</em></span><input class="t" name="app_name" required minlength="2" maxlength="80" placeholder="Farm Dash"></label>
@@ -865,6 +883,294 @@ async function issue(mode, out) {
   await refreshStatus();
 }
 
+/* ------------------------------------------------------------------ developer account (Sign in with Google) */
+// The same Google sign-in the apps already use (Supabase Auth). The page talks to it straight from the browser with
+// the PUBLIC sign-in details from /developers/config; every account action is a database function that checks who is
+// asking (auth.uid()), so this UI is a convenience, not the security.
+const acct = { cfg: null, detected: null, countries: [], byCode: {}, state: 'out', data: null, msg: null, reveal: {}, busy: null, refreshing: null };
+const SESSION_KEY = 'era.dev.session';
+const readJson = (k) => { try { return JSON.parse(store.get(k) || 'null'); } catch { return null; } };
+const ownSession = () => { const s = readJson(SESSION_KEY); return s && s.access_token ? s : null; };
+const KNOWN_PG = /^(22023|ERA29|42501|P0002)$/;
+
+// If the person is already signed in to ICAN on this very site, use that session (single sign-on). It is only ever
+// READ, and never refreshed from here: refreshing would rotate the token and sign them out of ICAN.
+function borrowedSession() {
+  if (!acct.cfg) return null;
+  try {
+    const ref = new URL(acct.cfg.auth.url).hostname.split('.')[0];
+    const s = readJson(`sb-${ref}-auth-token`);
+    if (s && s.access_token && s.expires_at && s.expires_at * 1000 > Date.now() + 30000) return s;
+  } catch { /* none */ }
+  return null;
+}
+function refreshOwn(s) {
+  if (!s.refresh_token) { store.del(SESSION_KEY); return Promise.resolve(null); }
+  if (acct.refreshing) return acct.refreshing;
+  acct.refreshing = (async () => {
+    try {
+      const r = await fetch(`${acct.cfg.auth.url}/auth/v1/token?grant_type=refresh_token`, { method: 'POST', headers: { apikey: acct.cfg.auth.anon_key, 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: s.refresh_token }) });
+      const j = r.ok ? await r.json() : null;
+      if (!j || !j.access_token) { store.del(SESSION_KEY); return null; }
+      const next = { access_token: j.access_token, refresh_token: j.refresh_token || s.refresh_token, expires_at: j.expires_at || Math.floor(Date.now() / 1000) + (j.expires_in || 3600) };
+      store.set(SESSION_KEY, JSON.stringify(next)); return next;
+    } catch { return null; } finally { acct.refreshing = null; }
+  })();
+  return acct.refreshing;
+}
+async function accessToken() {
+  const own = ownSession();
+  if (own) {
+    if (own.expires_at * 1000 > Date.now() + 30000) return own.access_token;
+    const n = await refreshOwn(own); if (n) return n.access_token;
+  }
+  const b = borrowedSession(); return b ? b.access_token : null;
+}
+async function arpc(fn, args = {}) {
+  const run = (tok) => fetch(`${acct.cfg.auth.url}/rest/v1/rpc/${fn}`, { method: 'POST', cache: 'no-store', headers: { apikey: acct.cfg.auth.anon_key, Authorization: 'Bearer ' + tok, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+  const tok = await accessToken();
+  if (!tok) throw Object.assign(new Error('Sign in first.'), { signedOut: true });
+  let r = await run(tok);
+  if (r.status === 401 && ownSession()) { const n = await refreshOwn(ownSession()); if (n) r = await run(n.access_token); }
+  const text = await r.text(); let j = null; try { j = text ? JSON.parse(text) : null; } catch { /* not json */ }
+  if (!r.ok) {
+    const e = new Error(j && j.message && (KNOWN_PG.test(j.code || '') || r.status < 500) ? j.message : 'Something went wrong. Please try again.');
+    e.code = j && j.code; e.status = r.status;
+    e.notInstalled = r.status === 404 || /PGRST202|42883|Could not find the function/i.test(`${e.code} ${j && j.message}`);
+    e.signedOut = r.status === 401; throw e;
+  }
+  return j;
+}
+
+function signInWithGoogle() {
+  if (!location.protocol.startsWith('http')) { acct.msg = { bad: true, text: 'Open this page from the website to sign in.' }; renderAccount(); return; }
+  // a one-time value that must come back with the tokens, so a crafted link cannot sign someone in as a stranger
+  const nonce = [...crypto.getRandomValues(new Uint8Array(12))].map((b) => b.toString(16).padStart(2, '0')).join('');
+  store.set('era.dev.nonce', nonce, true);
+  const back = `${location.origin}/developers/?s=${nonce}`;
+  location.href = `${acct.cfg.auth.url}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(back)}`;
+}
+// Called first thing on load: picks the tokens out of the address bar (and removes them from it) when we are coming back from Google.
+function takeSignInReturn() {
+  const hp = new URLSearchParams(location.hash.replace(/^#/, ''));
+  if (!hp.get('access_token') && !hp.get('error')) return null;
+  const want = store.get('era.dev.nonce', true), got = qs.get('s');
+  history.replaceState(null, '', location.pathname + '#account');
+  store.del('era.dev.nonce', true);
+  if (hp.get('error')) return { error: hp.get('error_description') || hp.get('error') };
+  if (!want || want !== got) return { error: 'That sign-in did not start on this page, so it was ignored. Press “Continue with Google” again.' };
+  store.set(SESSION_KEY, JSON.stringify({ access_token: hp.get('access_token'), refresh_token: hp.get('refresh_token'),
+    expires_at: Number(hp.get('expires_at')) || Math.floor(Date.now() / 1000) + (Number(hp.get('expires_in')) || 3600) }));
+  return { ok: true };
+}
+function signOut() { store.del(SESSION_KEY); acct.data = null; acct.reveal = {}; acct.msg = null; toast('Signed out'); loadAccount(); }
+
+/* ---- country: the app's own country lookup (constants/countries.js + countryService.js), flattened to countries.json */
+async function loadCountries() {
+  try { const r = await fetch('./countries.json'); if (r.ok) { acct.countries = (await r.json()).countries || []; acct.byCode = Object.fromEntries(acct.countries.map((c) => [c.code, c])); } } catch { /* offline: the picker falls back to a 2-letter code */ }
+}
+const countryName = (code) => { const c = acct.byCode[code]; return c ? `${c.flag} ${c.name}` : code || ''; };
+function searchCountries(q) {
+  q = q.trim().toLowerCase(); if (!q) return acct.countries.slice(0, 8);
+  const score = (c) => { const n = c.name.toLowerCase(); return n.startsWith(q) ? 0 : c.code.toLowerCase() === q ? 0 : (c.currency || '').toLowerCase() === q ? 1 : n.split(/[\s(]/).some((w) => w.startsWith(q)) ? 2 : n.includes(q) ? 3 : (c.region || '').toLowerCase().includes(q) ? 4 : 9; };
+  return acct.countries.map((c) => [score(c), c]).filter(([s]) => s < 9).sort((a, b) => a[0] - b[0] || a[1].name.localeCompare(b[1].name)).slice(0, 8).map(([, c]) => c);
+}
+function countryPicker(current, onPick) {
+  const id = 'cb' + Math.random().toString(36).slice(2, 7);
+  const input = h('input', { class: 't', type: 'text', role: 'combobox', 'aria-expanded': 'false', 'aria-controls': id, 'aria-autocomplete': 'list', autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Your country', placeholder: acct.countries.length ? 'Search by country, code or currency…' : 'Two-letter country code, e.g. UG', maxlength: 60 });
+  const list = h('ul', { class: 'cbx', id, role: 'listbox', hidden: true });
+  const wrap = h('div', { class: 'cwrap' }, input, list);
+  let items = [], at = -1;
+  const label = () => { input.value = current ? countryName(current) : ''; };
+  const close = () => { list.hidden = true; input.setAttribute('aria-expanded', 'false'); at = -1; };
+  const mark = () => $$('li', list).forEach((li, i) => li.setAttribute('aria-selected', String(i === at)));
+  const pick = (code) => { current = code; label(); close(); onPick(code); };
+  const open = () => {
+    if (!acct.countries.length) return;
+    items = searchCountries(/^[\p{Extended_Pictographic}\p{Regional_Indicator}]/u.test(input.value) ? '' : input.value);
+    list.textContent = '';
+    items.forEach((c, i) => list.append(h('li', { role: 'option', id: id + '-' + i, onmousedown: (e) => { e.preventDefault(); pick(c.code); } },
+      h('span', {}, c.flag + ' ' + c.name), h('span', { class: 'mute' }, [c.currency, c.region].filter(Boolean).join(' · ')))));
+    if (!items.length) list.append(h('li', { class: 'none' }, 'No country matches that.'));
+    list.hidden = false; input.setAttribute('aria-expanded', 'true'); at = items.length ? 0 : -1; mark();
+  };
+  input.addEventListener('focus', () => { input.select(); open(); });
+  input.addEventListener('input', open);
+  input.addEventListener('blur', () => { setTimeout(() => { close(); label(); }, 120); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); if (list.hidden) open(); else { at = Math.min(items.length - 1, at + 1); mark(); } }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); at = Math.max(0, at - 1); mark(); }
+    else if (e.key === 'Escape') { close(); label(); }
+    else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!acct.countries.length) { const v = input.value.trim().toUpperCase(); if (/^[A-Z]{2}$/.test(v)) pick(v); else toast('Use a two-letter code such as UG'); }
+      else if (!list.hidden && items[at]) pick(items[at].code);
+    }
+  });
+  label();
+  return wrap;
+}
+const SRC_NOTE = { account: 'Taken from your ICAN account.', detected: 'Guessed from where you are connecting. Change it if that is wrong.', chosen: 'Saved to your account.' };
+
+/* ---- the account panel */
+const googleG = () => { const NS = 'http://www.w3.org/2000/svg'; const s = document.createElementNS(NS, 'svg'); s.setAttribute('viewBox', '0 0 48 48'); s.setAttribute('width', '18'); s.setAttribute('height', '18'); s.setAttribute('aria-hidden', 'true');
+  [['#EA4335', 'M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.2C12.4 13.6 17.7 9.5 24 9.5z'], ['#4285F4', 'M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.8c4.3-4 6.9-9.9 6.9-17.2z'], ['#FBBC05', 'M10.5 28.6c-.5-1.4-.8-2.9-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.2z'], ['#34A853', 'M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.4-5.8c-2.1 1.4-4.8 2.3-8.5 2.3-6.3 0-11.6-4.1-13.5-9.9l-7.9 6.2C6.5 42.6 14.6 48 24 48z']]
+    .forEach(([f, d]) => { const p = document.createElementNS(NS, 'path'); p.setAttribute('fill', f); p.setAttribute('d', d); s.append(p); }); return s; };
+function updateChip() {
+  const chip = $('#acctChip'); if (!chip) return; chip.hidden = !acct.cfg;
+  const first = acct.data && ((acct.data.profile.full_name || acct.data.profile.email || '').split(/[ @]/)[0]);
+  chip.textContent = acct.state === 'in' && first ? '👤 ' + first : 'Sign in';
+}
+// append() turns a null into the text "null", so every panel is filled through this
+const put = (el, ...nodes) => el.append(...nodes.flat().filter((n) => n != null && n !== false));
+function renderAccount() {
+  const card = $('#account'); if (!card || !acct.cfg) return;
+  card.textContent = ''; updateChip();
+  $('#legacy').hidden = acct.state === 'in';
+  const msg = acct.msg ? h('p', { class: 'hint', role: 'alert', style: 'margin:0;color:' + (acct.msg.bad ? 'var(--bad)' : 'var(--ok)') }, acct.msg.text) : null;
+  if (acct.state === 'loading') { put(card, h('p', { class: 'hint', style: 'margin:0' }, 'Checking your sign-in…')); return; }
+  if (acct.state === 'missing') {
+    put(card, h('h3', {}, 'Developer accounts are not switched on yet'), h('p', { class: 'hint', style: 'margin:0' }, 'The platform team needs to run one more database file (', h('code', {}, '20261007100000_era_api_developer_accounts.sql'), '). Until then, use the no-account form below: it works the same way.'));
+    return;
+  }
+  if (acct.state === 'out') {
+    put(card, h('div', { class: 'row' }, h('div', { style: 'flex:1;min-width:240px' }, h('h3', {}, 'Developer account'), h('p', { class: 'hint', style: 'margin:6px 0 0' }, 'Sign in with Google to keep your apps, keys and country in one place, on any device.')),
+      h('button', { class: 'btn gbtn', type: 'button', onclick: signInWithGoogle }, googleG(), 'Continue with Google')),
+      h('ul', { class: 'perks' }, h('li', {}, h('b', {}, 'Sandbox from the first second.'), ' A test key the moment you register your app. No approval, no card.'),
+        h('li', {}, h('b', {}, 'Your country, remembered.'), ' Picked from the same list the apps use, or taken from your ICAN account.'),
+        h('li', {}, h('b', {}, 'Live access later.'), ' A person reviews your app. You see the decision here and reveal your live key when it is approved.')),
+      msg, h('p', { class: 'hint', style: 'margin:0' }, 'Prefer not to sign in? You can still register below without an account.'));
+    return;
+  }
+  if (acct.state === 'error') {
+    put(card, h('h3', {}, 'We could not open your account'), msg, h('div', { class: 'row' }, h('button', { class: 'btn small', type: 'button', onclick: loadAccount }, 'Try again'), ownSession() ? h('button', { class: 'btn small', type: 'button', onclick: signOut }, 'Sign out') : null));
+    return;
+  }
+  // signed in
+  const d = acct.data, p = d.profile, st = d.settings || {};
+  const avatar = p.avatar_url && /^https:\/\//.test(p.avatar_url) ? h('img', { class: 'av', src: p.avatar_url, alt: '', referrerpolicy: 'no-referrer', width: 40, height: 40 }) : h('span', { class: 'av' }, (p.full_name || p.email || '?').slice(0, 1).toUpperCase());
+  const borrowed = !ownSession();
+  const countryBox = h('div', { class: 'cbox' });
+  const paintCountry = () => {
+    countryBox.textContent = '';
+    const c = acct.byCode[p.country_code];
+    countryBox.append(h('label', { class: 'f' }, h('span', { class: 'n' }, 'Your country ', h('em', {}, p.country_code ? '' : 'required to register an app')),
+      countryPicker(p.country_code, async (code) => {
+        try { const r = await arpc('era_api_dev_set_country', { p_country: code, p_source: 'chosen' }); p.country_code = r.country_code; p.country_source = r.country_source; toast('Country saved'); }
+        catch (e) { toast(e.message); }
+        paintCountry(); syncCreate();
+      })),
+      p.country_code ? h('p', { class: 'hint', style: 'margin:6px 0 0' }, [c && [c.currency, c.region].filter(Boolean).join(' · '), SRC_NOTE[p.country_source]].filter(Boolean).join('  ·  ')) : null);
+  };
+  paintCountry();
+  const create = createAppForm();
+  function syncCreate() { create.sync(); }
+
+  put(card, 
+    h('div', { class: 'row', style: 'justify-content:space-between' },
+      h('div', { class: 'who' }, avatar, h('div', {}, h('b', {}, p.full_name || 'Developer'), h('div', { class: 'hint' }, p.email + (p.provider === 'google' ? ' · Google' : '')))),
+      h('div', { class: 'row' }, h('span', { class: 'pill', style: 'color:var(--ok);border-color:var(--ok)' }, 'Signed in'), borrowed ? h('span', { class: 'hint' }, 'Using your ICAN sign-in') : h('button', { class: 'btn small', type: 'button', onclick: signOut }, 'Sign out'))),
+    msg,
+    st.enabled === false ? h('p', { class: 'hint', style: 'margin:0;color:var(--warn)' }, '⚠ The API is switched off right now, so calls will answer 503.') : null,
+    st.sandbox_enabled === false ? h('p', { class: 'hint', style: 'margin:0;color:var(--warn)' }, '⚠ Sandbox testing is paused by the platform team. Your keys will work again when it is back on.') : null,
+    countryBox,
+    h('div', {}, h('h3', { style: 'margin-bottom:10px' }, d.apps.length ? 'Your apps' : 'Create your first app'),
+      !d.apps.length ? h('p', { class: 'hint', style: 'margin:0 0 10px' }, 'Register an app to get a sandbox key straight away. Sandbox keys return fixture data, never touch real records, and allow ' + fmt(st.sandbox_per_minute) + ' calls a minute and ' + fmt(st.sandbox_per_day) + ' a day.') : null,
+      h('div', { style: 'display:grid;gap:12px' }, ...d.apps.map(appCard))),
+    create.el);
+  create.sync();
+}
+
+function appCard(a) {
+  const approved = a.status === 'approved', bad = a.status === 'rejected' || a.status === 'suspended';
+  const out = h('div', { class: 'keyout' }); if (acct.reveal[a.id]) out.append(acct.reveal[a.id]);
+  const issue = async (mode, btn) => {
+    btn.disabled = true;
+    try {
+      const r = await arpc('era_api_dev_issue_key', { p_client_id: a.id, p_mode: mode });
+      store.set('era.mykey', r.key, true); const my = $('#myKey'); if (my) my.value = r.key;
+      acct.reveal[a.id] = revealBox(mode === 'live' ? 'Your LIVE key' : 'Your new sandbox key', r.key, `era-${a.app_name.replace(/\W+/g, '-').toLowerCase()}-${mode}.env`, 'Copy it now. The previous ' + mode + ' key stopped working.');
+      await loadAccount();
+    } catch (e) { btn.disabled = false; acct.reveal[a.id] = null; out.textContent = ''; out.append(h('p', { style: 'color:var(--bad);margin:8px 0 0', role: 'alert' }, e.message)); }
+  };
+  const sb = h('button', { class: 'btn small', type: 'button', disabled: bad, onclick: (e) => issue('sandbox', e.currentTarget) }, '↻ New sandbox key');
+  const live = h('button', { class: 'btn small primary', type: 'button', disabled: !a.can_issue_live, title: a.can_issue_live ? '' : 'Available once approved', onclick: (e) => issue('live', e.currentTarget) }, a.live_key_claimed ? '↻ Rotate live key' : '🔑 Reveal live key');
+  const sbKey = (a.keys || []).find((k) => k.mode === 'sandbox' && !k.revoked);
+  return h('div', { class: 'appcard' },
+    h('div', { class: 'row', style: 'justify-content:space-between' }, h('b', { style: 'font-size:16px' }, a.app_name),
+      h('span', { class: 'row' }, a.country_code ? h('span', { class: 'pill', title: 'Registered from' }, countryName(a.country_code)) : null,
+        h('span', { class: 'pill', style: approved ? 'color:var(--ok);border-color:var(--ok)' : bad ? 'color:var(--bad);border-color:var(--bad)' : 'color:var(--warn);border-color:var(--warn)' }, a.status))),
+    h('div', { class: 'row' }, ...(approved ? a.granted_apps : a.requested_apps).map((x) => h('span', { class: 'pill' }, h('span', { class: 'appdot', style: 'background:' + (APPS[x] ? APPS[x].color : '#888') }), APPS[x] ? APPS[x].name : x))),
+    h('p', { class: 'hint', style: 'margin:0' }, approved ? `Approved for live access. ${fmt(a.limits.live_per_minute)}/min, ${fmt(a.limits.live_per_day)}/day.` : a.status === 'pending' ? 'Sandbox works now. Live access is waiting for a person to review your app.' : a.status === 'rejected' ? 'Not approved' + (a.review_note ? ': ' + a.review_note : '.') : 'Paused by the platform team.'),
+    h('div', { class: 'row' }, sb,
+      sbKey ? h('code', { class: 'pill' }, sbKey.prefix + '…') : null,
+      live, h('span', { class: 'hint' }, fmt(a.calls_24h) + ' calls in the last 24 hours')),
+    out,
+    (a.keys || []).length ? h('details', {}, h('summary', { class: 'hint', style: 'cursor:pointer' }, `${a.keys.length} key${a.keys.length === 1 ? '' : 's'}`),
+      h('div', { class: 'tablewrap', style: 'margin-top:8px' }, h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Key', 'Mode', 'Last used', ''].map((x) => h('th', {}, x)))),
+        h('tbody', {}, ...a.keys.map((k) => h('tr', {}, h('td', {}, h('code', {}, k.prefix + '…')), h('td', {}, k.mode), h('td', {}, k.last_used_at ? new Date(k.last_used_at).toLocaleString() : 'never'), h('td', {}, k.revoked ? h('span', { class: 'pill' }, 'revoked') : h('span', { class: 'pill', style: 'color:var(--ok)' }, 'active')))))))) : null);
+}
+
+function createAppForm() {
+  const f = h('form', { class: 'appcard', autocomplete: 'off' });
+  const name = h('input', { class: 't', name: 'app_name', required: true, minlength: 2, maxlength: 80, placeholder: 'Farm Dash' });
+  const site = h('input', { class: 't', type: 'url', name: 'website', placeholder: 'https://farmdash.dev' });
+  const desc = h('textarea', { class: 't', name: 'description', rows: 2, maxlength: 600, placeholder: 'A dashboard that shows farmers today\'s best produce prices in their district.' });
+  const picks = FOUR.map((id) => h('label', {}, h('input', { type: 'checkbox', name: 'apps', value: id, checked: true }), h('span', { class: 'appdot', style: 'background:' + APPS[id].color }), APPS[id].name));
+  const msg = h('span', { class: 'hint', role: 'alert' });
+  const btn = h('button', { class: 'btn primary', type: 'submit' }, 'Create app & sandbox key');
+  f.append(h('h3', {}, 'Register ' + (acct.data && acct.data.apps.length ? 'another app' : 'an app')),
+    h('div', { class: 'fields', style: 'grid-template-columns:1fr 1fr;display:grid;gap:12px' }, h('label', { class: 'f' }, h('span', { class: 'n' }, 'App name ', h('em', {}, 'required')), name), h('label', { class: 'f' }, h('span', { class: 'n' }, 'Website'), site)),
+    h('label', { class: 'f' }, h('span', { class: 'n' }, 'What are you building?'), desc),
+    h('div', {}, h('div', { class: 'n', style: 'margin-bottom:6px' }, 'Apps you want ', h('em', {}, 'pick at least one')), h('div', { class: 'apps' }, ...picks)),
+    h('div', { class: 'row' }, btn, msg));
+  const sync = () => {
+    const full = acct.data && acct.data.apps.length >= (acct.data.max_apps || 5), noCountry = !(acct.data && acct.data.profile.country_code);
+    btn.disabled = !!(full || noCountry);
+    msg.style.color = 'var(--mute)'; msg.textContent = full ? `You already have ${acct.data.max_apps} apps.` : noCountry ? 'Choose your country above first.' : '';
+  };
+  f.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const apps = picks.map((l) => l.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
+    if (!apps.length) { msg.style.color = 'var(--warn)'; msg.textContent = 'Pick at least one app.'; return; }
+    btn.disabled = true; btn.textContent = 'Creating…'; msg.textContent = '';
+    try {
+      const r = await arpc('era_api_dev_create_app', { p_app_name: name.value, p_website: site.value, p_description: desc.value, p_apps: apps, p_country: null });
+      const key = r.sandbox_key.key; store.set('era.mykey', key, true); const my = $('#myKey'); if (my) my.value = key;
+      acct.reveal[r.client_id] = h('div', {}, h('p', { style: 'margin:8px 0 6px' }, '🎉 ', h('b', {}, name.value.trim()), ' is registered. Your sandbox key works right now:'), revealBox('Your sandbox key', key, 'era-sandbox.env'));
+      stepState(1, 'done'); testKey(key);
+      await loadAccount();
+    } catch (ex) { btn.textContent = 'Create app & sandbox key'; sync(); msg.style.color = 'var(--bad)'; msg.textContent = ex.message; }
+  });
+  return { el: f, sync };
+}
+
+async function loadAccount() {
+  if (!(await accessToken())) { acct.state = 'out'; acct.data = null; renderAccount(); return; }
+  if (!acct.data) { acct.state = 'loading'; renderAccount(); }
+  try {
+    let d = await arpc('era_api_dev_account');
+    // no country on the account and none from ICAN? Offer where they seem to be connecting from, clearly marked as a guess.
+    if (!d.profile.country_code && acct.detected && acct.byCode[acct.detected]) {
+      try { await arpc('era_api_dev_set_country', { p_country: acct.detected, p_source: 'detected' }); d = await arpc('era_api_dev_account'); } catch { /* the picker still asks */ }
+    }
+    acct.data = d; acct.state = 'in'; acct.msg = null;
+  } catch (e) {
+    acct.data = null;
+    if (e.signedOut) acct.state = 'out'; else if (e.notInstalled) acct.state = 'missing'; else { acct.state = 'error'; acct.msg = { bad: true, text: e.message }; }
+  }
+  renderAccount();
+}
+async function setupAccount(returned) {
+  try { const r = await api('/developers/config'); acct.cfg = r.status === 200 && r.json && r.json.auth ? r.json : null; acct.detected = r.json && r.json.detected_country || null; } catch { /* page works without it */ }
+  if (!acct.cfg) return; // sign-in is not configured on this server: the no-account flow below is the whole page, exactly as before
+  $('#account').hidden = false;
+  await loadCountries();
+  if (returned && returned.error) acct.msg = { bad: true, text: returned.error };
+  await loadAccount();
+  if (returned) $('#account').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+}
+
 /* ------------------------------------------------------------------ recipes (sandbox) */
 const sbx = (p) => api(p, { key: PLAYGROUND_KEY });
 let icanUgx = null;
@@ -945,7 +1251,8 @@ function renderRef() {
 
 /* ------------------------------------------------------------------ boot */
 (async function boot() {
-  buildSky(); setupPlayground(); setupKeys(); setupRecipes();
+  const returned = takeSignInReturn(); // first: coming back from Google? take the tokens out of the address bar
+  buildSky(); setupPlayground(); setupKeys(); setupRecipes(); setupAccount(returned);
   await Promise.all([loadCatalog(), loadStatus()]);
   renderList(); renderRef(); renderCaps(); renderSnippet();
   const want = qs.get('try') ? state.endpoints.find((e) => e.id === qs.get('try') || e.path === qs.get('try')) : null;
