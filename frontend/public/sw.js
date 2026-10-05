@@ -27,6 +27,8 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET' || new URL(event.request.url).origin !== self.location.origin) return;
+  // The Era API and its developer page always go straight to the network: never cached, never answered with the app shell.
+  if (/^\/(api\/v1(\/|$)|developers(\/|$))/.test(new URL(event.request.url).pathname)) return;
 
   event.respondWith(
     fetch(event.request)
