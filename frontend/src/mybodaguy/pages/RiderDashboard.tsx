@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Bike, Settings, Map as MapIcon, ShoppingBag, User, Package, Bell, Car, Truck, Gift,
-  Home, LayoutGrid, X, Star, ArrowRight, type LucideIcon,
+  Home, LayoutGrid, X, Star, ArrowRight, Vote, type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
@@ -14,6 +14,7 @@ import RewardsPointsCard from '../components/RewardsPointsCard';
 import RiderEarningsCard, { buildWeekEarnings, type DayEarning } from '../components/RiderEarningsCard';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import RewardsHub from '../components/RewardsHub';
+import LeadershipVote, { useLeadershipAttention } from '../components/LeadershipVote';
 import SupermarketDeliveryPool from '../components/SupermarketDeliveryPool';
 import RiderRideRequests from '../components/RiderRideRequests';
 import RiderEscortRequests from '../components/RiderEscortRequests';
@@ -30,12 +31,12 @@ interface RiderDashboardProps {
   onGoToWallet?: () => void;
 }
 
-type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards';
+type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards' | 'vote';
 
 // emoji drives the desktop tab strip; icon drives the phone section bar and
-// menu sheet. 'requests' is deliberately not in NAV_TABS — it stays a card on
-// Overview rather than permanent tab space — but still needs a label/icon for
-// the phone section bar while it's the active view.
+// menu sheet. 'requests' and 'vote' are deliberately not in NAV_TABS — they
+// stay cards on Overview rather than permanent tab space — but still need a
+// label/icon for the phone section bar while they're the active view.
 const TAB_META: Record<TabType, { label: string; emoji: string; icon: LucideIcon }> = {
   overview:     { label: 'Overview',   emoji: '🏠', icon: Home },
   requests:     { label: 'Requests',   emoji: '🔔', icon: Bell },
@@ -44,6 +45,7 @@ const TAB_META: Record<TabType, { label: string; emoji: string; icon: LucideIcon
   partnerships: { label: 'Markets',    emoji: '🛒', icon: ShoppingBag },
   deliveries:   { label: 'Deliveries', emoji: '📦', icon: Package },
   rewards:      { label: 'Rewards',    emoji: '🎁', icon: Gift },
+  vote:         { label: 'Vote',       emoji: '🗳️', icon: Vote },
 };
 const NAV_TABS: TabType[] = ['overview', 'mode', 'locations', 'partnerships', 'deliveries', 'rewards'];
 
@@ -438,6 +440,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const voteAttention = useLeadershipAttention(user?.id);
   const { stats: riderStats, loading: riderStatsLoading, allVehicles, activeVehicleType, activeRiderId, reload: reloadRiderStats } = useRiderStats(user?.id);
   const { totalCount: totalJobsCount, insights: demandInsights, week, pendingCount, activeCount } =
     useRiderActivity(activeRiderId, riderStats?.operatorType === 'escort');
@@ -797,22 +800,49 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
             {/* ICAN Wallet Earnings */}
             <RiderICANEarnings user={user} />
 
+            {/* A vote that needs this rider's ballot — the thing most likely to
+                fail by apathy, so it gets its own banner above everything else. */}
+            {voteAttention.needsMyVote > 0 && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('vote')}
+                className="classic-card flex w-full items-center gap-3 !border-orange-300 p-4 text-left transition-all active:scale-[0.99]"
+              >
+                <span className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-2xl bg-orange-50 text-orange-600 ring-1 ring-inset ring-black/5">
+                  <Vote size={20} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-classic-display text-[16px] font-semibold leading-tight text-slate-800">
+                    {voteAttention.needsMyVote === 1 ? 'A leadership vote needs your ballot' : `${voteAttention.needsMyVote} leadership votes need your ballot`}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500">More than half of all riders decide. Your vote is secret.</span>
+                </span>
+                <ArrowRight size={18} className="flex-shrink-0 text-[#c4a052]" />
+              </button>
+            )}
+
             {/* Quick actions */}
             <div className="space-y-3">
               <SectionHeading>Quick actions</SectionHeading>
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
                 {([
                   { label: 'Work Mode',  desc: 'VIP, Normal, Discount or Return', icon: Settings,    tile: 'bg-violet-50 text-violet-600',   tab: 'mode' },
                   { label: 'Areas',      desc: 'Mark places you know well',       icon: MapIcon,     tile: 'bg-sky-50 text-sky-600',         tab: 'locations' },
                   { label: 'Markets',    desc: 'Work for businesses',             icon: ShoppingBag, tile: 'bg-orange-50 text-orange-600',   tab: 'partnerships' },
                   { label: 'Deliveries', desc: 'Supermarket delivery jobs',       icon: Package,     tile: 'bg-emerald-50 text-emerald-600', tab: 'deliveries' },
+                  { label: 'Vote',       desc: 'Choose your chairpersons',        icon: Vote,        tile: 'bg-rose-50 text-rose-600',       tab: 'vote' },
                 ] as { label: string; desc: string; icon: LucideIcon; tile: string; tab: TabType }[]).map(c => (
                   <button
                     key={c.tab}
                     type="button"
                     onClick={() => setActiveTab(c.tab)}
-                    className="classic-card flex min-h-[128px] flex-col justify-between gap-3 p-4 text-left transition-all hover:border-orange-300 active:scale-[0.98]"
+                    className={`classic-card relative flex min-h-[128px] flex-col justify-between gap-3 p-4 text-left transition-all hover:border-orange-300 active:scale-[0.98] ${c.tab === 'vote' ? 'col-span-2 lg:col-span-1' : ''}`}
                   >
+                    {c.tab === 'vote' && voteAttention.needsMyVote > 0 && (
+                      <span className="absolute right-3 top-3 grid h-6 min-w-[24px] place-items-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                        {voteAttention.needsMyVote}
+                      </span>
+                    )}
                     <span className={`grid h-11 w-11 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${c.tile}`}>
                       <c.icon size={20} />
                     </span>
@@ -872,6 +902,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
 
         {activeTab === 'rewards' && (
           <RewardsHub user={user} role="rider" onGoToWallet={onGoToWallet} />
+        )}
+
+        {activeTab === 'vote' && (
+          <LeadershipVote userId={user.id} />
         )}
       </div>
 

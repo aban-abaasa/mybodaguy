@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid } from 'lucide-react';
+import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid, Vote } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { chairpersonService, SubordinateChairperson, CommitteeMember, CommissionRecord } from '../services/chairpersonService';
 import { riderService, Rider } from '../services/riderService';
@@ -9,6 +9,7 @@ import { userService } from '../services/userService';
 import { avatarService } from '../services/avatarService';
 import ProfileModal from '../components/ProfileModal';
 import IcanCoinCard from '../components/IcanCoinCard';
+import LeadershipVote, { useLeadershipAttention } from '../components/LeadershipVote';
 import { ThemeMenuItem } from '../../components/ThemeToggle';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { toast } from 'sonner';
@@ -21,7 +22,7 @@ interface ChairpersonDashboardProps {
   onGoToWallet?: () => void;
 }
 
-type TabType = 'overview' | 'subordinates' | 'riders' | 'commission';
+type TabType = 'overview' | 'subordinates' | 'riders' | 'vote' | 'commission';
 
 export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: ChairpersonDashboardProps) {
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
@@ -41,6 +42,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [openCommissionSection, setOpenCommissionSection] = useState<'summary' | 'activity' | 'rates' | null>('summary');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const voteAttention = useLeadershipAttention(user?.id);
   const [stats, setStats] = useState({
     totalSubordinates: 0,
     activeSubordinates: 0,
@@ -273,6 +275,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
     { id: 'overview', label: 'Overview', icon: TrendingUp },
     { id: 'subordinates', label: 'Chairpersons', icon: Users },
     ...(hasStageRole ? [{ id: 'riders' as TabType, label: 'Riders', icon: Bike }] : []),
+    { id: 'vote', label: 'Vote', icon: Vote },
     { id: 'commission', label: 'Commission', icon: DollarSign },
   ];
   const activeTabMeta = tabs.find(t => t.id === activeTab) ?? tabs[0];
@@ -450,6 +453,15 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                 {[
                   { label: 'Manage Chairpersons', desc: 'View and assign', icon: Users, tile: 'bg-sky-50 text-sky-600', tab: 'subordinates' as TabType, show: true },
                   { label: 'Manage Riders', desc: 'View and assign', icon: Bike, tile: 'bg-emerald-50 text-emerald-600', tab: 'riders' as TabType, show: hasStageRole },
+                  {
+                    label: 'Leadership Vote',
+                    desc: voteAttention.againstMe > 0
+                      ? 'A vote is open on your seat'
+                      : voteAttention.needsMyVote > 0
+                        ? `${voteAttention.needsMyVote} vote${voteAttention.needsMyVote === 1 ? '' : 's'} need your ballot`
+                        : 'Hold leaders to account, or reply to riders',
+                    icon: Vote, tile: 'bg-rose-50 text-rose-600', tab: 'vote' as TabType, show: true,
+                  },
                   { label: 'Commission', desc: 'Track earnings', icon: DollarSign, tile: 'bg-amber-50 text-amber-600', tab: 'commission' as TabType, show: true },
                 ].filter(a => a.show).map(a => (
                   <button
@@ -636,6 +648,10 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
               </div>
             )}
           </div>
+        )}
+
+        {activeTab === 'vote' && (
+          <LeadershipVote userId={user.id} />
         )}
 
         {activeTab === 'commission' && (
