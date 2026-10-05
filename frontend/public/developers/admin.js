@@ -128,7 +128,7 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
   const style = document.createElement('style'); style.textContent = CSS; root.append(style);
   const app = document.createElement('div'); app.className = 'wrap'; root.append(app);
   let dead = false;
-  const S = { gate: 'checking', ov: null, tab: 'requests', pending: [], clients: [], status: '', endpoints: [], calls: [], callsFor: null, msg: null, busy: null, openClient: null, chain: null, cat: null, q: '', pf: 'all', closed: new Set(), openRow: new Set() };
+  const S = { gate: 'checking', ov: null, tab: 'requests', pending: [], clients: [], status: '', endpoints: [], calls: [], callsFor: null, msg: null, busy: null, openClient: null, chain: null, cat: null, q: '', pf: 'all', closed: new Set(), openRow: new Set(), countries: {} };
 
   // ---------------------------------------------------------------- theme
   // A host that publishes the developer-panel variables (--dp-*) is followed as-is. Otherwise sample the panel's
@@ -209,6 +209,9 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
     h('div', {}, h('div', { style: 'font-weight:700;font-size:13px' }, label), hint ? h('div', { class: 'mute' }, hint) : null),
     h('button', { class: 'sw', type: 'button', role: 'switch', 'aria-checked': String(checked), 'aria-label': label, onclick: () => onChange(!checked) }, h('i')));
   const appChips = (list) => h('span', { class: 'row', style: 'gap:4px' }, ...(list || []).map((a) => h('span', { class: 'pill' }, h('i', { class: 'dot', style: `background:${(APPS[a] || {}).color || '#888'}` }), (APPS[a] || { name: a }).name)));
+  const flagOf = (cc) => (/^[A-Z]{2}$/.test(cc || '') ? String.fromCodePoint(...[...cc].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)) : '');
+  const where = (c) => (c.country_code ? h('span', { class: 'pill', title: 'Country the developer registered from' }, `${flagOf(c.country_code)} ${(S.countries[c.country_code] || {}).name || c.country_code}`) : null);
+  const acctPill = (c) => (c.kind === 'developer' ? h('span', { class: 'pill', title: c.has_account ? 'Signed in with a developer account' : 'Registered without an account (ticket)' }, c.has_account ? '👤 account' : '🎟 ticket') : null);
   const statusPill = (s) => h('span', { class: 'pill ' + (s === 'approved' ? 'ok' : s === 'pending' ? 'warn' : 'bad') }, s);
 
   // ---------------------------------------------------------------- gate screens
@@ -244,7 +247,7 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
       const note = h('input', { type: 'text', placeholder: 'Note for the developer (optional)', maxlength: 200, 'aria-label': 'Note' });
       const picked = () => apps.map((l) => l.querySelector('input')).filter((i) => i.checked).map((i) => i.value);
       return h('div', { class: 'item' },
-        h('div', { class: 'row between' }, h('div', {}, h('h4', {}, c.app_name), h('div', { class: 'sub' }, `${c.contact_name || 'Unnamed'} · ${c.contact_email} · ${when(c.created_at)}`)), statusPill(c.status)),
+        h('div', { class: 'row between' }, h('div', {}, h('h4', {}, c.app_name), h('div', { class: 'sub' }, `${c.contact_name || 'Unnamed'} · ${c.contact_email} · ${when(c.created_at)}`)), h('div', { class: 'row' }, where(c), acctPill(c), statusPill(c.status))),
         c.description ? h('p', { class: 'sub', style: 'white-space:pre-wrap' }, c.description) : null,
         c.website ? h('div', { class: 'sub' }, 'Website: ', h('a', { href: c.website, target: '_blank', rel: 'noopener noreferrer nofollow', style: 'color:var(--brand)' }, c.website)) : null,
         h('div', {}, h('div', { class: 'lab', style: 'margin-bottom:6px' }, 'Approve live access to'), h('div', { class: 'row' }, ...apps)),
@@ -339,7 +342,7 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
     return h('div', { class: 'wrap' }, h('div', { class: 'row between' }, sel, h('span', { class: 'mute' }, `${list.length} app(s)`)),
       !list.length ? h('div', { class: 'card empty' }, 'Nothing here yet.') : null,
       ...list.map((c) => h('div', { class: 'item' },
-        h('div', { class: 'row between' }, h('div', {}, h('h4', {}, c.app_name), h('div', { class: 'sub' }, `${c.contact_email} · registered ${when(c.created_at)}`)), h('div', { class: 'row' }, statusPill(c.status), h('span', { class: 'pill' }, `${fmt(c.calls_24h)} calls / 24h`))),
+        h('div', { class: 'row between' }, h('div', {}, h('h4', {}, c.app_name), h('div', { class: 'sub' }, `${c.contact_email} · registered ${when(c.created_at)}`)), h('div', { class: 'row' }, where(c), acctPill(c), statusPill(c.status), h('span', { class: 'pill' }, `${fmt(c.calls_24h)} calls / 24h`))),
         h('div', { class: 'row' }, c.status === 'approved' ? appChips(c.granted_apps) : appChips(c.requested_apps), c.status === 'approved' ? h('span', { class: 'sub' }, `${fmt(c.live_rate_per_min)}/min · ${fmt(c.live_daily_quota)}/day`) : null),
         (c.keys || []).length ? h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ...['Key', 'Mode', 'Created', 'Last used', ''].map((x) => h('th', {}, x)))),
           h('tbody', {}, ...c.keys.map((k) => h('tr', {}, h('td', {}, h('code', {}, k.prefix + '…')), h('td', {}, k.mode), h('td', {}, when(k.created_at)), h('td', {}, when(k.last_used_at)),
@@ -437,6 +440,9 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
 
   // Descriptions, methods and scopes for the Products tab. Optional: without it the tab still lists what the database knows.
   fetch('/developers/catalog.json').then((r) => (r.ok ? r.json() : null)).then((c) => { if (c && !dead) { S.cat = c; if (S.gate === 'ok' && S.tab === 'products') render(); } }).catch(() => {});
+
+  // Country names for the badges: the same list the developer page and the apps use. Optional.
+  fetch('/developers/countries.json').then((r) => (r.ok ? r.json() : null)).then((c) => { if (c && !dead) { S.countries = Object.fromEntries((c.countries || []).map((x) => [x.code, x])); if (S.gate === 'ok') render(); } }).catch(() => {});
 
   gate();
   return {

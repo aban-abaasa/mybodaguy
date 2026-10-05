@@ -381,3 +381,38 @@ test('onboarding: over-long fields are cut down before they reach the database',
   await run(handler, fakeReq('POST', '/api/v1/developers/register', { body: { app_name: 'n'.repeat(5000), email: 'e'.repeat(5000), description: 'd'.repeat(5000), apps: ['icanera'] } }));
   assert.ok(calls[0].args.p_app_name.length <= 200 && calls[0].args.p_contact_email.length <= 300 && calls[0].args.p_description.length <= 1000);
 });
+
+// ---------------------------------------------------------------- developer accounts: /developers/config
+test('config: gives the page the PUBLIC sign-in details and the caller\'s country, with no key and no database call', async () => {
+  const { handler, calls } = setup(() => { throw new Error('must not be called'); }, { SUPABASE_URL: 'https://x.supabase.co/', SUPABASE_ANON_KEY: 'anon-public', VITE_SUPABASE_ANON_KEY: 'ignored' });
+  const res = await run(handler, fakeReq('GET', '/api/v1/developers/config', { headers: { 'x-vercel-ip-country': 'ug' } }));
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(json(res), { auth: { provider: 'google', url: 'https://x.supabase.co', anon_key: 'anon-public' }, detected_country: 'UG' });
+  assert.equal(calls.length, 0);
+  assert.equal(res.headers['cache-control'], 'no-store', 'the country is per caller, so it is never cached');
+});
+
+test('config: NEVER hands out the service-role key, even when it is the only key configured', async () => {
+  const { handler } = setup(() => ({}), { SUPABASE_URL: 'https://x.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'service-secret' });
+  const res = await run(handler, fakeReq('GET', '/api/v1/developers/config'));
+  assert.equal(res.statusCode, 200);
+  assert.equal(json(res).auth, null, 'sign-in is simply unavailable until a public key is configured');
+  assert.ok(!res.body.includes('service-secret'));
+});
+
+test('config: a missing, malformed or unknown country becomes null, not a guess', async () => {
+  const { handler } = setup(() => ({}));
+  for (const geo of [undefined, '', 'XX', 'UGA', '1', '<script>']) {
+    const res = await run(handler, fakeReq('GET', '/api/v1/developers/config', { headers: geo === undefined ? {} : { 'x-vercel-ip-country': geo } }));
+    assert.equal(json(res).detected_country, null, String(geo));
+  }
+});
+
+test('config: answers HEAD and OPTIONS like the other keyless routes, and POST is not a config route', async () => {
+  const { handler } = setup(() => ({}));
+  const head = await run(handler, fakeReq('HEAD', '/api/v1/developers/config'));
+  assert.equal(head.statusCode, 200);
+  assert.equal(head.body, undefined);
+  const post = await run(handler, fakeReq('POST', '/api/v1/developers/config', { body: {} }));
+  assert.equal(post.statusCode, 404);
+});
