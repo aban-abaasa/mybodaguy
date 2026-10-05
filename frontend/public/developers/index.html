@@ -13,14 +13,14 @@
 :root{
   --bg:#070b1a; --bg2:#0b1226; --card:#0f1830; --card2:#131e3b; --line:#1e2a4d; --txt:#e8eeff; --sub:#a6b3d6; --mute:#6f7da6;
   --brand:#38bdf8; --ok:#34d399; --warn:#fbbf24; --bad:#f87171;
-  --icanera:#8b5cf6; --bodagoera:#f59e0b; --supermarketera:#10b981; --farmagentera:#84cc16; --platform:#38bdf8;
+  --business:#f43f5e; --icanera:#8b5cf6; --bodagoera:#f59e0b; --supermarketera:#10b981; --farmagentera:#84cc16; --platform:#38bdf8;
   --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --r:16px;
 }
 @media (prefers-color-scheme: light){
   :root{ --bg:#f5f7ff; --bg2:#eaefff; --card:#ffffff; --card2:#f1f4ff; --line:#d5ddf5; --txt:#0c1330; --sub:#3d4a73; --mute:#68759c;
-    --brand:#0369a1; --ok:#047857; --warn:#b45309; --bad:#b91c1c; --icanera:#6d28d9; --bodagoera:#b45309; --supermarketera:#047857; --farmagentera:#4d7c0f; --platform:#0369a1; }
+    --brand:#0369a1; --ok:#047857; --warn:#b45309; --bad:#b91c1c; --business:#be123c; --icanera:#6d28d9; --bodagoera:#b45309; --supermarketera:#047857; --farmagentera:#4d7c0f; --platform:#0369a1; }
 }
 *{box-sizing:border-box} html{scroll-behavior:smooth;scroll-padding-top:72px}
 body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.55 var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
@@ -181,6 +181,33 @@ footer .apps2{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
 .banner{border:1px solid var(--warn);background:#fbbf2414;color:var(--txt);padding:12px 16px;border-radius:12px;margin:0 0 18px;font-size:14px}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+
+/* v2: business capabilities */
+.badge-post{color:#2a1500;background:var(--warn);border-color:transparent}
+.caps{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:28px}
+@media(max-width:1000px){.caps{grid-template-columns:repeat(2,1fr)}} @media(max-width:560px){.caps{grid-template-columns:1fr}}
+.cap{display:flex;flex-direction:column;gap:8px;position:relative;overflow:hidden}
+.cap::before{content:"";position:absolute;inset:0 0 auto 0;height:3px;background:var(--c,var(--brand))}
+.cap .ico{font-size:26px;line-height:1}
+.cap p{margin:0;color:var(--sub);font-size:14px;flex:1}
+.cap .calls{font:12px var(--mono);color:var(--mute);word-break:break-all}
+.cap .lock{align-self:flex-start;font:700 11px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--business);border:1px solid var(--business);border-radius:99px;padding:2px 8px}
+.cap .row{margin-top:4px}
+.scopes{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px;margin:14px 0 0;padding:0;list-style:none}
+.scopes li{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--bg2);font-size:13.5px;color:var(--sub)}
+.scopes code{color:var(--txt);font-weight:700}
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:22px 0}
+@media(max-width:900px){.flow{grid-template-columns:1fr 1fr}} @media(max-width:560px){.flow{grid-template-columns:1fr}}
+.flow .card{padding:14px 16px;font-size:14px;color:var(--sub)} .flow b{display:block;color:var(--txt);margin-bottom:2px}
+.flow .n{font:800 12px var(--mono);color:var(--business);display:block;margin-bottom:6px}
+.guard{display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;margin:12px 0 0;padding:0;list-style:none;font-size:14px;color:var(--sub)}
+@media(max-width:760px){.guard{grid-template-columns:1fr}}
+.guard li::before{content:"✓ ";color:var(--ok);font-weight:800}
+@media(max-width:560px){.form .fields{grid-template-columns:1fr!important}}
+.two>*,.form>*,.three>*,.caps>*,.flow>*,.recipes>*,.steps>*{min-width:0}
+.three pre.code{overflow-x:auto}
+@media(max-width:560px){.apps{grid-template-columns:1fr}}
+textarea.t.mono{font:13px var(--mono);min-height:64px;resize:vertical}
 </style>
 </head>
 <body>
@@ -190,7 +217,7 @@ footer .apps2{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
   <div class="wrap">
     <a class="logo" href="#top" aria-label="Era API home"><i aria-hidden="true"></i> Era API</a>
     <nav class="links" aria-label="Sections">
-      <a href="#playground">Playground</a><a href="#keys">Get a key</a><a href="#recipes">Recipes</a><a href="#reference">Reference</a><a href="#trust">Trust</a>
+      <a href="#playground">Playground</a><a href="#build">Build</a><a href="#business">Business</a><a href="#keys">Get a key</a><a href="#recipes">Recipes</a><a href="#reference">Reference</a><a href="#trust">Trust</a>
     </nav>
     <div class="status" id="status" role="status" aria-live="polite"><span class="dot" id="dot"></span><span id="statusText">checking…</span></div>
   </div>
@@ -203,7 +230,7 @@ footer .apps2{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
     <div>
       <div class="eyebrow">ICANERA · BodaGoEra · SupermarketEra · FarmAgentEra</div>
       <h1>Build on <span class="grad">the Era.</span></h1>
-      <p class="lead">One key opens four apps. Coin prices and FX, boda fares and stages, store shelves and barcodes, harvest prices and farmland — as one clean, read-only API. <strong>Try it right now, no sign-up.</strong></p>
+      <p class="lead">One API for four apps. Coin price, valuation and network fees. Boda journeys and deliveries. Every product category on the shelves. And for businesses: payment requests, stock that watches its own expiry dates, and maintenance data. <strong>Try it right now, no sign-up.</strong></p>
       <div class="cta">
         <a class="btn primary" href="#playground" id="ctaTry">▶ Try it live</a>
         <a class="btn" href="#keys" id="ctaKey">🔑 Get a free key</a>
@@ -211,8 +238,9 @@ footer .apps2{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
       </div>
       <div class="chips" aria-label="Highlights">
         <span class="chip">⚡ Sandbox key in ~10 seconds</span>
-        <span class="chip">🔒 Read-only &amp; privacy-first</span>
+        <span class="chip">🔒 Never moves money by itself</span>
         <span class="chip">🧪 Realistic fixtures, zero risk</span>
+        <span class="chip">🔑 Owner-issued business keys</span>
         <span class="chip">📄 OpenAPI 3 included</span>
       </div>
     </div>
@@ -245,11 +273,12 @@ footer .apps2{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
           <div class="keyrow" style="margin-top:14px">
             <span>Key:</span>
             <div class="seg" role="group" aria-label="Which key to use">
-              <button id="kPlay" aria-pressed="true" type="button">Public sandbox</button>
+              <button id="kPlay" aria-pressed="true" type="button">Sandbox</button>
               <button id="kMine" aria-pressed="false" type="button">My key</button>
             </div>
-            <input id="myKey" class="t mono" type="password" placeholder="era_test_… or era_live_…" style="flex:1;min-width:200px" hidden autocomplete="off" spellcheck="false" aria-label="Your API key">
+            <input id="myKey" class="t mono" type="password" placeholder="era_test_…, era_live_… or era_biz_…" style="flex:1;min-width:200px" hidden autocomplete="off" spellcheck="false" aria-label="Your API key">
             <span class="hint" id="keyHint">Fixture data · shared limit 20/min per visitor</span>
+          
           </div>
         </div>
         <div class="out">
@@ -268,6 +297,63 @@ footer .apps2{display:flex;gap:18px;flex-wrap:wrap;margin-top:10px}
           </div>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ BUILD -->
+<section id="build">
+  <div class="wrap">
+    <div class="eyebrow">What you can build</div>
+    <h2>Eight things people already ask for.</h2>
+    <p class="lead">Each card opens a live, working request in the playground. The four with a key badge are private to a business and need a key its owner issued; the playground uses a sample shop so you can see every answer first.</p>
+    <div class="caps" id="caps"></div>
+  </div>
+</section>
+
+<!-- ============================================================ BUSINESS -->
+<section id="business" style="background:var(--bg2)">
+  <div class="wrap">
+    <div class="eyebrow">For businesses</div>
+    <h2>Your own data, behind a key you control.</h2>
+    <p class="lead">A business owner mints a key inside ICAN, for one business, with only the powers it needs, and revokes it in a tap. There is no review queue and no one else can see or widen it.</p>
+    <div class="flow">
+      <div class="card"><span class="n">1 · OWNER</span><b>Mint a key in ICAN</b>Open your business, then <i>Developer API</i>. Pick the scopes and an expiry (up to a year).</div>
+      <div class="card"><span class="n">2 · TEST</span><b>Rehearse safely</b>Make a <code>test</code> key: it answers with fixtures and creates nothing real.</div>
+      <div class="card"><span class="n">3 · BUILD</span><b>Call from your server</b>Send the key as <code>Bearer era_biz_…</code>. Writes carry an <code>Idempotency-Key</code>.</div>
+      <div class="card"><span class="n">4 · CONTROL</span><b>See and revoke</b>Every call is listed for you. Revoke in one tap; it dies at once.</div>
+    </div>
+    <div class="two" style="margin-top:6px">
+      <div class="card">
+        <h3>Scopes: a key can only do what you ticked</h3>
+        <ul class="scopes">
+          <li><code>payments:request</code> Ask a customer to pay. Never takes money.</li>
+          <li><code>payments:read</code> Check whether a request was paid.</li>
+          <li><code>inventory:read</code> Stock, value at cost, and expiry dates.</li>
+          <li><code>cmms:read</code> Assets, reorder alerts, requisitions and work.</li>
+          <li><code>bookings:request</code> Ask for a ride or delivery.</li>
+          <li><code>bookings:read</code> Track those booking requests.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Requests, not transfers</h3>
+        <p class="hint" style="margin:6px 0 8px">Two parts of the platform touch real money and real people, so the API only <em>asks</em>:</p>
+        <p style="margin:0 0 8px"><b>Payment requests.</b> You create one with an amount and a reference. The payer sees it in their ICAN app and approves with their <em>own PIN</em>. The API cannot pay, send or withdraw, and there is no endpoint that does.</p>
+        <p style="margin:0"><b>Rides and deliveries.</b> You get a firm quote from the same maths the app uses, then create a booking request with a confirm link. The customer opens it, signs in to BodaGoEra and books it themselves. Nothing is dispatched until they do.</p>
+      </div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h3>Guard rails that are always on</h3>
+      <ul class="guard">
+        <li>A key belongs to exactly one business. It can never read another.</li>
+        <li>Keys are stored only as hashes, shown once, expire, and revoke instantly.</li>
+        <li>Prices come from us. Any <code>fare</code> you send in a booking is ignored.</li>
+        <li>Per-key caps on amount and on open requests; 5 new keys an hour, 10 active per business.</li>
+        <li>Retries are safe: the same <code>Idempotency-Key</code> returns the first answer.</li>
+        <li>Customer and rider identities are never returned to a business.</li>
+        <li>An admin kill switch for the whole business API, one endpoint, or payments only.</li>
+        <li>Optionally, payment keys need a verified business (set by the platform team).</li>
+      </ul>
     </div>
   </div>
 </section>
@@ -367,9 +453,12 @@ Retry-After: 12   (on 429)</pre></div>
       <tbody>
         <tr><td>400</td><td><code>bad_request</code></td><td>A parameter is missing or invalid. The message says which.</td></tr>
         <tr><td>401</td><td><code>missing_key</code> <code>invalid_key</code> <code>key_revoked</code></td><td>No key, a malformed or unknown key, or one that was rotated or revoked.</td></tr>
-        <tr><td>403</td><td><code>scope_missing</code> <code>live_not_approved</code> <code>app_suspended</code></td><td>Your key is not approved for that app, or your app was paused.</td></tr>
+        <tr><td>403</td><td><code>scope_missing</code> <code>live_not_approved</code> <code>app_suspended</code> <code>business_suspended</code></td><td>Your key is not approved for that app, lacks the scope an endpoint needs, or the app was paused.</td></tr>
         <tr><td>404</td><td><code>unknown_endpoint</code> <code>not_found</code></td><td>No such path, or nothing matched (an unknown barcode, country…).</td></tr>
-        <tr><td>405</td><td><code>method_not_allowed</code></td><td>v1 is read-only. Use GET.</td></tr>
+        <tr><td>405</td><td><code>method_not_allowed</code></td><td>Use GET for data. Only the few request-creating endpoints take POST.</td></tr>
+        <tr><td>409</td><td><code>idempotency_conflict</code></td><td>You reused an <code>Idempotency-Key</code> with a different request. Use a fresh key.</td></tr>
+        <tr><td>413 / 415</td><td><code>payload_too_large</code> <code>unsupported_media_type</code></td><td>Bodies are JSON and up to 16 KB.</td></tr>
+        <tr><td>422</td><td><code>unprocessable</code></td><td>Well formed but not allowed: above your key's cap, business not verified, too many open requests.</td></tr>
         <tr><td>429</td><td><code>rate_limited</code> <code>quota_exceeded</code> <code>too_many_bad_keys</code></td><td>Slow down. <code>Retry-After</code> tells you how long.</td></tr>
         <tr><td>5xx</td><td><code>handler_error</code> <code>endpoint_disabled</code> <code>api_disabled</code></td><td>Our side, or switched off for now. The details are logged for the team, not shown to you.</td></tr>
       </tbody></table></div>
@@ -387,10 +476,12 @@ Retry-After: 12   (on 429)</pre></div>
     <div class="card">
       <h3>What this API will never do</h3>
       <ul class="never">
-        <li><b>Move money.</b> v1 is read-only. There is no endpoint that pays, sends or withdraws.</li>
-        <li><b>Show anyone's wallet, balance, transactions or messages.</b></li>
+        <li><b>Move money.</b> A payment request only <em>asks</em>; the payer approves in their app with their own PIN. There is no endpoint that pays, sends or withdraws.</li>
+        <li><b>Book a ride on someone's behalf.</b> A booking request is a link the customer opens and confirms themselves.</li>
+        <li><b>Let one business see another.</b> A business key is bound to one business, forever.</li>
+        <li><b>Show anyone's wallet, balance, transactions or messages.</b> Not even the business's own.</li>
         <li><b>Hand out contact details.</b> Listings and stores show no phone numbers or emails. People connect inside the apps.</li>
-        <li><b>Reveal cost prices, stock levels or who a supplier is.</b></li>
+        <li><b>Reveal cost prices, stock levels or suppliers to the public.</b> Those are visible only to the business that owns them, through its own key.</li>
         <li><b>Keep your key.</b> Keys are stored only as hashes and shown once. Lose one? Rotate it.</li>
       </ul>
       <p class="hint" style="margin-top:14px">Every call is rate limited, abusive callers are throttled, and the platform team can switch any single endpoint — or the whole API — off instantly.</p>
@@ -401,7 +492,7 @@ Retry-After: 12   (on 429)</pre></div>
 
 <footer>
   <div class="wrap">
-    <div><b style="color:var(--txt)">Era API</b> · v1 · <span id="foot">read-only</span></div>
+    <div><b style="color:var(--txt)">Era API</b> · v2 · <span id="foot">requests, never transfers</span></div>
     <div class="apps2" id="footApps"></div>
   </div>
 </footer>
@@ -413,13 +504,17 @@ Retry-After: 12   (on 429)</pre></div>
 /* ------------------------------------------------------------------ constants */
 // A PUBLIC, sandbox-only key (fixture data, rate limited per visitor). It is meant to be copied.
 const PLAYGROUND_KEY = 'era_test_9a8d0e2b7f4c1a63d5e8b0f2c47a91d3e6b85f0c';
+// Likewise PUBLIC: a business-test key for a sample shop. It only returns fixtures and creates nothing.
+const BUSINESS_SANDBOX_KEY = 'era_bzt_5c1e7a90b3d24f68a1e0c7d95b2f4a86d3e1c0b7';
 const APPS = {
   platform:       { name: 'Platform',       color: 'var(--platform)',       icon: '✨' },
   icanera:        { name: 'ICANERA',        color: 'var(--icanera)',        icon: '🪙' },
   bodagoera:      { name: 'BodaGoEra',      color: 'var(--bodagoera)',      icon: '🏍️' },
   supermarketera: { name: 'SupermarketEra', color: 'var(--supermarketera)', icon: '🛒' },
   farmagentera:   { name: 'FarmAgentEra',   color: 'var(--farmagentera)',   icon: '🌾' },
+  business:       { name: 'Your business',  color: 'var(--business)',       icon: '🏢' },
 };
+const ORDER = ['platform', 'icanera', 'bodagoera', 'supermarketera', 'farmagentera', 'business'];
 const FOUR = ['icanera', 'bodagoera', 'supermarketera', 'farmagentera'];
 const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -456,11 +551,11 @@ const fmt = (n, d = 0) => (n == null || Number.isNaN(Number(n)) ? '–' : Number
 // Opened from a file or another origin it falls back to the canonical host, which is hard-coded here on purpose.
 const detectedBase = (location.protocol.startsWith('http') ? location.origin + '/api/v1' : 'https://icanera.space/api/v1');
 const qs = new URLSearchParams(location.search);
-const state = { base: detectedBase, endpoints: [], apps: [], sel: null, params: {}, useMine: false, last: null, ticket: store.get('era.ticket'), live: false, sandboxLimits: null };
+const state = { base: detectedBase, endpoints: [], apps: [], sel: null, params: {}, body: {}, idem: null, useMine: false, last: null, ticket: store.get('era.ticket'), live: false, sandboxLimits: null };
 
-async function api(path, { key, body, method } = {}) {
+async function api(path, { key, body, method, headers: extra } = {}) {
   const t0 = performance.now();
-  const headers = {};
+  const headers = { ...(extra || {}) };
   if (key) headers.Authorization = 'Bearer ' + key;
   if (body) headers['Content-Type'] = 'application/json';
   try {
@@ -556,7 +651,11 @@ async function loadStatus() {
 /* ------------------------------------------------------------------ playground */
 const snippetLangs = ['cURL', 'JavaScript', 'Python', 'Dart'];
 let lang = store.get('era.lang') || 'cURL';
-function currentKey() { return state.useMine ? ($('#myKey').value.trim() || '') : PLAYGROUND_KEY; }
+const selEp = () => state.endpoints.find((e) => e.id === state.sel);
+const isBiz = (ep) => !!ep && ep.access === 'business';
+const newIdem = () => 'dev-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+function currentKey(ep = selEp()) { return state.useMine ? ($('#myKey').value.trim() || '') : (isBiz(ep) ? BUSINESS_SANDBOX_KEY : PLAYGROUND_KEY); }
+function keyHintText() { const ep = selEp(); return state.useMine ? 'Your own key: sandbox, live or business.' : isBiz(ep) ? 'Business sandbox: a sample shop · nothing real is created' : 'Fixture data · shared limit 20/min per visitor'; }
 function buildQuery(ep) {
   const q = new URLSearchParams(); let path = ep.path;
   for (const p of ep.params || []) {
@@ -568,13 +667,12 @@ function buildQuery(ep) {
 }
 function renderList() {
   const box = $('#eps'); const f = $('#q').value.trim().toLowerCase(); box.textContent = '';
-  const order = ['platform', ...FOUR];
-  order.forEach((app) => {
+  ORDER.forEach((app) => {
     if (state.focusApp && !f && state.focusApp !== app) return;
     const list = state.endpoints.filter((e) => e.app === app && (!f || (e.path + ' ' + e.summary + ' ' + e.id).toLowerCase().includes(f)));
     if (!list.length) return;
     box.append(h('div', { class: 'grp' }, h('span', { class: 'appdot', style: 'background:' + APPS[app].color }), APPS[app].name));
-    list.forEach((e) => box.append(h('button', { class: 'ep', role: 'option', type: 'button', 'aria-current': String(state.sel === e.id), style: '--c:' + APPS[app].color, onclick: () => selectEndpoint(e.id) }, e.summary, h('small', {}, e.path))));
+    list.forEach((e) => box.append(h('button', { class: 'ep', role: 'option', type: 'button', 'aria-current': String(state.sel === e.id), style: '--c:' + APPS[app].color, onclick: () => selectEndpoint(e.id) }, e.method === 'POST' ? h('span', { class: 'pill badge-post', style: 'font-size:10px;margin-right:6px;padding:1px 6px' }, 'POST') : null, e.summary, h('small', {}, e.path))));
   });
   if (state.focusApp && !f) box.append(h('button', { class: 'btn small', style: 'margin:10px 8px', type: 'button', onclick: () => { state.focusApp = null; renderList(); } }, '← All apps'));
   if (!box.childElementCount) box.append(h('div', { class: 'empty' }, 'No endpoints match.'));
@@ -589,12 +687,26 @@ function selectEndpoint(id) {
     inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
     fields.append(h('label', { class: 'f' }, h('span', { class: 'n' }, p.name, h('em', {}, (p.in === 'path' ? 'path' : 'query') + (p.required ? ' · required' : ''))), inp, h('span', { class: 'hint', id: 'h-' + p.name }, p.description || '')));
   });
-  if (!(ep.params || []).length) fields.append(h('p', { class: 'hint', style: 'margin:0' }, 'No parameters. Just send it.'));
+  state.body = {}; state.idem = newIdem();
+  (ep.body || []).forEach((f) => {
+    const raw = f.example === undefined ? '' : (typeof f.example === 'object' ? JSON.stringify(f.example) : String(f.example));
+    state.body[f.name] = raw;
+    const big = f.type === 'object' || f.type === 'array';
+    const inp = big ? h('textarea', { class: 't mono', name: 'b-' + f.name, rows: 3, spellcheck: 'false', autocomplete: 'off', 'aria-describedby': 'hb-' + f.name }) : h('input', { class: 't', name: 'b-' + f.name, placeholder: f.example !== undefined ? 'e.g. ' + raw : '', autocomplete: 'off', spellcheck: 'false', 'aria-describedby': 'hb-' + f.name });
+    inp.value = raw;
+    inp.addEventListener('input', () => { state.body[f.name] = inp.value; refreshRequest(); });
+    if (!big) inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') send(); });
+    fields.append(h('label', { class: 'f', style: big ? 'grid-column:1/-1' : '' }, h('span', { class: 'n' }, f.name, h('em', {}, 'body' + (f.required ? ' · required' : ''))), inp, h('span', { class: 'hint', id: 'hb-' + f.name }, f.description || '')));
+  });
+  if (!(ep.params || []).length && !(ep.body || []).length) fields.append(h('p', { class: 'hint', style: 'margin:0' }, 'No parameters. Just send it.'));
+  if (ep.method === 'POST') fields.append(h('p', { class: 'hint', style: 'grid-column:1/-1;margin:0' }, 'This creates a request, never a transfer. A fresh Idempotency-Key is added for you: ', h('code', { id: 'idemShow' }, state.idem), '.'));
   renderList(); refreshRequest(); $('#panelRes').hidden = false;
 }
 function refreshRequest() {
   const ep = state.endpoints.find((e) => e.id === state.sel); if (!ep) return;
   $('#urlBase').textContent = state.base.replace(/^https?:\/\//, '') ; $('#urlPath').textContent = buildQuery(ep); renderSnippet();
+  const m = $('.bar .url .pill'); m.textContent = ep.method || 'GET'; m.className = 'pill ' + (ep.method === 'POST' ? 'badge-post' : 'badge-get');
+  $('#keyHint').textContent = keyHintText();
 }
 function highlight(value) {
   const s = typeof value === 'string' ? value : JSON.stringify(value, null, 2); if (s.length > 200000) return esc(s.slice(0, 200000)) + '\n… (truncated)';
@@ -610,26 +722,46 @@ function highlight(value) {
 function renderMeta(res) {
   const m = $('#meta'); m.textContent = ''; if (!res) return;
   const cls = res.status >= 500 || res.status === 0 ? 's5' : res.status >= 400 ? 's4' : 's2';
-  m.append(h('span', { class: 'st ' + cls }, res.status === 0 ? 'network error' : res.status + ' ' + ({ 200: 'OK', 201: 'Created', 400: 'Bad request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not found', 405: 'Method not allowed', 429: 'Too many requests', 502: 'Bad gateway', 503: 'Unavailable' }[res.status] || '')), h('span', { class: 'pill' }, res.ms + ' ms'));
+  m.append(h('span', { class: 'st ' + cls }, res.status === 0 ? 'network error' : res.status + ' ' + ({ 200: 'OK', 201: 'Created', 400: 'Bad request', 401: 'Unauthorized', 403: 'Forbidden', 404: 'Not found', 405: 'Method not allowed', 409: 'Conflict', 413: 'Too large', 415: 'Unsupported type', 422: 'Not allowed', 429: 'Too many requests', 502: 'Bad gateway', 503: 'Unavailable' }[res.status] || '')), h('span', { class: 'pill' }, res.ms + ' ms'));
   const lim = Number(res.headers['x-ratelimit-limit']), rem = Number(res.headers['x-ratelimit-remaining']);
   if (lim > 0 && !Number.isNaN(rem)) m.append(h('span', { class: 'gauge' + (rem / lim < .2 ? ' low' : ''), title: rem + ' of ' + lim + ' left this minute', role: 'img', 'aria-label': rem + ' of ' + lim + ' requests left this minute' }, h('i', { style: 'width:' + Math.round(rem / lim * 100) + '%' })), h('span', { class: 'pill' }, rem + '/' + lim + ' left'));
   if (res.headers['x-era-mode']) m.append(h('span', { class: 'pill' }, res.headers['x-era-mode']));
 }
+function buildBody(ep) {
+  const out = {};
+  for (const f of ep.body || []) {
+    const raw = (state.body[f.name] ?? '').toString().trim(); if (raw === '') continue;
+    if (f.type === 'number' || f.type === 'integer') { const n = Number(raw); out[f.name] = Number.isNaN(n) ? raw : n; }
+    else if (f.type === 'boolean') out[f.name] = raw === 'true';
+    else if (f.type === 'object' || f.type === 'array') { try { out[f.name] = JSON.parse(raw); } catch { out[f.name] = raw; } }
+    else out[f.name] = raw;
+  }
+  return out;
+}
 async function send() {
   const ep = state.endpoints.find((e) => e.id === state.sel); if (!ep) { toast('Pick an endpoint first'); return; }
-  const key = currentKey(); if (!key) { toast('Paste your key first'); $('#myKey').focus(); return; }
+  const key = currentKey(ep); if (!key) { toast('Paste your key first'); $('#myKey').focus(); return; }
   const btn = $('#send'); btn.disabled = true; btn.textContent = 'Sending…';
-  const res = await api(buildQuery(ep), { key });
+  const post = ep.method === 'POST';
+  const res = await api(buildQuery(ep), post ? { key, method: 'POST', body: buildBody(ep), headers: { 'Idempotency-Key': state.idem } } : { key });
+  if (post) { state.idem = newIdem(); const sh = $('#idemShow'); if (sh) sh.textContent = state.idem; }
   btn.disabled = false; btn.textContent = 'Send ⏎'; state.last = res;
-  pulse(ep.app === 'platform' ? FOUR[Math.floor(Math.random() * 4)] : ep.app, res.ms, res.status); $('#skyLat').textContent = res.ms + ' ms · ' + res.status;
+  pulse(FOUR.includes(ep.app) ? ep.app : FOUR[Math.floor(Math.random() * 4)], res.ms, res.status); $('#skyLat').textContent = res.ms + ' ms · ' + res.status;
   $('#resEmpty').hidden = true; const code = $('#resCode'); code.hidden = false; code.innerHTML = res.json ? highlight(res.json) : esc(res.text || '(empty)');
   renderMeta(res);
-  const hp = $('#panelHdr'); hp.textContent = ''; hp.append(h('div', { class: 'tablewrap' }, h('table', { class: 't' }, h('tbody', {}, ...Object.entries(res.headers).filter(([k]) => /^(x-|retry|cache|content-type|access-control-allow-origin)/.test(k)).sort().map(([k, v]) => h('tr', {}, h('td', {}, h('code', {}, k)), h('td', {}, v)))))));
+  const hp = $('#panelHdr'); hp.textContent = ''; hp.append(h('div', { class: 'tablewrap' }, h('table', { class: 't' }, h('tbody', {}, ...Object.entries(res.headers).filter(([k]) => /^(x-|retry|cache|content-type|access-control-allow-origin|idempotent)/.test(k)).sort().map(([k, v]) => h('tr', {}, h('td', {}, h('code', {}, k)), h('td', {}, v)))))));
   showTab('Res');
 }
 function showTab(n) { ['Res', 'Hdr', 'Code'].forEach((t) => { $('#tab' + t).setAttribute('aria-selected', String(t === n)); $('#panel' + t).hidden = t !== n; }); }
 function snippet(ep) {
-  const url = state.base + buildQuery(ep); const key = currentKey() || 'YOUR_KEY';
+  const url = state.base + buildQuery(ep); const key = currentKey(ep) || 'YOUR_KEY';
+  if (ep.method === 'POST') {
+    const body = buildBody(ep); const js = JSON.stringify(body, null, 2); const idem = state.idem || 'a-unique-id-per-request';
+    if (lang === 'cURL') return `curl -s -X POST "${url}" \\\n  -H "Authorization: Bearer ${key}" \\\n  -H "Content-Type: application/json" \\\n  -H "Idempotency-Key: ${idem}" \\\n  -d '${JSON.stringify(body)}'`;
+    if (lang === 'JavaScript') return `const res = await fetch(\n  "${url}",\n  {\n    method: "POST",\n    headers: {\n      Authorization: "Bearer ${key}",\n      "Content-Type": "application/json",\n      "Idempotency-Key": crypto.randomUUID(), // reuse it when you retry\n    },\n    body: JSON.stringify(${js.replace(/\n/g, '\n    ')}),\n  }\n);\nconst { data } = await res.json();\nconsole.log(res.status, data);`;
+    if (lang === 'Python') return `import requests, uuid\n\nr = requests.post(\n    "${url}",\n    headers={\n        "Authorization": "Bearer ${key}",\n        "Idempotency-Key": str(uuid.uuid4()),  # reuse it when you retry\n    },\n    json=${js.replace(/\n/g, '\n    ')},\n    timeout=10,\n)\nprint(r.status_code, r.json()["data"])`;
+    return `import 'dart:convert';\nimport 'package:http/http.dart' as http;\n\nFuture<void> main() async {\n  final res = await http.post(\n    Uri.parse('${url}'),\n    headers: {\n      'Authorization': 'Bearer ${key}',\n      'Content-Type': 'application/json',\n      'Idempotency-Key': '${idem}',\n    },\n    body: jsonEncode(${JSON.stringify(body)}),\n  );\n  print(jsonDecode(res.body)['data']);\n}`;
+  }
   if (lang === 'cURL') return `curl -s "${url}" \\\n  -H "Authorization: Bearer ${key}"`;
   if (lang === 'JavaScript') return `const res = await fetch(\n  "${url}",\n  { headers: { Authorization: "Bearer ${key}" } }\n);\nconst { data, meta } = await res.json();\nconsole.log(data);`;
   if (lang === 'Python') return `import requests\n\nr = requests.get(\n    "${url}",\n    headers={"Authorization": "Bearer ${key}"},\n    timeout=10,\n)\nr.raise_for_status()\nprint(r.json()["data"])`;
@@ -645,7 +777,7 @@ function setupPlayground() {
   $('#tabRes').addEventListener('click', () => showTab('Res')); $('#tabHdr').addEventListener('click', () => showTab('Hdr')); $('#tabCode').addEventListener('click', () => { renderSnippet(); showTab('Code'); });
   $('#copySnip').addEventListener('click', () => copy($('#snippet').textContent, 'Snippet copied'));
   const mine = $('#kMine'), play = $('#kPlay'), inp = $('#myKey');
-  const setMode = (m) => { state.useMine = m; mine.setAttribute('aria-pressed', String(m)); play.setAttribute('aria-pressed', String(!m)); inp.hidden = !m; $('#keyHint').textContent = m ? 'Your own key: sandbox or live.' : 'Fixture data · shared limit 20/min per visitor'; if (m) inp.focus(); refreshRequest(); };
+  const setMode = (m) => { state.useMine = m; mine.setAttribute('aria-pressed', String(m)); play.setAttribute('aria-pressed', String(!m)); inp.hidden = !m; if (m) inp.focus(); refreshRequest(); };
   mine.addEventListener('click', () => setMode(true)); play.addEventListener('click', () => setMode(false)); inp.addEventListener('input', refreshRequest);
   const remembered = store.get('era.mykey', true); if (remembered) { inp.value = remembered; }
   inp.addEventListener('change', () => store.set('era.mykey', inp.value.trim(), true));
@@ -768,19 +900,41 @@ function setupRecipes() {
   if ('IntersectionObserver' in window) { const io = new IntersectionObserver((en) => { if (en.some((x) => x.isIntersecting)) { io.disconnect(); run(); } }, { rootMargin: '200px' }); io.observe($('#recipes')); } else run();
 }
 
+/* ------------------------------------------------------------------ capabilities */
+const CAPS = [
+  { id: 'icanera.coin_valuation',     app: 'icanera',        ico: '🪙', t: 'Coin creation and valuation', p: 'How the ICAN price is made: the floor, the FX and inflation legs, supply, and a converter. Everything a wallet needs to show a fair value.', calls: '/icanera/coin/valuation · /coin/supply · /coin/convert' },
+  { id: 'icanera.chain_gas',          app: 'icanera',        ico: '⛽', t: 'Gas for the blockchain', p: 'A network fee estimate before you commit, in ICAN and in local currency, plus the integrity chain head and proofs for any event.', calls: '/icanera/chain/gas · /chain/head · /chain/proof/{seq}' },
+  { id: 'bodagoera.journey_quote',    app: 'bodagoera',      ico: '🛣️', t: 'Journeys and deliveries', p: 'A firm quote for a ride or a multi-stop delivery from the app\'s own fare maths, including time-of-day surges.', calls: '/bodagoera/journeys/quote' },
+  { id: 'supermarketera.categories',  app: 'supermarketera', ico: '🧺', t: 'Every product category', p: 'The full category tree, products on store shelves with search and barcodes, and live clearance deals.', calls: '/supermarketera/categories · /products · /clearance' },
+  { id: 'business.payment_create',    app: 'business',       ico: '💸', t: 'Payment requests', p: 'Ask a customer to pay. They approve in their app with their own PIN. Track it until paid, expired or cancelled.', calls: 'POST /business/payments', biz: true },
+  { id: 'business.inventory_expiring',app: 'business',       ico: '⏳', t: 'Inventory that watches expiry', p: 'Stock with the nearest live batch, a first-expired-first-out list, and a suggested clearance price that never goes below cost.', calls: '/business/inventory · /expiring · /summary', biz: true },
+  { id: 'business.cmms_overview',     app: 'business',       ico: '🛠️', t: 'CMMS', p: 'Assets, reorder alerts, requisitions and work assignments for the business\'s maintenance operation.', calls: '/business/cmms/*', biz: true },
+  { id: 'business.booking_create',    app: 'business',       ico: '🧾', t: 'Book a complete journey', p: 'Quote, then create a booking request with a confirm link. The customer books it in BodaGoEra; you track it end to end.', calls: 'POST /business/bookings', biz: true },
+];
+function renderCaps() {
+  const box = $('#caps'); box.textContent = '';
+  CAPS.forEach((c) => {
+    if (state.endpoints.length && !state.endpoints.some((e) => e.id === c.id)) return;
+    box.append(h('div', { class: 'card cap', style: '--c:' + APPS[c.app].color }, h('span', { class: 'ico', 'aria-hidden': 'true' }, c.ico), h('h3', {}, c.t), c.biz ? h('span', { class: 'lock' }, '🔑 business key') : null, h('p', {}, c.p), h('div', { class: 'calls' }, c.calls),
+      h('div', { class: 'row' }, h('button', { class: 'btn small primary', type: 'button', onclick: () => { state.focusApp = null; $('#q').value = ''; selectEndpoint(c.id); $('#playground').scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth' }); } }, '▶ Try it'))));
+  });
+}
+
 /* ------------------------------------------------------------------ reference */
 function renderRef() {
   const box = $('#refList'); box.textContent = '';
-  ['platform', ...FOUR].forEach((app) => {
+  ORDER.forEach((app) => {
     const list = state.endpoints.filter((e) => e.app === app); if (!list.length) return;
     const meta = state.apps.find((a) => a.id === app);
     box.append(h('h3', { style: 'margin:26px 0 4px;display:flex;gap:9px;align-items:center' }, h('span', { class: 'appdot', style: 'background:' + APPS[app].color }), APPS[app].name), meta ? h('p', { class: 'hint', style: 'margin:0 0 8px' }, meta.tagline) : null);
     list.forEach((e) => {
       const id = 'ref-' + e.id.replace(/\./g, '-');
-      const d = h('details', { class: 'ref', id }, h('summary', {}, h('span', { class: 'pill badge-get' }, 'GET'), h('code', {}, e.path), h('span', { class: 'sm' }, e.summary)),
+      const d = h('details', { class: 'ref', id }, h('summary', {}, h('span', { class: 'pill ' + (e.method === 'POST' ? 'badge-post' : 'badge-get') }, e.method || 'GET'), h('code', {}, e.path), e.scope ? h('span', { class: 'pill', title: 'Scope a business key needs' }, '🔑 ' + e.scope) : null, h('span', { class: 'sm' }, e.summary)),
         h('div', { class: 'refbody' }, e.description ? h('p', { style: 'margin:0;color:var(--sub)' }, e.description) : null,
+          (e.body || []).length ? h('div', { class: 'tablewrap' }, h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Body field', 'Type', 'Notes'].map((x) => h('th', {}, x)))), h('tbody', {}, ...e.body.map((f) => h('tr', {}, h('td', {}, h('code', {}, f.name), f.required ? h('span', { class: 'pill', style: 'margin-left:6px' }, 'required') : null), h('td', {}, f.type), h('td', {}, f.description || '')))))) : null,
+          e.method === 'POST' ? h('p', { class: 'hint', style: 'margin:0' }, 'Send an ', h('code', {}, 'Idempotency-Key'), ' header (8 to 64 letters, digits, - or _). Retrying with the same key returns the first answer and creates nothing twice.') : null,
           (e.params || []).length ? h('div', { class: 'tablewrap' }, h('table', { class: 't' }, h('thead', {}, h('tr', {}, ...['Parameter', 'In', 'Type', 'Notes'].map((x) => h('th', {}, x)))), h('tbody', {}, ...e.params.map((p) => h('tr', {}, h('td', {}, h('code', {}, p.name), p.required ? h('span', { class: 'pill', style: 'margin-left:6px' }, 'required') : null), h('td', {}, p.in), h('td', {}, p.type + (p.default !== undefined ? ' = ' + p.default : '')), h('td', {}, p.description || ''))))) ) : h('p', { class: 'hint', style: 'margin:0' }, 'No parameters.'),
-          h('div', { class: 'row' }, h('button', { class: 'btn small primary', type: 'button', onclick: () => { state.focusApp = null; $('#q').value = ''; selectEndpoint(e.id); $('#playground').scrollIntoView({ behavior: 'smooth' }); } }, '▶ Try it'), e.example_path ? h('button', { class: 'btn small', type: 'button', onclick: () => copy(`curl -s "${state.base}${e.example_path}" -H "Authorization: Bearer ${PLAYGROUND_KEY}"`, 'curl copied') }, 'Copy curl') : null, e.cache_seconds ? h('span', { class: 'hint' }, 'cached up to ' + e.cache_seconds + ' s') : null)));
+          h('div', { class: 'row' }, h('button', { class: 'btn small primary', type: 'button', onclick: () => { state.focusApp = null; $('#q').value = ''; selectEndpoint(e.id); $('#playground').scrollIntoView({ behavior: 'smooth' }); } }, '▶ Try it'), e.example_path ? h('button', { class: 'btn small', type: 'button', onclick: () => copy(`curl -s "${state.base}${e.example_path}" -H "Authorization: Bearer ${isBiz(e) ? BUSINESS_SANDBOX_KEY : PLAYGROUND_KEY}"`, 'curl copied') }, 'Copy curl') : null, e.cache_seconds ? h('span', { class: 'hint' }, 'cached up to ' + e.cache_seconds + ' s') : null)));
       box.append(d);
     });
   });
@@ -793,7 +947,7 @@ function renderRef() {
 (async function boot() {
   buildSky(); setupPlayground(); setupKeys(); setupRecipes();
   await Promise.all([loadCatalog(), loadStatus()]);
-  renderList(); renderRef(); renderSnippet();
+  renderList(); renderRef(); renderCaps(); renderSnippet();
   const want = qs.get('try') ? state.endpoints.find((e) => e.id === qs.get('try') || e.path === qs.get('try')) : null;
   const first = want || state.endpoints.find((e) => e.id === 'icanera.coin_price') || state.endpoints[0]; if (first) selectEndpoint(first.id);
   setInterval(loadStatus, 60000);

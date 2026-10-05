@@ -8,30 +8,47 @@
         {
             "id": "icanera",
             "name": "ICANERA",
-            "tagline": "Coin price, candles, FX, tax rules and the public business directory."
+            "tagline": "Coin price, valuation, supply, FX, tax rules, chain fees and the public business directory."
         },
         {
             "id": "bodagoera",
             "name": "BodaGoEra",
-            "tagline": "Stages, districts, ports, fare estimates and rider-card checks."
+            "tagline": "Stages, ports, journey and delivery quotes, and rider-card checks."
         },
         {
             "id": "supermarketera",
             "name": "SupermarketEra",
-            "tagline": "Stores, a product catalogue and barcode lookups."
+            "tagline": "Stores, a product catalogue across every category, clearance deals and barcode lookups."
         },
         {
             "id": "farmagentera",
             "name": "FarmAgentEra",
             "tagline": "Marketplace listings, a produce price board and crop knowledge."
+        },
+        {
+            "id": "business",
+            "name": "Your business",
+            "tagline": "Private, owner-issued: payment requests, inventory with expiry tracking, CMMS and booking requests."
         }
+    ],
+    "scopes": [
+        "payments:request",
+        "payments:read",
+        "inventory:read",
+        "cmms:read",
+        "bookings:request",
+        "bookings:read"
     ],
     "version": "v1",
     "endpoints": [
         {
             "id": "platform.whoami",
             "app": "platform",
+            "body": [
+            ],
             "path": "/whoami",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
             ],
@@ -43,7 +60,11 @@
         {
             "id": "platform.pulse",
             "app": "platform",
+            "body": [
+            ],
             "path": "/pulse",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
             ],
@@ -55,7 +76,11 @@
         {
             "id": "icanera.coin_price",
             "app": "icanera",
+            "body": [
+            ],
             "path": "/icanera/coin/price",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -76,7 +101,11 @@
         {
             "id": "icanera.coin_candles",
             "app": "icanera",
+            "body": [
+            ],
             "path": "/icanera/coin/candles",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -106,7 +135,11 @@
         {
             "id": "icanera.fx_rates",
             "app": "icanera",
+            "body": [
+            ],
             "path": "/icanera/fx/rates",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -158,7 +191,11 @@
         {
             "id": "icanera.countries",
             "app": "icanera",
+            "body": [
+            ],
             "path": "/icanera/countries",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -178,7 +215,11 @@
         {
             "id": "icanera.tax_rules",
             "app": "icanera",
+            "body": [
+            ],
             "path": "/icanera/tax/{country}",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -198,7 +239,11 @@
         {
             "id": "icanera.businesses",
             "app": "icanera",
+            "body": [
+            ],
             "path": "/icanera/businesses",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -232,9 +277,157 @@
             "cache_seconds": 120
         },
         {
+            "id": "icanera.coin_valuation",
+            "app": "icanera",
+            "body": [
+            ],
+            "path": "/icanera/coin/valuation",
+            "scope": null,
+            "access": "app",
+            "method": "GET",
+            "params": [
+            ],
+            "summary": "How the ICAN price is made",
+            "description": "The valuation step by step: the 5,000 UGX floor, FX protection, the USD and UGX inflation legs, the fair price, and how the market price compares. Plus aggregate activity.",
+            "example_path": "/icanera/coin/valuation",
+            "cache_seconds": 60
+        },
+        {
+            "id": "icanera.coin_supply",
+            "app": "icanera",
+            "body": [
+            ],
+            "path": "/icanera/coin/supply",
+            "scope": null,
+            "access": "app",
+            "method": "GET",
+            "params": [
+            ],
+            "summary": "ICAN supply",
+            "description": "Coins held in wallets, holders, coins bought and sold through the platform, and 30-day activity by type. Aggregates only, nothing per person.",
+            "example_path": "/icanera/coin/supply",
+            "cache_seconds": 120
+        },
+        {
+            "id": "icanera.coin_convert",
+            "app": "icanera",
+            "body": [
+            ],
+            "path": "/icanera/coin/convert",
+            "scope": null,
+            "access": "app",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "from",
+                    "type": "string",
+                    "example": "UGX",
+                    "required": true,
+                    "description": "ICAN or a 3-letter currency code."
+                },
+                {
+                    "in": "query",
+                    "name": "to",
+                    "type": "string",
+                    "example": "ICAN",
+                    "required": true,
+                    "description": "ICAN or a 3-letter currency code. Exactly one side is ICAN."
+                },
+                {
+                    "in": "query",
+                    "name": "amount",
+                    "type": "number",
+                    "example": 100000,
+                    "required": true,
+                    "description": "The amount to convert."
+                }
+            ],
+            "summary": "Convert ICAN and a currency",
+            "description": "At the live price, either way. Indicative: a fee or spread applies when you actually buy or sell.",
+            "example_path": "/icanera/coin/convert?from=UGX&to=ICAN&amount=100000",
+            "cache_seconds": 30
+        },
+        {
+            "id": "icanera.chain_gas",
+            "app": "icanera",
+            "body": [
+            ],
+            "path": "/icanera/chain/gas",
+            "scope": null,
+            "access": "app",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "network",
+                    "type": "string",
+                    "default": "ethereum",
+                    "required": false,
+                    "description": "The network."
+                },
+                {
+                    "in": "query",
+                    "name": "operation",
+                    "type": "string",
+                    "example": "token_transfer",
+                    "required": false,
+                    "description": "native_transfer, token_transfer, token_approve, contract_call or contract_deploy. Omit for all."
+                }
+            ],
+            "summary": "Blockchain network fee estimate",
+            "description": "What a transaction would cost in gas, in the network coin, in USD and in ICAN. An estimate from typical gas units and the gas price the platform team last entered (its age is shown).",
+            "example_path": "/icanera/chain/gas?operation=token_transfer",
+            "cache_seconds": 60
+        },
+        {
+            "id": "icanera.chain_head",
+            "app": "icanera",
+            "body": [
+            ],
+            "path": "/icanera/chain/head",
+            "scope": null,
+            "access": "app",
+            "method": "GET",
+            "params": [
+            ],
+            "summary": "Integrity chain: latest block",
+            "description": "The latest sequence number and chain hash of the hash-linked record of ICAN events.",
+            "example_path": "/icanera/chain/head",
+            "cache_seconds": 15
+        },
+        {
+            "id": "icanera.chain_proof",
+            "app": "icanera",
+            "body": [
+            ],
+            "path": "/icanera/chain/proof/{seq}",
+            "scope": null,
+            "access": "app",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "path",
+                    "name": "seq",
+                    "type": "integer",
+                    "example": 1358,
+                    "required": true,
+                    "description": "The sequence number."
+                }
+            ],
+            "summary": "Integrity chain: proof for one event",
+            "description": "The event type, its hash and the previous hash, so you can check it links to the event before it. Never the underlying record.",
+            "example_path": "/icanera/chain/proof/1358",
+            "cache_seconds": 600
+        },
+        {
             "id": "bodagoera.stages",
             "app": "bodagoera",
+            "body": [
+            ],
             "path": "/bodagoera/stages",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -270,7 +463,11 @@
         {
             "id": "bodagoera.districts",
             "app": "bodagoera",
+            "body": [
+            ],
             "path": "/bodagoera/districts",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
             ],
@@ -282,7 +479,11 @@
         {
             "id": "bodagoera.ports",
             "app": "bodagoera",
+            "body": [
+            ],
             "path": "/bodagoera/ports",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -302,7 +503,11 @@
         {
             "id": "bodagoera.fare_estimate",
             "app": "bodagoera",
+            "body": [
+            ],
             "path": "/bodagoera/fare/estimate",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -311,7 +516,7 @@
                     "type": "number",
                     "example": 7.5,
                     "required": true,
-                    "description": "Distance in kilometres (0.1 to 500)."
+                    "description": "Distance in kilometres (0.1 to 300)."
                 },
                 {
                     "in": "query",
@@ -321,17 +526,28 @@
                     "example": "cargo",
                     "required": false,
                     "description": "ride or cargo."
+                },
+                {
+                    "in": "query",
+                    "name": "at",
+                    "type": "string",
+                    "required": false,
+                    "description": "Price for this ISO date-time. Default: now."
                 }
             ],
             "summary": "Fare estimate",
-            "description": "Estimate a ride or cargo fare from the published rates: max(minimum, base + per-km x distance).",
+            "description": "Estimate a ride or cargo fare with the booking engine's own formula: max(minimum, base + per-km x distance) x the time-of-day multiplier, rounded to 100 UGX. Can price for a later time.",
             "example_path": "/bodagoera/fare/estimate?km=7.5",
             "cache_seconds": 60
         },
         {
             "id": "bodagoera.verify_rider",
             "app": "bodagoera",
+            "body": [
+            ],
             "path": "/bodagoera/riders/verify",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -349,9 +565,69 @@
             "cache_seconds": 0
         },
         {
+            "id": "bodagoera.journey_quote",
+            "app": "bodagoera",
+            "body": [
+            ],
+            "path": "/bodagoera/journeys/quote",
+            "scope": null,
+            "access": "app",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "from",
+                    "type": "string",
+                    "example": "0.3318,32.5728",
+                    "required": true,
+                    "description": "Pickup as latitude,longitude."
+                },
+                {
+                    "in": "query",
+                    "name": "to",
+                    "type": "string",
+                    "example": "0.3476,32.6025",
+                    "required": true,
+                    "description": "Drop-off as latitude,longitude."
+                },
+                {
+                    "in": "query",
+                    "name": "stops",
+                    "type": "string",
+                    "example": "0.3400,32.5900",
+                    "required": false,
+                    "description": "Up to 3 stops, separated by |."
+                },
+                {
+                    "in": "query",
+                    "name": "kind",
+                    "type": "string",
+                    "default": "ride",
+                    "example": "delivery",
+                    "required": false,
+                    "description": "ride, delivery or cargo."
+                },
+                {
+                    "in": "query",
+                    "name": "at",
+                    "type": "string",
+                    "required": false,
+                    "description": "Price for this ISO date-time (next 14 days). Default: now."
+                }
+            ],
+            "summary": "Quote a journey or delivery",
+            "description": "Prices a ride, a delivery or cargo between two points, with up to 3 stops. Uses the booking engine's own formula, including the time-of-day multiplier, and can price for a later time.",
+            "example_path": "/bodagoera/journeys/quote?from=0.3318,32.5728&to=0.3476,32.6025&kind=delivery",
+            "cache_seconds": 0
+        },
+        {
             "id": "supermarketera.stores",
             "app": "supermarketera",
+            "body": [
+            ],
             "path": "/supermarketera/stores",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -403,7 +679,11 @@
         {
             "id": "supermarketera.catalog",
             "app": "supermarketera",
+            "body": [
+            ],
             "path": "/supermarketera/catalog",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -454,7 +734,11 @@
         {
             "id": "supermarketera.barcode",
             "app": "supermarketera",
+            "body": [
+            ],
             "path": "/supermarketera/barcode/{code}",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -474,19 +758,129 @@
         {
             "id": "supermarketera.categories",
             "app": "supermarketera",
+            "body": [
+            ],
             "path": "/supermarketera/categories",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
             ],
             "summary": "Catalogue categories",
-            "description": "Every category with how many items it holds.",
+            "description": "Every category on the platform: how many wholesale catalogue items and how many shelf products each holds.",
             "example_path": "/supermarketera/categories",
             "cache_seconds": 300
         },
         {
+            "id": "supermarketera.products",
+            "app": "supermarketera",
+            "body": [
+            ],
+            "path": "/supermarketera/products",
+            "scope": null,
+            "access": "app",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "q",
+                    "type": "string",
+                    "example": "milk",
+                    "required": false,
+                    "description": "Search name or brand."
+                },
+                {
+                    "in": "query",
+                    "name": "category",
+                    "type": "string",
+                    "example": "Dairy",
+                    "required": false,
+                    "description": "Filter by category."
+                },
+                {
+                    "in": "query",
+                    "name": "store",
+                    "type": "string",
+                    "required": false,
+                    "description": "Search by store name."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 25,
+                    "required": false,
+                    "description": "1 to 100."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "Products on store shelves",
+            "description": "Products across every category and store: price, brand, barcode, expiry date and any published clearance price. No cost prices, no stock levels.",
+            "example_path": "/supermarketera/products?category=Dairy",
+            "cache_seconds": 60
+        },
+        {
+            "id": "supermarketera.clearance",
+            "app": "supermarketera",
+            "body": [
+            ],
+            "path": "/supermarketera/clearance",
+            "scope": null,
+            "access": "app",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "city",
+                    "type": "string",
+                    "example": "Kampala",
+                    "required": false,
+                    "description": "Only this city."
+                },
+                {
+                    "in": "query",
+                    "name": "category",
+                    "type": "string",
+                    "required": false,
+                    "description": "Only this category."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 25,
+                    "required": false,
+                    "description": "1 to 100."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "Clearance deals",
+            "description": "Reduced prices that stores published on stock nearing its expiry date: original price, price now, discount and days left.",
+            "example_path": "/supermarketera/clearance",
+            "cache_seconds": 60
+        },
+        {
             "id": "farmagentera.listings",
             "app": "farmagentera",
+            "body": [
+            ],
             "path": "/farmagentera/listings",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -539,7 +933,11 @@
         {
             "id": "farmagentera.price_board",
             "app": "farmagentera",
+            "body": [
+            ],
             "path": "/farmagentera/price-board",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -567,7 +965,11 @@
         {
             "id": "farmagentera.crops",
             "app": "farmagentera",
+            "body": [
+            ],
             "path": "/farmagentera/crops",
+            "scope": null,
+            "access": "app",
             "method": "GET",
             "params": [
                 {
@@ -614,6 +1016,574 @@
             "description": "Reference data: season, maturity days, expected yield, soil pH and water needs.",
             "example_path": "/farmagentera/crops?q=maize",
             "cache_seconds": 3600
+        },
+        {
+            "id": "business.payment_create",
+            "app": "business",
+            "body": [
+                {
+                    "name": "amount",
+                    "type": "number",
+                    "example": 45000,
+                    "required": true,
+                    "description": "Amount to collect."
+                },
+                {
+                    "name": "currency",
+                    "type": "string",
+                    "example": "UGX",
+                    "required": false,
+                    "description": "UGX (default), USD, KES, TZS or RWF."
+                },
+                {
+                    "name": "description",
+                    "type": "string",
+                    "example": "Order #1042",
+                    "required": false,
+                    "description": "Shown to the payer. Up to 140 characters."
+                },
+                {
+                    "name": "expires_in_minutes",
+                    "type": "integer",
+                    "example": 60,
+                    "required": false,
+                    "description": "5 to 1440. Default 60."
+                },
+                {
+                    "name": "classification",
+                    "type": "string",
+                    "example": "business",
+                    "required": false,
+                    "description": "business (default) or personal."
+                },
+                {
+                    "name": "external_ref",
+                    "type": "string",
+                    "example": "order-1042",
+                    "required": false,
+                    "description": "Your own reference, returned on every read."
+                }
+            ],
+            "path": "/business/payments",
+            "scope": "payments:request",
+            "access": "business",
+            "method": "POST",
+            "params": [
+            ],
+            "summary": "Create a payment request",
+            "description": "Creates a payment request (a QR code). It does NOT move money: the payer scans it in the ICAN app and approves with their own PIN. Capped per request and per day by the key; needs an Idempotency-Key.",
+            "example_path": null,
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.payments",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/payments",
+            "scope": "payments:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "status",
+                    "type": "string",
+                    "default": "all",
+                    "example": "pending",
+                    "required": false,
+                    "description": "all, pending, completed or expired."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 25,
+                    "required": false,
+                    "description": "1 to 100."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "List payment requests",
+            "description": "The payment requests this business created through the API, with status (pending, completed, expired) and when each was paid. Never who paid.",
+            "example_path": "/business/payments?status=pending",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.payment_get",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/payments/{code}",
+            "scope": "payments:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "path",
+                    "name": "code",
+                    "type": "string",
+                    "example": "PAY_SANDBOX0000B2",
+                    "required": true,
+                    "description": "The payment code."
+                }
+            ],
+            "summary": "Check one payment request",
+            "description": "Status of one payment request: poll this until it says completed.",
+            "example_path": "/business/payments/PAY_SANDBOX0000B2",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.payment_cancel",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/payments/{code}/cancel",
+            "scope": "payments:request",
+            "access": "business",
+            "method": "POST",
+            "params": [
+                {
+                    "in": "path",
+                    "name": "code",
+                    "type": "string",
+                    "example": "PAY_SANDBOX0000B2",
+                    "required": true,
+                    "description": "The payment code."
+                }
+            ],
+            "summary": "Cancel a pending payment request",
+            "description": "Expires a payment request that has not been paid. A paid request cannot be cancelled here.",
+            "example_path": null,
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.inventory",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/inventory",
+            "scope": "inventory:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "status",
+                    "type": "string",
+                    "default": "all",
+                    "example": "expiring",
+                    "required": false,
+                    "description": "all, low, out, expiring, expired or ok."
+                },
+                {
+                    "in": "query",
+                    "name": "q",
+                    "type": "string",
+                    "required": false,
+                    "description": "Search name or SKU."
+                },
+                {
+                    "in": "query",
+                    "name": "category",
+                    "type": "string",
+                    "required": false,
+                    "description": "Filter by category."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 50,
+                    "required": false,
+                    "description": "1 to 200."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "Inventory with expiry tracking",
+            "description": "Every tracked product in your stores: stock, reorder level, nearest expiry date, days left and an expiry status (expired, critical within 7 days, soon within 30, ok).",
+            "example_path": "/business/inventory?status=expiring",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.inventory_expiring",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/inventory/expiring",
+            "scope": "inventory:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "days",
+                    "type": "integer",
+                    "default": 30,
+                    "example": 14,
+                    "required": false,
+                    "description": "Look ahead this many days (1 to 365)."
+                },
+                {
+                    "in": "query",
+                    "name": "include_expired",
+                    "type": "string",
+                    "default": "true",
+                    "required": false,
+                    "description": "false to hide already-expired stock."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 50,
+                    "required": false,
+                    "description": "1 to 200."
+                }
+            ],
+            "summary": "What to sell, discount or pull",
+            "description": "Batches and products by expiry date, first-expired-first-out, with the value at risk, a suggested clearance discount and a price that never falls below cost, and whether you already published it.",
+            "example_path": "/business/inventory/expiring?days=14",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.inventory_summary",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/inventory/summary",
+            "scope": "inventory:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+            ],
+            "summary": "Inventory at a glance",
+            "description": "Product counts, low and out-of-stock, stock value at cost, how much sits in each expiry band, the value at risk and the next three to expire.",
+            "example_path": "/business/inventory/summary",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.cmms_overview",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/cmms/overview",
+            "scope": "cmms:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+            ],
+            "summary": "CMMS overview",
+            "description": "Assets (by status, warranties expiring, cost and book value), consumables below reorder, open requisitions, open and overdue work, department budgets.",
+            "example_path": "/business/cmms/overview",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.cmms_assets",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/cmms/assets",
+            "scope": "cmms:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "q",
+                    "type": "string",
+                    "required": false,
+                    "description": "Search name or asset tag."
+                },
+                {
+                    "in": "query",
+                    "name": "status",
+                    "type": "string",
+                    "example": "in_service",
+                    "required": false,
+                    "description": "Filter by status."
+                },
+                {
+                    "in": "query",
+                    "name": "condition",
+                    "type": "string",
+                    "example": "good",
+                    "required": false,
+                    "description": "Filter by condition."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 50,
+                    "required": false,
+                    "description": "1 to 200."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "CMMS assets",
+            "description": "Equipment with condition, status, acquisition cost, a computed book value (straight-line or declining balance) and warranty days left.",
+            "example_path": "/business/cmms/assets",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.cmms_stock_alerts",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/cmms/stock-alerts",
+            "scope": "cmms:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 50,
+                    "required": false,
+                    "description": "1 to 200."
+                }
+            ],
+            "summary": "CMMS reorder alerts",
+            "description": "Consumables at or below their reorder level, with days of cover from the last 30 days of use, the date to reorder by (allowing for lead time) and a suggested quantity.",
+            "example_path": "/business/cmms/stock-alerts",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.cmms_requisitions",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/cmms/requisitions",
+            "scope": "cmms:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "status",
+                    "type": "string",
+                    "required": false,
+                    "description": "Filter by status."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 50,
+                    "required": false,
+                    "description": "1 to 200."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "CMMS requisitions",
+            "description": "Requisitions with purpose, urgency, status, estimated cost and delivery dates. No names of requesters.",
+            "example_path": "/business/cmms/requisitions",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.cmms_work",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/cmms/work",
+            "scope": "cmms:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "status",
+                    "type": "string",
+                    "example": "in_progress",
+                    "required": false,
+                    "description": "Filter by status."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 50,
+                    "required": false,
+                    "description": "1 to 200."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "CMMS work assignments",
+            "description": "Jobs with status, priority, due date, progress and an overdue flag. Nobody's name or contact is returned.",
+            "example_path": "/business/cmms/work",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.booking_create",
+            "app": "business",
+            "body": [
+                {
+                    "name": "kind",
+                    "type": "string",
+                    "example": "delivery",
+                    "required": false,
+                    "description": "ride (default) or delivery."
+                },
+                {
+                    "name": "from",
+                    "type": "object",
+                    "example": {
+                        "lat": 0.3318,
+                        "lng": 32.5728,
+                        "label": "Kampala Fresh Mart"
+                    },
+                    "required": true,
+                    "description": "Pickup: lat, lng and an optional label."
+                },
+                {
+                    "name": "to",
+                    "type": "object",
+                    "example": {
+                        "lat": 0.3476,
+                        "lng": 32.6025,
+                        "label": "Ntinda, Plot 12"
+                    },
+                    "required": true,
+                    "description": "Drop-off: lat, lng and an optional label."
+                },
+                {
+                    "name": "stops",
+                    "type": "array",
+                    "required": false,
+                    "description": "Up to 3 intermediate points, each {lat, lng}."
+                },
+                {
+                    "name": "at",
+                    "type": "string",
+                    "required": false,
+                    "description": "Price for this ISO date-time (next 14 days)."
+                },
+                {
+                    "name": "notes",
+                    "type": "string",
+                    "required": false,
+                    "description": "Up to 200 characters for the rider."
+                },
+                {
+                    "name": "external_ref",
+                    "type": "string",
+                    "example": "order-1042",
+                    "required": false,
+                    "description": "Your own reference."
+                }
+            ],
+            "path": "/business/bookings",
+            "scope": "bookings:request",
+            "access": "business",
+            "method": "POST",
+            "params": [
+            ],
+            "summary": "Request a ride or delivery",
+            "description": "Prices a journey or delivery and creates a booking REQUEST with a confirm link. It does not book, dispatch or charge: the customer opens the link in BodaGoEra, picks a rider and books with their own session and PIN.",
+            "example_path": null,
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.bookings",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/bookings",
+            "scope": "bookings:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "status",
+                    "type": "string",
+                    "default": "all",
+                    "example": "booked",
+                    "required": false,
+                    "description": "all, awaiting_confirmation, booked, cancelled or expired."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 25,
+                    "required": false,
+                    "description": "1 to 100."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "List booking requests",
+            "description": "The booking requests this business created, with status (awaiting_confirmation, booked, cancelled, expired) and, once booked, the ride's state.",
+            "example_path": "/business/bookings",
+            "cache_seconds": 0
+        },
+        {
+            "id": "business.booking_get",
+            "app": "business",
+            "body": [
+            ],
+            "path": "/business/bookings/{code}",
+            "scope": "bookings:read",
+            "access": "business",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "path",
+                    "name": "code",
+                    "type": "string",
+                    "example": "BKFADE0000000000000001",
+                    "required": true,
+                    "description": "The booking code."
+                }
+            ],
+            "summary": "Track one booking request",
+            "description": "Status of one booking request and, once booked, the ride: accepted, started, completed. Never the rider's or customer's identity.",
+            "example_path": "/business/bookings/BKFADE0000000000000001",
+            "cache_seconds": 0
         }
     ]
 }
