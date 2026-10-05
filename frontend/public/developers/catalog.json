@@ -1,0 +1,619 @@
+{
+    "apps": [
+        {
+            "id": "platform",
+            "name": "Platform",
+            "tagline": "Who you are, how much you have left, and one call that sees the whole family."
+        },
+        {
+            "id": "icanera",
+            "name": "ICANERA",
+            "tagline": "Coin price, candles, FX, tax rules and the public business directory."
+        },
+        {
+            "id": "bodagoera",
+            "name": "BodaGoEra",
+            "tagline": "Stages, districts, ports, fare estimates and rider-card checks."
+        },
+        {
+            "id": "supermarketera",
+            "name": "SupermarketEra",
+            "tagline": "Stores, a product catalogue and barcode lookups."
+        },
+        {
+            "id": "farmagentera",
+            "name": "FarmAgentEra",
+            "tagline": "Marketplace listings, a produce price board and crop knowledge."
+        }
+    ],
+    "version": "v1",
+    "endpoints": [
+        {
+            "id": "platform.whoami",
+            "app": "platform",
+            "path": "/whoami",
+            "method": "GET",
+            "params": [
+            ],
+            "summary": "Who am I?",
+            "description": "Your app, key mode, approved apps, limits and how much of today's quota is used. The first call to make.",
+            "example_path": "/whoami",
+            "cache_seconds": 0
+        },
+        {
+            "id": "platform.pulse",
+            "app": "platform",
+            "path": "/pulse",
+            "method": "GET",
+            "params": [
+            ],
+            "summary": "The whole family in one call",
+            "description": "A snapshot across every app your key is approved for: the ICAN price, BodaGoEra stages, SupermarketEra stores and FarmAgentEra listings.",
+            "example_path": "/pulse",
+            "cache_seconds": 30
+        },
+        {
+            "id": "icanera.coin_price",
+            "app": "icanera",
+            "path": "/icanera/coin/price",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "currency",
+                    "type": "string",
+                    "default": "USD",
+                    "example": "UGX",
+                    "required": false,
+                    "description": "3-letter currency code."
+                }
+            ],
+            "summary": "ICAN coin price",
+            "description": "The live price of 1 ICAN in any of ~170 currencies, with 24h and 7d change.",
+            "example_path": "/icanera/coin/price?currency=UGX",
+            "cache_seconds": 30
+        },
+        {
+            "id": "icanera.coin_candles",
+            "app": "icanera",
+            "path": "/icanera/coin/candles",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "interval",
+                    "type": "string",
+                    "default": "1h",
+                    "example": "15m",
+                    "required": false,
+                    "description": "One of 5m, 15m, 1h, 4h, 1d."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 48,
+                    "example": 24,
+                    "required": false,
+                    "description": "How many candles (1 to 288)."
+                }
+            ],
+            "summary": "ICAN price candles",
+            "description": "OHLC candles in UGX, newest bins last, ready for a chart.",
+            "example_path": "/icanera/coin/candles?interval=1h&limit=24",
+            "cache_seconds": 60
+        },
+        {
+            "id": "icanera.fx_rates",
+            "app": "icanera",
+            "path": "/icanera/fx/rates",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "currency",
+                    "type": "string",
+                    "example": "KES",
+                    "required": false,
+                    "description": "Filter by currency code."
+                },
+                {
+                    "in": "query",
+                    "name": "country",
+                    "type": "string",
+                    "example": "KE",
+                    "required": false,
+                    "description": "Filter by 2-letter country code."
+                },
+                {
+                    "in": "query",
+                    "name": "region",
+                    "type": "string",
+                    "example": "Africa",
+                    "required": false,
+                    "description": "Filter by region."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 50,
+                    "required": false,
+                    "description": "1 to 250."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "FX rates and inflation",
+            "description": "Exchange rates against the Ugandan shilling, with each country's latest inflation.",
+            "example_path": "/icanera/fx/rates?region=Africa&limit=10",
+            "cache_seconds": 300
+        },
+        {
+            "id": "icanera.countries",
+            "app": "icanera",
+            "path": "/icanera/countries",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "currency",
+                    "type": "string",
+                    "example": "UGX",
+                    "required": false,
+                    "description": "Only countries using this currency."
+                }
+            ],
+            "summary": "Countries and currencies",
+            "description": "Which currency each supported country uses.",
+            "example_path": "/icanera/countries",
+            "cache_seconds": 3600
+        },
+        {
+            "id": "icanera.tax_rules",
+            "app": "icanera",
+            "path": "/icanera/tax/{country}",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "path",
+                    "name": "country",
+                    "type": "string",
+                    "example": "UG",
+                    "required": true,
+                    "description": "2-letter ISO country code."
+                }
+            ],
+            "summary": "Tax rules by country",
+            "description": "Published tax brackets and rates for a country. Informational, never tax advice.",
+            "example_path": "/icanera/tax/UG",
+            "cache_seconds": 3600
+        },
+        {
+            "id": "icanera.businesses",
+            "app": "icanera",
+            "path": "/icanera/businesses",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "q",
+                    "type": "string",
+                    "example": "agro",
+                    "required": false,
+                    "description": "Search by name or industry."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 20,
+                    "required": false,
+                    "description": "1 to 50."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "Public business directory",
+            "description": "Businesses that chose to be listed publicly, with open jobs and notices counts.",
+            "example_path": "/icanera/businesses?q=agro",
+            "cache_seconds": 120
+        },
+        {
+            "id": "bodagoera.stages",
+            "app": "bodagoera",
+            "path": "/bodagoera/stages",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "q",
+                    "type": "string",
+                    "example": "wandegeya",
+                    "required": false,
+                    "description": "Search by stage or area."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 50,
+                    "required": false,
+                    "description": "1 to 200."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "Boda stages",
+            "description": "Where riders gather: names, areas and coordinates.",
+            "example_path": "/bodagoera/stages",
+            "cache_seconds": 120
+        },
+        {
+            "id": "bodagoera.districts",
+            "app": "bodagoera",
+            "path": "/bodagoera/districts",
+            "method": "GET",
+            "params": [
+            ],
+            "summary": "Districts served",
+            "description": "The districts BodaGoEra operates in.",
+            "example_path": "/bodagoera/districts",
+            "cache_seconds": 600
+        },
+        {
+            "id": "bodagoera.ports",
+            "app": "bodagoera",
+            "path": "/bodagoera/ports",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "country",
+                    "type": "string",
+                    "example": "Kenya",
+                    "required": false,
+                    "description": "Filter by country name."
+                }
+            ],
+            "summary": "Ports",
+            "description": "Sea ports used for cross-border journeys, with UN/LOCODE.",
+            "example_path": "/bodagoera/ports?country=Kenya",
+            "cache_seconds": 600
+        },
+        {
+            "id": "bodagoera.fare_estimate",
+            "app": "bodagoera",
+            "path": "/bodagoera/fare/estimate",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "km",
+                    "type": "number",
+                    "example": 7.5,
+                    "required": true,
+                    "description": "Distance in kilometres (0.1 to 500)."
+                },
+                {
+                    "in": "query",
+                    "name": "kind",
+                    "type": "string",
+                    "default": "ride",
+                    "example": "cargo",
+                    "required": false,
+                    "description": "ride or cargo."
+                }
+            ],
+            "summary": "Fare estimate",
+            "description": "Estimate a ride or cargo fare from the published rates: max(minimum, base + per-km x distance).",
+            "example_path": "/bodagoera/fare/estimate?km=7.5",
+            "cache_seconds": 60
+        },
+        {
+            "id": "bodagoera.verify_rider",
+            "app": "bodagoera",
+            "path": "/bodagoera/riders/verify",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "code",
+                    "type": "string",
+                    "example": "SAMPLE0000000000valid",
+                    "required": true,
+                    "description": "The verification code on the rider card. In the sandbox, any code ending in 'valid' passes."
+                }
+            ],
+            "summary": "Verify a rider card",
+            "description": "Is this the rider the card says? Pass the code from the card's QR. Returns only what a passenger needs.",
+            "example_path": "/bodagoera/riders/verify?code=SAMPLE0000000000valid",
+            "cache_seconds": 0
+        },
+        {
+            "id": "supermarketera.stores",
+            "app": "supermarketera",
+            "path": "/supermarketera/stores",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "q",
+                    "type": "string",
+                    "example": "fresh",
+                    "required": false,
+                    "description": "Search by store name."
+                },
+                {
+                    "in": "query",
+                    "name": "city",
+                    "type": "string",
+                    "example": "Kampala",
+                    "required": false,
+                    "description": "Filter by city."
+                },
+                {
+                    "in": "query",
+                    "name": "country",
+                    "type": "string",
+                    "example": "Uganda",
+                    "required": false,
+                    "description": "Filter by country."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 25,
+                    "required": false,
+                    "description": "1 to 100."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "Stores",
+            "description": "Stores on SupermarketEra with their city and what they offer.",
+            "example_path": "/supermarketera/stores?city=Kampala",
+            "cache_seconds": 120
+        },
+        {
+            "id": "supermarketera.catalog",
+            "app": "supermarketera",
+            "path": "/supermarketera/catalog",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "q",
+                    "type": "string",
+                    "example": "soap",
+                    "required": false,
+                    "description": "Search by name or brand."
+                },
+                {
+                    "in": "query",
+                    "name": "category",
+                    "type": "string",
+                    "example": "Bakery",
+                    "required": false,
+                    "description": "Filter by category."
+                },
+                {
+                    "in": "query",
+                    "name": "brand",
+                    "type": "string",
+                    "required": false,
+                    "description": "Filter by brand."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 25,
+                    "required": false,
+                    "description": "1 to 100."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "Product catalogue",
+            "description": "Wholesale catalogue items: names, brands, units and prices. No stock levels, cost prices or supplier identities.",
+            "example_path": "/supermarketera/catalog?q=bread",
+            "cache_seconds": 60
+        },
+        {
+            "id": "supermarketera.barcode",
+            "app": "supermarketera",
+            "path": "/supermarketera/barcode/{code}",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "path",
+                    "name": "code",
+                    "type": "string",
+                    "example": "6001234567890",
+                    "required": true,
+                    "description": "Barcode or SKU. In the sandbox try 6001234567890."
+                }
+            ],
+            "summary": "Look up a barcode",
+            "description": "Find a catalogue item by barcode or SKU.",
+            "example_path": "/supermarketera/barcode/6001234567890",
+            "cache_seconds": 300
+        },
+        {
+            "id": "supermarketera.categories",
+            "app": "supermarketera",
+            "path": "/supermarketera/categories",
+            "method": "GET",
+            "params": [
+            ],
+            "summary": "Catalogue categories",
+            "description": "Every category with how many items it holds.",
+            "example_path": "/supermarketera/categories",
+            "cache_seconds": 300
+        },
+        {
+            "id": "farmagentera.listings",
+            "app": "farmagentera",
+            "path": "/farmagentera/listings",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "type",
+                    "type": "string",
+                    "default": "all",
+                    "example": "produce",
+                    "required": false,
+                    "description": "all, produce, land or service."
+                },
+                {
+                    "in": "query",
+                    "name": "q",
+                    "type": "string",
+                    "example": "matooke",
+                    "required": false,
+                    "description": "Search titles and descriptions."
+                },
+                {
+                    "in": "query",
+                    "name": "district",
+                    "type": "string",
+                    "example": "Mbarara",
+                    "required": false,
+                    "description": "Filter by district."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 25,
+                    "required": false,
+                    "description": "1 to 100."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "Marketplace listings",
+            "description": "Produce, land and services for sale or hire. No seller identity or contact details: people connect inside the app.",
+            "example_path": "/farmagentera/listings?type=produce",
+            "cache_seconds": 60
+        },
+        {
+            "id": "farmagentera.price_board",
+            "app": "farmagentera",
+            "path": "/farmagentera/price-board",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "district",
+                    "type": "string",
+                    "example": "Masaka",
+                    "required": false,
+                    "description": "Only listings in this district."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 30,
+                    "required": false,
+                    "description": "1 to 100."
+                }
+            ],
+            "summary": "Produce price board",
+            "description": "What each crop is asking right now: listing count, lowest, average and highest price, total quantity.",
+            "example_path": "/farmagentera/price-board",
+            "cache_seconds": 120
+        },
+        {
+            "id": "farmagentera.crops",
+            "app": "farmagentera",
+            "path": "/farmagentera/crops",
+            "method": "GET",
+            "params": [
+                {
+                    "in": "query",
+                    "name": "q",
+                    "type": "string",
+                    "example": "maize",
+                    "required": false,
+                    "description": "Search by name."
+                },
+                {
+                    "in": "query",
+                    "name": "season",
+                    "type": "string",
+                    "required": false,
+                    "description": "Filter by season."
+                },
+                {
+                    "in": "query",
+                    "name": "type",
+                    "type": "string",
+                    "example": "cereal",
+                    "required": false,
+                    "description": "Filter by crop type."
+                },
+                {
+                    "in": "query",
+                    "name": "limit",
+                    "type": "integer",
+                    "default": 25,
+                    "required": false,
+                    "description": "1 to 100."
+                },
+                {
+                    "in": "query",
+                    "name": "offset",
+                    "type": "integer",
+                    "default": 0,
+                    "required": false,
+                    "description": "For paging."
+                }
+            ],
+            "summary": "Crop varieties",
+            "description": "Reference data: season, maturity days, expected yield, soil pH and water needs.",
+            "example_path": "/farmagentera/crops?q=maize",
+            "cache_seconds": 3600
+        }
+    ]
+}
