@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt, Map } from 'lucide-react';
+import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt, Map, Trash2, ChevronDown, History } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import RideCommsBar from './RideCommsBar';
@@ -8,6 +8,8 @@ import RouteMap from './RouteMap';
 import LiveTrackingMap from './LiveTrackingMap';
 import type { Location } from '../data/mockLocations';
 import { startJobRingLoop, stopJobRingLoop } from '../services/notificationSound';
+import CancelReasonDialog from './CancelReasonDialog';
+import { cancelRide, hideMyRides, RIDER_CANCEL_REASONS } from '../services/orderActions';
 
 function toLocation(name: string, lat: number | null, lng: number | null): Location | null {
   if (lat == null || lng == null) return null;
@@ -76,6 +78,12 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
   // fires once per new job — not on every 4-second poll while the same
   // request is still sitting there waiting for a response.
   const lastChimedRideId = useRef<string | null>(null);
+  // Cancel the active trip (with a reason) and delete finished trips from this rider's history.
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
+  const [pastOpen, setPastOpen] = useState(false);
+  const [pastTrips, setPastTrips] = useState<RideRow[]>([]);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // Scoped by vehicleType, not just riderId — a person can hold more than
   // one mbg_riders row now (multi-vehicle), so requests must only be
@@ -189,6 +197,70 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
       toast.error(e.message || 'Failed to respond');
     } finally {
       setActing(false);
+    }
+  };
+
+  const confirmCancelTrip = async (reason: string) => {
+    if (!active) return;
+    setCancelBusy(true);
+    try {
+      await cancelRide(active.id, reason);
+      toast.info('Trip cancelled');
+      setCancelOpen(false);
+      setPaymentPickerOpen(false);
+      await load();
+      await loadPastTrips();
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not cancel the trip');
+      // The ride may already be over or reassigned — refresh what the screen shows.
+      await load();
+    } finally {
+      setCancelBusy(false);
+    }
+  };
+
+  // Finished trips (completed / cancelled), newest first, minus the ones this
+  // rider deleted. rider_hidden_at only exists once
+  // ADD_CANCEL_WITH_REASON_AND_DELETE_ORDERS.sql has been run — until then the
+  // plain list is shown (and Delete reports that it is not switched on yet).
+  const loadPastTrips = useCallback(async () => {
+    if (!riderRowId) return;
+    const cols = 'id, customer_id, service_type, delivery_mode, pickup_location, dropoff_location, status, fare, rider_earning, created_at';
+    let { data, error } = await supabase
+      .from('mbg_rides')
+      .select(cols)
+      .eq('rider_id', riderRowId)
+      .in('status', ['completed', 'cancelled'])
+      .is('rider_hidden_at', null)
+      .order('created_at', { ascending: false })
+      .limit(15);
+    if (error) {
+      ({ data } = await supabase
+        .from('mbg_rides')
+        .select(cols)
+        .eq('rider_id', riderRowId)
+        .in('status', ['completed', 'cancelled'])
+        .order('created_at', { ascending: false })
+        .limit(15));
+    }
+    setPastTrips((data || []) as unknown as RideRow[]);
+  }, [riderRowId]);
+
+  useEffect(() => {
+    if (pastOpen) loadPastTrips();
+  }, [pastOpen, loadPastTrips, active?.id]);
+
+  const deleteTrip = async (id: string) => {
+    setDeletingId(id);
+    try {
+      const { hiddenIds, skipped } = await hideMyRides([id]);
+      setPastTrips(prev => prev.filter(t => !hiddenIds.includes(t.id)));
+      if (skipped.length > 0) toast.error(skipped[0].reason);
+      else toast.success('Deleted');
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not delete');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -479,6 +551,14 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
                   Mark Delivered — Complete Trip
                 </button>
               )}
+
+              <button
+                onClick={() => setCancelOpen(true)}
+                disabled={acting || completingMethod !== null}
+                className="w-full mt-3 py-2.5 bg-white border-2 border-red-300 text-red-600 font-semibold rounded-lg hover:bg-red-50 disabled:opacity-50 flex items-center justify-center gap-2 text-sm"
+              >
+                <X size={16} /> Cancel this trip
+              </button>
             </div>
           )}
 
@@ -489,8 +569,60 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
               <p className="text-sm mt-1">Make sure you're available and your areas/vehicle info are up to date.</p>
             </div>
           )}
+
+          <div className="bg-white rounded-xl shadow-sm border border-slate-100">
+            <button
+              type="button"
+              onClick={() => setPastOpen(v => !v)}
+              aria-expanded={pastOpen}
+              className="flex w-full items-center justify-between gap-3 p-4 text-left"
+            >
+              <span className="flex items-center gap-2 font-semibold text-slate-700"><History size={16} className="text-orange-500" /> Past trips</span>
+              <ChevronDown size={16} className={`text-slate-400 transition-transform ${pastOpen ? 'rotate-180' : ''}`} />
+            </button>
+            {pastOpen && (
+              <div className="px-4 pb-4">
+                {pastTrips.length === 0 ? (
+                  <p className="py-3 text-sm text-slate-400">No finished trips to show.</p>
+                ) : (
+                  pastTrips.map(t => (
+                    <div key={t.id} className="flex items-center gap-3 border-t border-slate-100 py-3 first:border-0">
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-1 break-words text-sm font-semibold text-slate-800">{t.pickup_location}</p>
+                        <p className="line-clamp-1 break-words text-xs text-slate-400">to {t.dropoff_location}</p>
+                        <p className="mt-0.5 text-[11px] text-slate-400">
+                          <span className="font-semibold capitalize">{t.status}</span> · {new Date(t.created_at).toLocaleDateString()}
+                          {t.status === 'completed' && t.rider_earning != null && <> · UGX {Number(t.rider_earning).toLocaleString()}</>}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => deleteTrip(t.id)}
+                        disabled={deletingId === t.id}
+                        aria-label="Delete this trip from my list"
+                        className="inline-flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-50"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
+
+      <CancelReasonDialog
+        open={cancelOpen}
+        title="Cancel this trip?"
+        description={active ? `${active.pickup_location} → ${active.dropoff_location}` : undefined}
+        reasons={RIDER_CANCEL_REASONS}
+        confirmLabel="Cancel trip"
+        busy={cancelBusy}
+        onConfirm={confirmCancelTrip}
+        onClose={() => setCancelOpen(false)}
+      />
 
       {deliveryReceipt && (
         <DeliveryReceiptCard

@@ -3,6 +3,9 @@
 // single ICAN payment, and dispatched at exactly this price (see
 // ADD_JOURNEY_PREPAID_LEG_FARES.sql) — no time-of-day multiplier, no wallet
 // surcharge, no second charge when the rider completes it.
+//
+// The ride from the arrival airport to the destination (the last mile) is priced
+// the same way — real road distance, same base + per-km rate — see priceLastMileUgx.
 
 const EARTH_RADIUS_KM = 6371;
 
@@ -29,30 +32,148 @@ export function originAirportOf(offer) {
   };
 }
 
+/** The airport the last flight lands at, as Duffel describes it in the offer. */
+export function arrivalAirportOf(offer) {
+  const segments = offer?.slices?.[0]?.segments;
+  const destination = segments?.[segments.length - 1]?.destination;
+  if (!destination) return null;
+  const lat = Number(destination.latitude);
+  const lng = Number(destination.longitude);
+  return {
+    iataCode: destination.iata_code || null,
+    name: destination.name || destination.city_name || destination.iata_code || 'Airport',
+    countryCode: destination.iata_country_code || null,
+    lat: Number.isFinite(lat) ? lat : null,
+    lng: Number.isFinite(lng) ? lng : null
+  };
+}
+
+const isPoint = (p) => !!p && p.lat !== null && p.lng !== null && p.lat !== undefined && p.lng !== undefined
+  && Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng));
+
+// A quote and the confirm that follows it must agree to the shilling, so the
+// distance for a pair of points is worked out once and remembered for a while
+// (OSRM is deterministic, but a lookup that timed out at quote time must not
+// price differently at confirm time just because the router answered then).
+const ROAD_CACHE_TTL_MS = 15 * 60 * 1000;
+const roadCache = new Map();
+const OSRM_TIMEOUT_MS = 4000;
+
 /**
- * Fare (UGX) for the ride from the customer's pickup to the departure airport:
- * the platform's normal base + per-km rate over the real distance, never below
- * the minimum fare. Falls back to the minimum fare when either end has no
- * coordinates (the ride still gets a sensible price, just not a distance one).
+ * The real DRIVING distance between two points (km): OSRM's road route, the same
+ * router the app's maps use. When the router can't answer in time, the straight
+ * line is stretched by a road factor (default 1.3, the same factor the dispatch
+ * planner assumes) — a straight line always under-prices a real road trip.
+ * `source` says which one was used ('road' | 'estimate').
  */
-export async function priceAirportTransferUgx(supabaseAdmin, pickup, airport) {
+export async function roadDistanceKm(from, to, roadFactor = 1.3) {
+  const key = [from.lat, from.lng, to.lat, to.lng].map((n) => Number(n).toFixed(4)).join(',');
+  const hit = roadCache.get(key);
+  if (hit && Date.now() - hit.at < ROAD_CACHE_TTL_MS) return hit.value;
+
+  let value;
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${Number(from.lng)},${Number(from.lat)};${Number(to.lng)},${Number(to.lat)}?overview=false`;
+    const res = await fetch(url, { signal: AbortSignal.timeout(OSRM_TIMEOUT_MS) });
+    const data = res.ok ? await res.json() : null;
+    const meters = data?.code === 'Ok' ? data.routes?.[0]?.distance : null;
+    if (Number.isFinite(meters) && meters > 0) value = { km: meters / 1000, source: 'road' };
+  } catch {
+    // fall through to the estimate
+  }
+  if (!value) {
+    value = { km: haversineKm(Number(from.lat), Number(from.lng), Number(to.lat), Number(to.lng)) * roadFactor, source: 'estimate' };
+  }
+  roadCache.set(key, { at: Date.now(), value });
+  return value;
+}
+
+/** Launch floor of the ICAN price in UGX (mirrors pricing.js) — turns a UGX rate into its coin equivalent when no coin rate is set. */
+const ICAN_FLOOR_UGX = 5000;
+
+async function rideRates(supabaseAdmin) {
   const setting = async (key, fallback) => {
     const { data } = await supabaseAdmin.rpc('mbg_get_setting_numeric', { p_key: key, p_default: fallback });
     const n = Number(data);
     return Number.isFinite(n) && n > 0 ? n : fallback;
   };
-  const [baseFare, perKm, minFare] = await Promise.all([
+  const [baseFare, perKm, minFare, roadFactor] = await Promise.all([
     setting('ride.base_fare', 1000),
     setting('ride.per_km_rate', 1000),
-    setting('ride.minimum_fare', 2000)
+    setting('ride.minimum_fare', 2000),
+    setting('journey.road_distance_factor', 1.3)
   ]);
+  // Global journeys are priced in coins: a rate fixed in ICAN keeps its value as the
+  // shilling (or any local currency) loses it. Unless set explicitly, the coin rate is
+  // today's UGX rate at the ICAN launch floor, so nothing jumps when this switches on.
+  const [baseIcan, perKmIcan, minIcan] = await Promise.all([
+    setting('journey.global.base_fare_ican', baseFare / ICAN_FLOOR_UGX),
+    setting('journey.global.per_km_ican', perKm / ICAN_FLOOR_UGX),
+    setting('journey.global.minimum_fare_ican', minFare / ICAN_FLOOR_UGX)
+  ]);
+  return { baseFare, perKm, minFare, roadFactor, baseIcan, perKmIcan, minIcan };
+}
 
-  const havePoints = [pickup?.lat, pickup?.lng, airport?.lat, airport?.lng].every((v) => Number.isFinite(Number(v)) && v !== null);
-  if (!havePoints) return { fareUgx: minFare, distanceKm: null };
+const round8 = (n) => Number(Number(n).toFixed(8));
 
-  const distanceKm = haversineKm(Number(pickup.lat), Number(pickup.lng), airport.lat, airport.lng);
-  const fareUgx = Math.round(Math.max(minFare, baseFare + distanceKm * perKm) / 100) * 100;
-  return { fareUgx, distanceKm: Math.round(distanceKm * 10) / 10 };
+/**
+ * Fare for one ground leg of a journey between two points: the platform's normal
+ * base + per-km rate over the real road distance, never below the minimum fare.
+ *
+ * Domestic journeys are priced in UGX (rounded to 100). A GLOBAL journey
+ * (`coins: { icanPriceUgx }`) is priced in ICAN with the coin rates, and `fareUgx`
+ * is just that amount's value at the live price, for the records.
+ *
+ * Both are null when either end has no coordinates — the caller decides the
+ * fallback (first leg: minimum fare; last mile: a flat estimate), because a
+ * missing end is not the same as a short trip.
+ */
+export async function priceGroundLegUgx(supabaseAdmin, from, to, coins = null) {
+  const rates = await rideRates(supabaseAdmin);
+  const ugxOf = (ican) => Math.round((ican * coins.icanPriceUgx) / 100) * 100;
+  const fallback = { fareUgx: null, fareIcan: null, distanceKm: null, source: null, minFare: rates.minFare, minIcan: rates.minIcan };
+  if (!isPoint(from) || !isPoint(to)) return fallback;
+  const { km, source } = await roadDistanceKm(from, to, rates.roadFactor);
+  const distanceKm = Math.round(km * 10) / 10;
+
+  if (coins) {
+    const fareIcan = round8(Math.max(rates.minIcan, rates.baseIcan + km * rates.perKmIcan));
+    return { ...fallback, fareIcan, fareUgx: ugxOf(fareIcan), distanceKm, source };
+  }
+  const fareUgx = Math.round(Math.max(rates.minFare, rates.baseFare + km * rates.perKm) / 100) * 100;
+  return { ...fallback, fareUgx, distanceKm, source };
+}
+
+/**
+ * Fare for the ride from the customer's pickup to the departure airport. Falls back
+ * to the minimum fare when either end has no coordinates (the ride still gets a
+ * sensible price, just not a distance one).
+ */
+export async function priceAirportTransferUgx(supabaseAdmin, pickup, airport, coins = null) {
+  const leg = await priceGroundLegUgx(supabaseAdmin, pickup, airport, coins);
+  if (leg.fareUgx === null) {
+    return coins
+      ? { fareUgx: Math.round((leg.minIcan * coins.icanPriceUgx) / 100) * 100, fareIcan: leg.minIcan, distanceKm: null, source: null }
+      : { fareUgx: leg.minFare, fareIcan: null, distanceKm: null, source: null };
+  }
+  return { fareUgx: leg.fareUgx, fareIcan: leg.fareIcan, distanceKm: leg.distanceKm, source: leg.source };
+}
+
+/**
+ * Fare for the last mile: from the arrival airport to the customer's destination,
+ * priced exactly like the first leg. When the destination has no pin (or the airport
+ * has no coordinates) the distance is unknown, so a flat estimate is kept instead of
+ * guessing a distance (`flatFallbackUgx`, turned into coins at the launch floor for
+ * a global journey).
+ */
+export async function priceLastMileUgx(supabaseAdmin, airport, destination, flatFallbackUgx, coins = null) {
+  const leg = await priceGroundLegUgx(supabaseAdmin, airport, destination, coins);
+  if (leg.fareUgx === null) {
+    if (!coins) return { fareUgx: flatFallbackUgx, fareIcan: null, distanceKm: null, source: null };
+    const fareIcan = round8(flatFallbackUgx / ICAN_FLOOR_UGX);
+    return { fareUgx: Math.round((fareIcan * coins.icanPriceUgx) / 100) * 100, fareIcan, distanceKm: null, source: null };
+  }
+  return { fareUgx: leg.fareUgx, fareIcan: leg.fareIcan, distanceKm: leg.distanceKm, source: leg.source };
 }
 
 /**

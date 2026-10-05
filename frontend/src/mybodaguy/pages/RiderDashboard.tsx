@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Bike, Settings, Map as MapIcon, ShoppingBag, User, Package, Bell, Car, Truck, Gift,
-  Home, LayoutGrid, X, Star, ArrowRight, Vote, type LucideIcon,
+  Home, LayoutGrid, X, Star, ArrowRight, IdCard, Vote, type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
@@ -9,6 +9,7 @@ import RiderModeSelector from '../components/RiderModeSelector';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
 import RiderICANEarnings from '../components/RiderICANEarnings';
+import RiderMyCard from '../components/RiderMyCard';
 import IcanCoinCard from '../components/IcanCoinCard';
 import RewardsPointsCard from '../components/RewardsPointsCard';
 import RiderEarningsCard, { buildWeekEarnings, type DayEarning } from '../components/RiderEarningsCard';
@@ -31,7 +32,7 @@ interface RiderDashboardProps {
   onGoToWallet?: () => void;
 }
 
-type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards' | 'vote';
+type TabType = 'overview' | 'requests' | 'card' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards' | 'vote';
 
 // emoji drives the desktop tab strip; icon drives the phone section bar and
 // menu sheet. 'requests' and 'vote' are deliberately not in NAV_TABS — they
@@ -40,6 +41,7 @@ type TabType = 'overview' | 'requests' | 'mode' | 'locations' | 'partnerships' |
 const TAB_META: Record<TabType, { label: string; emoji: string; icon: LucideIcon }> = {
   overview:     { label: 'Overview',   emoji: '🏠', icon: Home },
   requests:     { label: 'Requests',   emoji: '🔔', icon: Bell },
+  card:         { label: 'My Card',    emoji: '💳', icon: IdCard },
   mode:         { label: 'Work Mode',  emoji: '⚙️', icon: Settings },
   locations:    { label: 'Areas',      emoji: '📍', icon: MapIcon },
   partnerships: { label: 'Markets',    emoji: '🛒', icon: ShoppingBag },
@@ -47,7 +49,7 @@ const TAB_META: Record<TabType, { label: string; emoji: string; icon: LucideIcon
   rewards:      { label: 'Rewards',    emoji: '🎁', icon: Gift },
   vote:         { label: 'Vote',       emoji: '🗳️', icon: Vote },
 };
-const NAV_TABS: TabType[] = ['overview', 'mode', 'locations', 'partnerships', 'deliveries', 'rewards'];
+const NAV_TABS: TabType[] = ['overview', 'card', 'mode', 'locations', 'partnerships', 'deliveries', 'rewards'];
 
 // True while this user has an active (accepted/in_progress) ride that is
 // the dispatched vehicle for a journey's sea_leg — i.e. mid-voyage, departed
@@ -442,6 +444,8 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
   const [showProfileModal, setShowProfileModal] = useState(false);
   const voteAttention = useLeadershipAttention(user?.id);
   const { stats: riderStats, loading: riderStatsLoading, allVehicles, activeVehicleType, activeRiderId, reload: reloadRiderStats } = useRiderStats(user?.id);
+  // Bumped after the rider pays for their ID card so the wallet cards re-read the balance.
+  const [walletRefresh, setWalletRefresh] = useState(0);
   const { totalCount: totalJobsCount, insights: demandInsights, week, pendingCount, activeCount } =
     useRiderActivity(activeRiderId, riderStats?.operatorType === 'escort');
   const [switchingVehicle, setSwitchingVehicle] = useState(false);
@@ -748,6 +752,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
               </span>
             </button>
 
+            {/* ID card — a compact entry that opens the My Card tab. It only shows when
+                there is something to do (a card to pay for or show, or one to request). */}
+            <RiderMyCard variant="tile" onOpen={() => setActiveTab('card')} />
+
             {/* Earnings — today as the headline, the week as the shape of it */}
             <RiderEarningsCard week={weekForCard} loading={weekForCard === null} />
 
@@ -793,12 +801,12 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
 
             {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
             <div className="grid grid-cols-2 gap-3">
-              <IcanCoinCard variant="premium" userId={user?.id} onGoToWallet={onGoToWallet} />
+              <IcanCoinCard key={walletRefresh} variant="premium" userId={user?.id} onGoToWallet={onGoToWallet} />
               <RewardsPointsCard variant="premium" userId={user?.id} onOpen={() => setActiveTab('rewards')} />
             </div>
 
             {/* ICAN Wallet Earnings */}
-            <RiderICANEarnings user={user} />
+            <RiderICANEarnings key={walletRefresh} user={user} />
 
             {/* A vote that needs this rider's ballot — the thing most likely to
                 fail by apathy, so it gets its own banner above everything else. */}
@@ -879,6 +887,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
           </div>
         ) : (
           <RiderRideRequests riderId={user.id} vehicleType={activeVehicleType} collapsed={activeTab !== 'requests'} />
+        )}
+
+        {activeTab === 'card' && (
+          <RiderMyCard variant="page" userId={user?.id} onPaid={() => setWalletRefresh(n => n + 1)} onGoToWallet={onGoToWallet} />
         )}
 
         {activeTab === 'mode' && (

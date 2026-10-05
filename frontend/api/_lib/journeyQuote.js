@@ -1,7 +1,7 @@
-import { originAirportOf, priceAirportTransferUgx } from './transfer.js';
-import { priceJourney } from './pricing.js';
+import { originAirportOf, arrivalAirportOf, priceAirportTransferUgx, priceLastMileUgx } from './transfer.js';
+import { priceJourney, getIcanPrice } from './pricing.js';
 
-/** Flat estimate for the ride from the arrival airport (real per-country fare models are Phase 2). */
+/** Flat estimate for the ride from the arrival airport — used ONLY when the destination has no pin, so no real distance exists. */
 export const DROPOFF_FARE_UGX = 20000;
 
 /** Most travellers Duffel will book on one offer. */
@@ -82,6 +82,13 @@ export async function loadStoreOrder(supabaseAdmin, store) {
   };
 }
 
+/** True when the flight crosses a border — both airports' countries are known and differ. */
+export function isGlobalJourney(originAirport, arrivalAirport) {
+  const from = originAirport?.countryCode;
+  const to = arrivalAirport?.countryCode;
+  return !!from && !!to && from !== to;
+}
+
 /** How many travellers an offer was searched for (Duffel lists one passenger id each). */
 export function partySizeOf(offer) {
   const n = Array.isArray(offer?.passengers) ? offer.passengers.length : 1;
@@ -94,7 +101,7 @@ export function partySizeOf(offer) {
  * confirm endpoint recomputes them before charging, so what is debited never
  * depends on figures the browser sent.
  */
-export async function computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoWeightKg, userId, pickupRide = true, dropoffRide = true, partySize = partySizeOf(offer), parcel = false, goodsIcan = 0 }) {
+export async function computeQuoteAmounts(supabaseAdmin, { pickup, destination, offer, cargoWeightKg, userId, pickupRide = true, dropoffRide = true, partySize = partySizeOf(offer), parcel = false, goodsIcan = 0 }) {
   // One car per ride: refuse a party it can't carry rather than sending a driver who can't take them all.
   // A parcel journey's ground legs carry goods, not the travellers, so seats don't limit them.
   if (!parcel && (pickupRide || dropoffRide) && partySize > CAR_SEATS) throw new RideCapacityError(partySize);
@@ -104,11 +111,22 @@ export async function computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoW
   // re-charged as a normal ride booking — see _lib/transfer.js). A customer who
   // has their own car, or a friend driving them, skips it and is not charged.
   const airport = originAirportOf(offer);
-  const { fareUgx: pickupFareUgx, distanceKm: pickupKm } = pickupRide
-    ? await priceAirportTransferUgx(supabaseAdmin, pickup, airport)
-    : { fareUgx: 0, distanceKm: null };
+  const arrivalAirport = arrivalAirportOf(offer);
 
-  const dropoffFareUgx = dropoffRide ? DROPOFF_FARE_UGX : 0;
+  // A global (cross-border) journey is priced in coins: its ground legs use ICAN rates, so
+  // the fare keeps its value however local currencies move. A domestic one stays in UGX.
+  const isGlobal = isGlobalJourney(airport, arrivalAirport);
+  const coins = isGlobal ? { icanPriceUgx: (await getIcanPrice(supabaseAdmin, 'UGX')).pricePerIcan } : null;
+
+  const { fareUgx: pickupFareUgx, fareIcan: pickupFareIcan, distanceKm: pickupKm, source: pickupDistanceSource } = pickupRide
+    ? await priceAirportTransferUgx(supabaseAdmin, pickup, airport, coins)
+    : { fareUgx: 0, fareIcan: coins ? 0 : null, distanceKm: null, source: null };
+
+  // The last mile: from the airport the flight lands at to the customer's pin,
+  // priced on the real road distance exactly like the ride to the airport.
+  const { fareUgx: dropoffFareUgx, fareIcan: dropoffFareIcan, distanceKm: dropoffKm, source: dropoffDistanceSource } = dropoffRide
+    ? await priceLastMileUgx(supabaseAdmin, arrivalAirport, destination, DROPOFF_FARE_UGX, coins)
+    : { fareUgx: 0, fareIcan: coins ? 0 : null, distanceKm: null, source: null };
 
   // Extra baggage the party brings beyond its free allowance (each traveller has
   // their own) — a per-kg platform surcharge, not a real airline ancillary-baggage booking.
@@ -122,7 +140,7 @@ export async function computeQuoteAmounts(supabaseAdmin, { pickup, offer, cargoW
   // Everything is priced in ICAN at its live value (the airline's fare from its
   // own currency) — see _lib/pricing.js. Unsupported currencies and an
   // unreachable price engine are refused rather than guessed.
-  const priced = await priceJourney(supabaseAdmin, { pickupFareUgx, dropoffFareUgx, cargoFareUgx, offer, userId, goodsIcan });
+  const priced = await priceJourney(supabaseAdmin, { pickupFareUgx, dropoffFareUgx, pickupFareIcan, dropoffFareIcan, cargoFareUgx, offer, userId, goodsIcan });
 
-  return { airport, pickupFareUgx, pickupKm, dropoffFareUgx, cargoFareUgx, weightKg, priced, pickupRide, dropoffRide, partySize, parcel };
+  return { airport, arrivalAirport, isGlobal, pickupFareUgx, pickupKm, pickupDistanceSource, dropoffKm, dropoffDistanceSource, dropoffFareUgx, cargoFareUgx, weightKg, priced, pickupRide, dropoffRide, partySize, parcel };
 }

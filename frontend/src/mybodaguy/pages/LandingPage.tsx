@@ -77,6 +77,8 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
   const [myMessages, setMyMessages] = useState<LandingMessage[]>([]);
   const [submitState, setSubmitState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [boardOpen, setBoardOpen] = useState(false);
+  const [boardVisibleCount, setBoardVisibleCount] = useState(6);
   const [replyDraft, setReplyDraft] = useState('');
   const [replyState, setReplyState] = useState<'idle' | 'sending' | 'error'>('idle');
   const [guestIdentity, setGuestIdentityState] = useState<GuestIdentity | null>(() => getGuestIdentity());
@@ -781,8 +783,22 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
           </p>
         </div>
 
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3 max-w-6xl mx-auto">
-          {threads.map((m) => {
+        <div className="max-w-6xl mx-auto border border-[#C4A052]/30 bg-[#FAF8F3] landing-classic-frame">
+          <button
+            type="button"
+            onClick={() => setBoardOpen((o) => !o)}
+            aria-expanded={boardOpen}
+            className="flex w-full items-center justify-between gap-3 px-6 py-4 text-left font-sans"
+          >
+            <span className="text-sm font-semibold text-[#2C2416]">
+              Community chat · {threads.length} {threads.length === 1 ? 'message' : 'messages'}
+            </span>
+            <span className="text-xs text-[#8B6914]">{boardOpen ? 'Collapse' : 'Tap to open'}</span>
+          </button>
+          {boardOpen && (
+          <div className="border-t border-[#C4A052]/20 p-4">
+          <div className="max-h-[70vh] overflow-y-auto grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          {threads.slice(0, boardVisibleCount).map((m) => {
             const isExpanded = expandedId === m.id;
             const canReply = !!(identity || guestIdentity?.name);
             return (
@@ -917,27 +933,22 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
           {threads.length === 0 && (
             <p className="text-sm text-[#8B6914] col-span-full text-center py-8">No public messages yet — be the first to ask something.</p>
           )}
+          </div>
+          {threads.length > boardVisibleCount && (
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={() => setBoardVisibleCount((c) => c + 6)}
+                className="border border-[#C4A052]/40 px-5 py-2 text-sm font-medium text-[#5C4D3A] transition hover:bg-[#F3EDE3] font-sans"
+              >
+                Load more
+              </button>
+            </div>
+          )}
+          </div>
+          )}
         </div>
 
-        {contributors.length > 0 && (
-          <div className="mt-10 max-w-6xl mx-auto">
-            <p className="text-xs uppercase tracking-[0.3em] text-[#8B6914] font-sans">Community members</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {contributors.map((c) => (
-                <button
-                  key={c.authId || 'guests'}
-                  type="button"
-                  onClick={() => handleSelectContributor(c)}
-                  disabled={c.isGuestGroup}
-                  className="inline-flex items-center gap-2 border border-[#C4A052]/30 bg-[#FAF8F3] px-3 py-1.5 text-xs font-medium text-[#5C4D3A] transition hover:border-[#C4A052] disabled:cursor-default font-sans"
-                >
-                  <UserIcon className="h-3 w-3" /> {c.name}
-                  <span className="text-slate-400">· {c.count} {c.count === 1 ? 'message' : 'messages'}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </section>
 
       {selectedContributor && (

@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Bike, Clock, LogOut, Package, History, Gift, User, Wallet,
   X, CheckCircle, ChevronDown, ArrowRight, Home, ClipboardList, MapPin,
-  CalendarDays, Truck, Building2, LayoutGrid, ScanLine,
+  CalendarDays, Truck, Building2, LayoutGrid, ScanLine, Trash2,
   type LucideIcon,
 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
+import { toast } from 'sonner';
 import EnhancedRideRequest from '../components/EnhancedRideRequest';
 import BecomeOperatorForm from '../components/BecomeOperatorForm';
 import CustomerSelfCheckout from '../components/CustomerSelfCheckout';
@@ -19,7 +20,13 @@ import RideTrackingModal from '../components/RideTrackingModal';
 import ManageBusinessPanel from '../components/ManageBusinessPanel';
 import JourneyTracker from '../components/JourneyTracker';
 import RefundableDeliveries from '../components/RefundableDeliveries';
+import CancelReasonDialog from '../components/CancelReasonDialog';
+import {
+  cancelRide, hideMyRides, isCancellableRideStatus, isFinishedRideStatus,
+  CUSTOMER_CANCEL_REASONS, SUPERMARKET_CANCEL_REASONS,
+} from '../services/orderActions';
 import { computeOrderInsights, shortenLocation } from '../utils/orderInsights';
+import NearbyRidersMap, { type NearbyRider } from '../components/NearbyRidersMap';
 import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { ThemeToggle } from '../../components/ThemeToggle';
@@ -72,7 +79,7 @@ const ALL_TABS: { id: TabType; label: string; emoji: string; icon: LucideIcon }[
 // markup. Live map tracking still opens via onOpenTracking from inside the
 // expanded row, rather than firing straight from a row tap.
 function RideListItem({
-  ride, expanded, onToggle, selfUserId, selfName, contact, escortStatus, onOpenTracking, statusColor, serviceIcon,
+  ride, expanded, onToggle, selfUserId, selfName, contact, escortStatus, onOpenTracking, statusColor, serviceIcon, onCancel, onDelete,
 }: {
   ride: any;
   expanded: boolean;
@@ -84,6 +91,10 @@ function RideListItem({
   onOpenTracking: () => void;
   statusColor: (s: string) => string;
   serviceIcon?: React.ReactNode;
+  /** Cancel (asks for a reason first) — offered while the order is still running. */
+  onCancel?: () => void;
+  /** Remove from my history — offered once the order is over. */
+  onDelete?: () => void;
 }) {
   return (
     <div className="border-b border-slate-100 last:border-0">
@@ -141,6 +152,24 @@ function RideListItem({
               />
             </>
           )}
+          {(onCancel && isCancellableRideStatus(ride.status)) && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="mt-1 w-full py-2 text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            >
+              Cancel this {ride.service_type === 'delivery' ? 'order' : 'ride'}
+            </button>
+          )}
+          {(onDelete && isFinishedRideStatus(ride.status)) && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="mt-1 inline-flex w-full items-center justify-center gap-1.5 py-2 text-xs font-semibold text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            >
+              <Trash2 size={13} /> Delete this {ride.service_type === 'delivery' ? 'order' : 'ride'}
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -168,6 +197,11 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   // that component's in-memory state while actively booking, and is lost on
   // navigation or refresh.
   const [trackedRide, setTrackedRide] = useState<any>(null);
+  // Cancel-with-reason and delete-from-history for the ride/delivery lists.
+  const [cancelTarget, setCancelTarget] = useState<any>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [orderActionBusy, setOrderActionBusy] = useState(false);
   // A booked journey chosen from My Journeys (Orders) to open on the Book a
   // Ride tab, where its live tracking screen lives.
   const [openJourneyId, setOpenJourneyId] = useState<string | null>(null);
@@ -190,6 +224,12 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   // on where to expect the fastest (and, thanks to more riders competing
   // for the same jobs, often cheapest) pickup.
   const [busiestStage, setBusiestStage] = useState<{ stage_name: string; available_riders: number } | null>(null);
+  // Real GPS: the customer's position, and the live riders around it.
+  const [myPos, setMyPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [nearby, setNearby] = useState<{
+    count: number; nearest_km: number | null; eta_min: number | null;
+    stage_name: string | null; stage_lat: number | null; stage_lng: number | null; riders: NearbyRider[];
+  } | null>(null);
   // Best-stocked shop right now — the same "live availability" idea as
   // busiestStage, but for goods instead of riders.
   const [bestStockedStore, setBestStockedStore] = useState<{ store_name: string; location: string | null; available_stock: number } | null>(null);
@@ -216,12 +256,26 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
     const load = async () => {
       const { data: cr } = await supabase.from('mbg_customers').select('id').eq('user_id', user.id).maybeSingle();
       if (!cr?.id) { setRidesLoading(false); return; }
-      const { data } = await supabase
+      const rideCols = 'id, created_at, pickup_location, dropoff_location, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, status, fare, service_type, rider_id';
+      // Orders the customer deleted are hidden (customer_hidden_at). If the
+      // ADD_CANCEL_WITH_REASON_AND_DELETE_ORDERS.sql migration has not been run
+      // yet the column does not exist — fall back to the plain list rather than
+      // showing the customer no orders at all.
+      let { data, error: ridesError } = await supabase
         .from('mbg_rides')
-        .select('id, created_at, pickup_location, dropoff_location, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, status, fare, service_type, rider_id')
+        .select(rideCols)
         .eq('customer_id', cr.id)
+        .is('customer_hidden_at', null)
         .order('created_at', { ascending: false })
         .limit(20);
+      if (ridesError) {
+        ({ data } = await supabase
+          .from('mbg_rides')
+          .select(rideCols)
+          .eq('customer_id', cr.id)
+          .order('created_at', { ascending: false })
+          .limit(20));
+      }
       setRides(data || []);
       setRidesLoading(false);
 
@@ -316,6 +370,35 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
     return () => { cancelled = true; clearInterval(interval); };
   }, [user?.id]);
 
+  // Watch the customer's GPS (silently skipped if denied/unavailable — the
+  // greeting then falls back to the stage-level hint).
+  useEffect(() => {
+    if (!user?.id || !navigator.geolocation) return;
+    const id = navigator.geolocation.watchPosition(
+      p => setMyPos(prev => {
+        const next = { lat: p.coords.latitude, lng: p.coords.longitude };
+        // ignore sub-~50m jitter so we don't refetch on every GPS tick
+        return prev && Math.abs(prev.lat - next.lat) < 0.0005 && Math.abs(prev.lng - next.lng) < 0.0005 ? prev : next;
+      }),
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 },
+    );
+    return () => navigator.geolocation.clearWatch(id);
+  }, [user?.id]);
+
+  // Live riders around the customer's real position, refreshed every 20s.
+  useEffect(() => {
+    if (!user?.id || !myPos) return;
+    let cancelled = false;
+    const load = () => {
+      supabase.rpc('mbg_get_nearby_riders', { p_lat: myPos.lat, p_lng: myPos.lng, p_radius_km: 5 })
+        .then(({ data }) => { if (!cancelled && data) setNearby(data); });
+    };
+    load();
+    const interval = setInterval(load, 20000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [user?.id, myPos]);
+
   useEffect(() => {
     if (!user?.id) return;
     supabase
@@ -364,7 +447,12 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         content: <>Mostly from <strong>{shortenLocation(orderInsights.topLocation)}</strong></>,
       });
     }
-    if (busiestStage) {
+    if (nearby && nearby.count > 0) {
+      slides.push({
+        key: 'riders', emoji: '🏍️', tint: 'bg-emerald-50 text-emerald-700',
+        content: <><strong>{nearby.count}</strong> {nearby.count === 1 ? 'rider' : 'riders'} online near {nearby.stage_name ? <strong>{nearby.stage_name}</strong> : 'you'}{nearby.eta_min != null && <> — nearest ~<strong>{nearby.eta_min} min</strong> away</>}</>,
+      });
+    } else if (busiestStage) {
       slides.push({
         key: 'riders', emoji: '🏍️', tint: 'bg-emerald-50 text-emerald-700',
         content: <><strong>{busiestStage.available_riders}</strong> riders online near <strong>{busiestStage.stage_name}</strong> — fastest pickup</>,
@@ -377,7 +465,73 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
       });
     }
     return slides;
-  }, [totalOrderCount, orderInsights, busiestStage, bestStockedStore]);
+  }, [totalOrderCount, orderInsights, busiestStage, nearby, bestStockedStore]);
+
+  const confirmCancelRide = async (reason: string) => {
+    if (!cancelTarget) return;
+    setOrderActionBusy(true);
+    try {
+      await cancelRide(cancelTarget.id, reason);
+      setRides(prev => prev.map(r => (r.id === cancelTarget.id ? { ...r, status: 'cancelled' } : r)));
+      toast.success(cancelTarget.service_type === 'delivery' ? 'Order cancelled' : 'Ride cancelled');
+      setCancelTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not cancel');
+    } finally {
+      setOrderActionBusy(false);
+    }
+  };
+
+  const confirmDeleteRide = async () => {
+    if (!deleteTarget) return;
+    setOrderActionBusy(true);
+    try {
+      const { hiddenIds, skipped } = await hideMyRides([deleteTarget.id]);
+      setRides(prev => prev.filter(r => !hiddenIds.includes(r.id)));
+      if (skipped.length > 0) toast.error(skipped[0].reason);
+      else toast.success('Deleted');
+      setDeleteTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not delete');
+    } finally {
+      setOrderActionBusy(false);
+    }
+  };
+
+  // "Delete all" in Rides & Deliveries: every FINISHED order the customer has, not just the 20
+  // on screen (older ones would otherwise reappear). Running orders are never touched — the
+  // server refuses them — and payment/wallet records are kept (the orders are only hidden).
+  const finishedRideCount = rides.filter(r => isFinishedRideStatus(r.status)).length;
+  const confirmDeleteAll = async () => {
+    setOrderActionBusy(true);
+    try {
+      let ids: string[] = rides.filter(r => isFinishedRideStatus(r.status)).map(r => r.id);
+      const { data: cr } = await supabase.from('mbg_customers').select('id').eq('user_id', user.id).maybeSingle();
+      if (cr?.id) {
+        const { data: all, error: allError } = await supabase
+          .from('mbg_rides')
+          .select('id')
+          .eq('customer_id', cr.id)
+          .in('status', ['completed', 'cancelled', 'failed'])
+          .is('customer_hidden_at', null)
+          .limit(2000);
+        // Before the delete-orders migration the column is missing: fall back to what is on screen.
+        if (!allError && all) ids = all.map((r: any) => r.id);
+      }
+      const hidden = new Set<string>();
+      for (let i = 0; i < ids.length; i += 200) {
+        const { hiddenIds } = await hideMyRides(ids.slice(i, i + 200));
+        hiddenIds.forEach(id => hidden.add(id));
+      }
+      setRides(prev => prev.filter(r => !hidden.has(r.id)));
+      toast.success(hidden.size === 0 ? 'Nothing to delete' : `Deleted ${hidden.size} ${hidden.size === 1 ? 'order' : 'orders'}`);
+      setDeleteAllOpen(false);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not delete');
+    } finally {
+      setOrderActionBusy(false);
+    }
+  };
 
   const switchTab = (id: TabType) => { setActiveTab(id); setMobileMenu(false); };
 
@@ -498,6 +652,16 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                   <InsightSlider slides={insightSlides} />
                 </div>
               )}
+              {myPos && (
+                <div className="mt-3">
+                  <NearbyRidersMap
+                    me={myPos}
+                    riders={nearby?.riders ?? []}
+                    stage={nearby?.stage_lat != null && nearby?.stage_lng != null && nearby.stage_name
+                      ? { name: nearby.stage_name, lat: nearby.stage_lat, lng: nearby.stage_lng } : null}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
@@ -596,6 +760,8 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                             onOpenTracking={() => setTrackedRide(r)}
                             statusColor={statusColor}
                             serviceIcon={r.service_type === 'delivery' ? <Package size={16} className="text-blue-500" /> : undefined}
+                            onCancel={() => setCancelTarget(r)}
+                            onDelete={() => setDeleteTarget(r)}
                           />
                         ))}
                       </div>
@@ -685,8 +851,17 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             />
           )}
           <div className="classic-card p-5">
-            <div className="mb-3">
+            <div className="mb-3 flex items-center justify-between gap-3">
               <SectionHeading>Rides &amp; Deliveries</SectionHeading>
+              {finishedRideCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setDeleteAllOpen(true)}
+                  className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-600 hover:bg-red-50"
+                >
+                  <Trash2 size={13} /> Delete all
+                </button>
+              )}
             </div>
             {ridesLoading ? (
               <p className="text-slate-400 text-sm">Loading…</p>
@@ -714,6 +889,8 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                     onOpenTracking={() => setTrackedRide(r)}
                     statusColor={statusColor}
                     serviceIcon={r.service_type === 'delivery' ? <Package size={16} className="text-blue-500" /> : <Bike size={16} className="text-orange-500" />}
+                    onCancel={() => setCancelTarget(r)}
+                    onDelete={() => setDeleteTarget(r)}
                   />
                 ))}
               </div>
@@ -770,6 +947,55 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         )}
       </div>
 
+      <CancelReasonDialog
+        open={!!cancelTarget}
+        title={cancelTarget?.service_type === 'delivery' ? 'Cancel this order?' : 'Cancel this ride?'}
+        description={cancelTarget ? `${cancelTarget.pickup_location} → ${cancelTarget.dropoff_location}` : undefined}
+        reasons={cancelTarget?.service_type === 'delivery' ? SUPERMARKET_CANCEL_REASONS : CUSTOMER_CANCEL_REASONS}
+        confirmLabel={cancelTarget?.service_type === 'delivery' ? 'Cancel order' : 'Cancel ride'}
+        busy={orderActionBusy}
+        onConfirm={confirmCancelRide}
+        onClose={() => setCancelTarget(null)}
+      />
+      {deleteAllOpen && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="delete-all-title">
+          <div className="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 text-left shadow-xl">
+            <h4 id="delete-all-title" className="text-lg font-bold text-slate-800">Delete all finished rides &amp; deliveries?</h4>
+            <p className="text-sm text-slate-600">
+              Every completed, cancelled or failed ride and delivery disappears from your list. Anything still running is kept,
+              and payment and wallet records are not touched. This can't be undone.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button type="button" disabled={orderActionBusy} onClick={confirmDeleteAll} className="min-h-[44px] rounded-lg bg-red-600 px-4 font-semibold text-white hover:bg-red-700 disabled:opacity-60">
+                {orderActionBusy ? 'Deleting…' : 'Delete all'}
+              </button>
+              <button type="button" disabled={orderActionBusy} onClick={() => setDeleteAllOpen(false)} className="min-h-[44px] rounded-lg px-4 font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-60">
+                Keep them
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/40 p-4 sm:items-center" role="dialog" aria-modal="true" aria-labelledby="delete-order-title">
+          <div className="w-full max-w-md space-y-4 rounded-2xl bg-white p-5 text-left shadow-xl">
+            <h4 id="delete-order-title" className="text-lg font-bold text-slate-800">
+              Delete this {deleteTarget.service_type === 'delivery' ? 'order' : 'ride'}?
+            </h4>
+            <p className="text-sm text-slate-600">
+              It disappears from your list. Payment and wallet records are kept.
+            </p>
+            <div className="flex flex-col gap-2">
+              <button type="button" disabled={orderActionBusy} onClick={confirmDeleteRide} className="min-h-[44px] rounded-lg bg-red-600 px-4 font-semibold text-white hover:bg-red-700 disabled:opacity-60">
+                {orderActionBusy ? 'Deleting…' : 'Delete'}
+              </button>
+              <button type="button" disabled={orderActionBusy} onClick={() => setDeleteTarget(null)} className="min-h-[44px] rounded-lg px-4 font-semibold text-slate-500 hover:text-slate-700 disabled:opacity-60">
+                Keep it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {trackedRide && (
         <RideTrackingModal
           ride={trackedRide}

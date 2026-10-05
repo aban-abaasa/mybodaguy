@@ -1,0 +1,399 @@
+/* Rider ID card — a credit-card look.
+   ISO ID-1 proportions (85.6 × 54 mm). Everything inside is sized in `cqw`
+   (1% of the card's own width), so the card scales cleanly from a phone to a
+   desktop without any media queries. --rc-a is the division's / stage's accent;
+   --rc-1..3 are its darkened stops, set from the component. */
+
+.rc {
+  container-type: inline-size;
+  width: 100%;
+  max-width: 400px;
+  margin-inline: auto;
+  perspective: 1400px;
+}
+
+.rc-flip {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 85.6 / 54;
+  transform-style: preserve-3d;
+  transition: transform 0.75s cubic-bezier(0.2, 0.7, 0.2, 1);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  outline-offset: 4px;
+  border-radius: 4.4cqw;
+}
+.rc-flip.is-static { cursor: default; }
+.rc-flip.is-flipped { transform: rotateY(180deg); }
+
+.rc-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 4.4cqw;
+  overflow: hidden;
+  color: #fff;
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  box-shadow:
+    0 2.4cqw 5cqw -2cqw rgba(0, 0, 0, 0.6),
+    0 0 0 0.25cqw rgba(255, 255, 255, 0.1) inset;
+}
+
+/* ── Front ─────────────────────────────────────────────────────────────── */
+.rc-front {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(255, 255, 255, 0.2), transparent 55%),
+    repeating-radial-gradient(circle at 18% 130%, rgba(255, 255, 255, 0.07) 0 0.25cqw, transparent 0.25cqw 1.9cqw),
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.035) 0 0.5cqw, transparent 0.5cqw 2.4cqw),
+    linear-gradient(135deg, var(--rc-1), var(--rc-2) 55%, var(--rc-3));
+}
+
+/* A soft light that sweeps across the card now and then, like foil catching it. */
+.rc-front::after {
+  content: '';
+  position: absolute;
+  inset: -20% 0;
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.2) 50%, transparent 58%);
+  transform: translateX(-130%);
+  animation: rc-sweep 7s ease-in-out 1.2s infinite;
+  pointer-events: none;
+}
+
+.rc-pad {
+  position: absolute;
+  inset: 0;
+  padding: 5.4cqw 6cqw;
+}
+
+.rc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.rc-logo {
+  display: flex;
+  align-items: center;
+  gap: 1.6cqw;
+  font-weight: 800;
+  font-style: italic;
+  letter-spacing: 0.01em;
+  font-size: 4.9cqw;
+  line-height: 1;
+  text-shadow: 0 0.3cqw 0.6cqw rgba(0, 0, 0, 0.35);
+}
+.rc-logo svg { width: 8.6cqw; height: 5.6cqw; flex: none; }
+
+.rc-top-right { display: flex; align-items: center; gap: 2.2cqw; }
+.rc-contactless { width: 5cqw; height: 5cqw; opacity: 0.9; }
+
+.rc-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 1cqw;
+  padding: 0.7cqw 2cqw;
+  border-radius: 99cqw;
+  font-size: 2.4cqw;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.32);
+  box-shadow: 0 0 0 0.3cqw rgba(255, 255, 255, 0.18) inset;
+}
+.rc-pill i {
+  width: 1.8cqw;
+  height: 1.8cqw;
+  border-radius: 50%;
+  background: currentColor;
+  display: block;
+}
+.rc-pill.ok { color: #6ee7b7; }
+.rc-pill.warn { color: #fcd34d; }
+.rc-pill.bad { color: #fca5a5; }
+
+.rc-chip {
+  position: absolute;
+  left: 6cqw;
+  top: 20.5cqw;
+  width: 13.4cqw;
+  height: 10cqw;
+  filter: drop-shadow(0 0.4cqw 0.5cqw rgba(0, 0, 0, 0.4));
+}
+
+.rc-photo {
+  position: absolute;
+  right: 6cqw;
+  top: 15cqw;
+  width: 17.5cqw;
+  height: 21.5cqw;
+  border-radius: 2.4cqw;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 0.45cqw var(--rc-a), 0 1.2cqw 2.4cqw rgba(0, 0, 0, 0.45);
+  display: grid;
+  place-items: center;
+  font-size: 9cqw;
+  font-weight: 800;
+}
+
+/* Numbers and names are "embossed": a light edge below, a dark edge above. */
+.rc-emboss {
+  font-family: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Courier New', monospace;
+  text-shadow: 0 0.25cqw 0 rgba(255, 255, 255, 0.28), 0 -0.2cqw 0 rgba(0, 0, 0, 0.55);
+}
+
+.rc-number {
+  position: absolute;
+  left: 6cqw;
+  right: 6cqw;
+  top: 34cqw;
+  font-size: 6.4cqw;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+.rc-bottom {
+  position: absolute;
+  left: 6cqw;
+  right: 6cqw;
+  bottom: 4.8cqw;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 3cqw;
+}
+
+.rc-label {
+  display: block;
+  font-size: 2.1cqw;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+  margin-bottom: 0.5cqw;
+}
+
+.rc-name {
+  display: block;
+  font-size: 4.7cqw;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rc-meta { display: flex; gap: 4cqw; flex: none; }
+.rc-meta b {
+  display: block;
+  font-size: 3.4cqw;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+.rc-place {
+  position: absolute;
+  left: 6cqw;
+  right: 24cqw;
+  bottom: 16.2cqw;
+  font-size: 2.7cqw;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rc-holo {
+  position: absolute;
+  right: 6cqw;
+  bottom: 15cqw;
+  width: 9.2cqw;
+  height: 9.2cqw;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.85), transparent 45%),
+    conic-gradient(from 0deg, #ff7ab8, #ffd36e, #7affc8, #7ab7ff, #c67aff, #ff7ab8);
+  opacity: 0.82;
+  box-shadow: 0 0 0 0.35cqw rgba(255, 255, 255, 0.35), 0 0.6cqw 1.4cqw rgba(0, 0, 0, 0.45);
+  animation: rc-holo 9s linear infinite;
+}
+.rc-holo::after {
+  content: '';
+  position: absolute;
+  inset: 22%;
+  border-radius: 50%;
+  border: 0.3cqw solid rgba(255, 255, 255, 0.7);
+  mix-blend-mode: overlay;
+}
+
+/* A card that is not paid for yet is dimmed and stamped. */
+.rc-front.is-pending { filter: saturate(0.55) brightness(0.92); }
+/* In the empty space between the chip and the photo, so the number stays readable. */
+.rc-stamp {
+  position: absolute;
+  left: 47%;
+  top: 41%;
+  transform: translate(-50%, -50%) rotate(-10deg);
+  padding: 0.8cqw 3cqw;
+  border: 0.6cqw solid rgba(252, 211, 77, 0.85);
+  border-radius: 1.4cqw;
+  color: rgba(252, 211, 77, 0.95);
+  font-size: 5.4cqw;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.28);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+/* ── Back ──────────────────────────────────────────────────────────────── */
+.rc-back {
+  transform: rotateY(180deg);
+  background:
+    repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.03) 0 0.5cqw, transparent 0.5cqw 2.4cqw),
+    linear-gradient(160deg, var(--rc-3), var(--rc-2));
+}
+.rc-stripe {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 5cqw;
+  height: 9.5cqw;
+  background: linear-gradient(#161618, #050506 60%, #161618);
+}
+.rc-sign {
+  position: absolute;
+  left: 6cqw;
+  right: 6cqw;
+  top: 17.4cqw;
+  height: 7.4cqw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2cqw;
+  padding: 0 2.4cqw;
+  border-radius: 0.8cqw;
+  color: #1f2937;
+  background: repeating-linear-gradient(-45deg, #f8f6ee 0 0.9cqw, #e7e3d4 0.9cqw 1.8cqw);
+}
+.rc-sign em {
+  font-family: 'Snell Roundhand', 'Segoe Script', 'Brush Script MT', cursive;
+  font-size: 4.6cqw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rc-cvc {
+  flex: none;
+  padding: 0.5cqw 2cqw;
+  border-radius: 0.8cqw;
+  background: #fff;
+  color: #111827;
+  font-size: 3.6cqw;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  font-family: ui-monospace, 'SF Mono', 'Courier New', monospace;
+  font-style: normal;
+}
+
+.rc-qr-row {
+  position: absolute;
+  left: 6cqw;
+  right: 6cqw;
+  top: 27.2cqw;
+  bottom: 3.8cqw;
+  display: flex;
+  align-items: center;
+  gap: 4.4cqw;
+}
+.rc-qr {
+  flex: none;
+  height: 100%;
+  aspect-ratio: 1;
+  padding: 1.1cqw;
+  border-radius: 1.8cqw;
+  background: #fff;
+  box-shadow: 0 0 0 0.5cqw var(--rc-a);
+  display: grid;
+  place-items: center;
+}
+.rc-qr canvas { width: 100% !important; height: 100% !important; display: block; }
+.rc-qr.is-locked {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 0 0 0.4cqw rgba(255, 255, 255, 0.22) inset;
+  color: rgba(255, 255, 255, 0.7);
+}
+.rc-qr.is-locked svg { width: 45%; height: 45%; }
+
+.rc-fine { min-width: 0; font-size: 2.9cqw; line-height: 1.4; color: rgba(255, 255, 255, 0.82); }
+.rc-fine strong { display: block; font-size: 3.6cqw; color: #fff; margin-bottom: 0.6cqw; }
+.rc-fine small { display: block; margin-top: 1cqw; font-size: 2.3cqw; color: rgba(255, 255, 255, 0.5); }
+
+/* ── Motion ────────────────────────────────────────────────────────────── */
+@keyframes rc-sweep {
+  0%, 62% { transform: translateX(-130%); }
+  100% { transform: translateX(130%); }
+}
+@keyframes rc-holo {
+  to { filter: hue-rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rc-flip { transition: none; }
+  .rc-front::after,
+  .rc-holo { animation: none; }
+}
+
+/* ── Printing ──────────────────────────────────────────────────────────────
+   printRiderCards() puts a sheet of cards in .rc-print-root and calls
+   window.print(). On screen the sheet is hidden; when printing, everything
+   else is hidden instead. The faces are the very same ones shown on screen,
+   sized to a real card (85.6 × 54 mm) — front and back side by side per
+   rider, so each can be cut out along its dashed line. */
+.rc-print-root { display: none; }
+
+@media print {
+  @page { size: A4; margin: 10mm; }
+
+  html, body { background: #fff !important; }
+  body > *:not(.rc-print-root) { display: none !important; }
+
+  .rc-print-root { display: block; color: #111; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  .rc-print-root, .rc-print-root * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .rc-print-row { break-inside: avoid; page-break-inside: avoid; margin: 0 0 7mm; }
+  .rc-print-caption { margin: 0 0 1.6mm; font-size: 8pt; color: #555; }
+  .rc-print-faces { display: flex; gap: 8mm; }
+
+  .rc-print-card {
+    flex: none;
+    width: 85.6mm;
+    max-width: none;
+    margin: 0;
+    perspective: none;
+    outline: 0.2mm dashed #999;
+    outline-offset: 0.8mm;
+    border-radius: 3.8mm;
+  }
+  .rc-print-card .rc-flip {
+    transform: none !important;
+    transform-style: flat;
+    transition: none;
+    cursor: default;
+  }
+  .rc-print-card .rc-face {
+    box-shadow: none;
+    -webkit-backface-visibility: visible;
+    backface-visibility: visible;
+  }
+  .rc-print-card .rc-back { transform: none; }
+  .rc-print-card .rc-front::after { display: none; }
+  .rc-print-card .rc-holo { animation: none; }
+}

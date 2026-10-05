@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid, Vote } from 'lucide-react';
+import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid, Printer, Vote } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { chairpersonService, SubordinateChairperson, CommitteeMember, CommissionRecord } from '../services/chairpersonService';
 import { riderService, Rider } from '../services/riderService';
@@ -8,6 +8,10 @@ import { supabase } from '../services/supabaseClient';
 import { userService } from '../services/userService';
 import { avatarService } from '../services/avatarService';
 import ProfileModal from '../components/ProfileModal';
+import RiderCardsPanel from '../components/RiderCardsPanel';
+import { isPrintableCard, printRiderCards } from '../components/RiderCardPrint';
+import RiderIdCard, { FeesChip, PermitChip, ToneChip } from '../components/RiderIdCard';
+import { riderCardService, isFreshRequest, timeAgo, type RiderCard } from '../services/riderCardService';
 import IcanCoinCard from '../components/IcanCoinCard';
 import LeadershipVote, { useLeadershipAttention } from '../components/LeadershipVote';
 import { ThemeMenuItem } from '../../components/ThemeToggle';
@@ -22,7 +26,7 @@ interface ChairpersonDashboardProps {
   onGoToWallet?: () => void;
 }
 
-type TabType = 'overview' | 'subordinates' | 'riders' | 'vote' | 'commission';
+type TabType = 'overview' | 'subordinates' | 'riders' | 'cards' | 'vote' | 'commission';
 
 export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: ChairpersonDashboardProps) {
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
@@ -30,6 +34,8 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   const [allAssignments, setAllAssignments] = useState<CommitteeMember[]>([]);
   const [subordinates, setSubordinates] = useState<SubordinateChairperson[]>([]);
   const [riders, setRiders] = useState<Rider[]>([]);
+  // The live ID cards of the riders above, by rider id — including one a rider just requested.
+  const [riderCards, setRiderCards] = useState<Record<string, RiderCard>>({});
   const [commissions, setCommissions] = useState<CommissionRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -111,6 +117,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
         }
       }
       setRiders(allRiders);
+      loadRiderCards(assignments);
 
       // Load this chairperson's own real commission earnings (mbg_commissions)
       const myCommissions = await chairpersonService.getMyCommissions(user.id);
@@ -136,6 +143,23 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
       setLoading(false);
     }
   };
+
+  // Every live card (unpaid or active) of the riders in the stages this chairperson
+  // holds, so a card a rider has just requested shows up next to that rider.
+  const loadRiderCards = async (assignments: CommitteeMember[] = allAssignments) => {
+    const stageIds = assignments.filter(a => a.region_type === 'stage').map(a => a.region_id);
+    if (stageIds.length === 0) return;
+    const results = await Promise.all(stageIds.map(id => riderCardService.getStageCards(id)));
+    const byRider: Record<string, RiderCard> = {};
+    for (const { cards } of results) for (const card of cards) byRider[card.rider_id] = card;
+    setRiderCards(byRider);
+  };
+
+  // A rider can request a card at any moment, so look again whenever the Riders tab is opened.
+  useEffect(() => {
+    if (activeTab === 'riders') loadRiderCards();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
 
   const formatRole = (role: string) => {
     return role.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
@@ -267,6 +291,8 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
   const displayName: string =
     user?.user_metadata?.full_name || user?.user_metadata?.name || (user?.email ? String(user.email).split('@')[0] : 'Chairperson');
   const hasStageRole = allAssignments.some(a => a.region_type === 'stage');
+  // Only the top of the hierarchy (district) issues rider ID cards.
+  const isDistrictChair = allAssignments.some(a => a.region_type === 'district');
   const activePct = stats.totalSubordinates > 0
     ? `${((stats.activeSubordinates / stats.totalSubordinates) * 100).toFixed(0)}%`
     : '0%';
@@ -275,6 +301,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
     { id: 'overview', label: 'Overview', icon: TrendingUp },
     { id: 'subordinates', label: 'Chairpersons', icon: Users },
     ...(hasStageRole ? [{ id: 'riders' as TabType, label: 'Riders', icon: Bike }] : []),
+    ...(isDistrictChair ? [{ id: 'cards' as TabType, label: 'Rider Cards', icon: CreditCard }] : []),
     { id: 'vote', label: 'Vote', icon: Vote },
     { id: 'commission', label: 'Commission', icon: DollarSign },
   ];
@@ -453,6 +480,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                 {[
                   { label: 'Manage Chairpersons', desc: 'View and assign', icon: Users, tile: 'bg-sky-50 text-sky-600', tab: 'subordinates' as TabType, show: true },
                   { label: 'Manage Riders', desc: 'View and assign', icon: Bike, tile: 'bg-emerald-50 text-emerald-600', tab: 'riders' as TabType, show: hasStageRole },
+                  { label: 'Rider Cards', desc: 'Issue QR ID cards', icon: CreditCard, tile: 'bg-violet-50 text-violet-600', tab: 'cards' as TabType, show: isDistrictChair },
                   {
                     label: 'Leadership Vote',
                     desc: voteAttention.againstMe > 0
@@ -591,6 +619,53 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
               ]}
             />
 
+            {/* Cards riders have just asked for — issued on the spot, waiting for the rider to pay */}
+            {(() => {
+              const fresh = riders.filter(r => riderCards[r.id] && isFreshRequest(riderCards[r.id]));
+              if (fresh.length === 0) return null;
+              return (
+                <div role="status" className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 p-3.5 text-sm text-amber-900">
+                  <CreditCard size={18} className="mt-0.5 flex-shrink-0" />
+                  <div className="min-w-0">
+                    <p className="font-semibold">
+                      {fresh.length === 1 ? '1 rider has' : `${fresh.length} riders have`} just requested a rider card
+                    </p>
+                    <p className="mt-0.5 text-xs">
+                      {fresh.map(r => `${r.full_name} (${timeAgo(riderCards[r.id].requested_at)})`).join(' · ')}. Open a rider to see the card.
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Print the ID cards of this stage's members — paid cards of active riders only */}
+            {(() => {
+              const ready = riders.map(r => riderCards[r.id]).filter((c): c is RiderCard => !!c && isPrintableCard(c));
+              const waiting = riders.filter(r => riderCards[r.id] && !isPrintableCard(riderCards[r.id])).length;
+              if (ready.length === 0 && waiting === 0) return null;
+              return (
+                <div className="classic-card flex items-center gap-3 p-3.5">
+                  <span className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-full bg-violet-50 text-violet-600 ring-1 ring-inset ring-violet-100">
+                    <Printer size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-classic-display text-base font-semibold leading-tight text-slate-800">Member ID cards</p>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                      {ready.length} ready to print{waiting > 0 ? ` · ${waiting} waiting for the rider to pay` : ''}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={ready.length === 0}
+                    onClick={() => printRiderCards(ready)}
+                    className="classic-btn classic-btn-primary !w-auto !min-h-[38px] !gap-1.5 !rounded-full !px-4 !py-2 !text-[13px] flex-shrink-0"
+                  >
+                    <Printer size={14} /> Print all
+                  </button>
+                </div>
+              );
+            })()}
+
             {/* Riders List */}
             {riders.length === 0 ? (
               <EmptyState
@@ -633,6 +708,15 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                         <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase text-slate-600">
                           {rider.plate_number}
                         </span>
+                        {riderCards[rider.id] && (
+                          isFreshRequest(riderCards[rider.id]) ? (
+                            <ToneChip tone="warn"><CreditCard size={10} /> Card requested</ToneChip>
+                          ) : riderCards[rider.id].status === 'pending_payment' ? (
+                            <ToneChip tone="warn"><CreditCard size={10} /> Card unpaid</ToneChip>
+                          ) : (
+                            <ToneChip tone="ok"><CreditCard size={10} /> Card active</ToneChip>
+                          )
+                        )}
                       </div>
                     </div>
 
@@ -650,6 +734,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
           </div>
         )}
 
+        {activeTab === 'cards' && isDistrictChair && <RiderCardsPanel />}
         {activeTab === 'vote' && (
           <LeadershipVote userId={user.id} />
         )}
@@ -858,6 +943,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
       {selectedRider && (
         <ManageRiderModal
           rider={selectedRider}
+          card={riderCards[selectedRider.id] ?? null}
           onClose={() => setSelectedRider(null)}
           onSuccess={() => {
             setSelectedRider(null);
@@ -1942,11 +2028,13 @@ function ManageSubordinateModal({ subordinate, onClose, onSuccess }: ManageSubor
 // Manage a specific rider — approve / suspend / reactivate
 interface ManageRiderModalProps {
   rider: Rider;
+  // The rider's live ID card, if they have one (or have just requested it).
+  card: RiderCard | null;
   onClose: () => void;
   onSuccess: () => void;
 }
 
-function ManageRiderModal({ rider, onClose, onSuccess }: ManageRiderModalProps) {
+function ManageRiderModal({ rider, card, onClose, onSuccess }: ManageRiderModalProps) {
   const [updating, setUpdating] = useState(false);
 
   const handleSetStatus = async (status: 'active' | 'suspended' | 'inactive') => {
@@ -1963,7 +2051,7 @@ function ManageRiderModal({ rider, onClose, onSuccess }: ManageRiderModalProps) 
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6">
+      <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-xl font-bold text-slate-800">Manage Rider</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
@@ -2013,6 +2101,37 @@ function ManageRiderModal({ rider, onClose, onSuccess }: ManageRiderModalProps) 
             <p className="text-[10px] text-slate-500 font-medium">Completed Rides</p>
             <p className="font-semibold text-slate-800">{rider.completed_rides}</p>
           </div>
+        </div>
+
+        {/* ID card — opens with the rider, including one they have just requested */}
+        <div className="mb-4 pt-3 border-t border-slate-200">
+          <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            <CreditCard size={13} /> Rider ID card
+          </p>
+          {card ? (
+            <div className="space-y-3">
+              <RiderIdCard card={card} />
+              {isPrintableCard(card) ? (
+                <button
+                  type="button"
+                  onClick={() => printRiderCards([card])}
+                  className="classic-btn classic-btn-outline !gap-1.5 !rounded-full"
+                >
+                  <Printer size={15} /> Print card
+                </button>
+              ) : (
+                <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+                  {card.status === 'pending_payment'
+                    ? 'You can print this card once the rider has paid for it.'
+                    : 'This card can’t be printed while the rider is not active.'}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
+              No card yet. The rider can request one from their dashboard, and it is issued instantly.
+            </p>
+          )}
         </div>
 
         {/* Actions */}

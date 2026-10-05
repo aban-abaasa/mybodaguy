@@ -3,7 +3,7 @@ import {
   Bike, Users, MapPin, DollarSign, Settings,
   TrendingUp, LogOut, Menu, X, Shield, Search,
   MessageSquare, RefreshCw, Globe, Lock, Trash2, Send, CheckCircle, Mail, Gift,
-  ShoppingBag, ChevronRight, Truck, XCircle, Activity, Share2,
+  ShoppingBag, ChevronRight, Truck, XCircle, Activity, Share2, Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { userService } from '../services/userService';
@@ -13,6 +13,7 @@ import IcanCoinCard from '../components/IcanCoinCard';
 import SupermarketProductManager from '../components/SupermarketProductManager';
 import { supabase } from '../services/supabaseClient';
 import { Linkify } from '../utils/linkify';
+import EraApiDevTab from '../components/EraApiDevTab';
 import {
   devListAllLandingMessages,
   devDeleteLandingMessage,
@@ -217,6 +218,8 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
   if (permissions.isMain) {
     tabs.push({ id: 'operators', label: 'Developers', icon: Lock });
     tabs.push({ id: 'support-links', label: 'Support Links', icon: Share2 });
+    // outside-developer API: approves access and can switch the whole API off, so main developers only
+    tabs.push({ id: 'era-api', label: 'API', icon: Zap });
   }
 
   return (
@@ -304,6 +307,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
             />
           )}
           {activeTab === 'support-links' && permissions.isMain && <SupportLinksTab />}
+          {activeTab === 'era-api' && permissions.isMain && <EraApiDevTab />}
         </div>
       </div>
     </div>
