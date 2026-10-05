@@ -7,6 +7,8 @@ import { ThemeProvider } from "./contexts/ThemeContext";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
 import PushAlertsPrompt from "./components/PushAlertsPrompt";
 import VerifyReceiptPage from "./mybodaguy/components/VerifyReceiptPage";
+import BookingConfirmPage, { BOOK_RETURN_CODE_KEY } from "./mybodaguy/components/BookingConfirmPage";
+import { isBookingCode } from "./mybodaguy/services/eraBooking";
 import TicketVerifyPage from "./mybodaguy/components/TicketVerifyPage";
 import RiderCardVerifyPage from "./mybodaguy/components/RiderCardVerifyPage";
 import SupportConsole from "./mybodaguy/pages/SupportConsole";
@@ -66,6 +68,11 @@ const ticketMatch = window.location.pathname.match(/^\/ticket\/([A-Za-z0-9]+)/);
 // Rider ID card QR (https://bodagoera.icanera.space/rider-card/<code>) — public, same pattern.
 const riderCardMatch = window.location.pathname.match(/^\/rider-card\/([A-Za-z0-9]+)/);
 
+// Era API booking request (https://bodagoera.icanera.space/book/<code>) — a business asked for a ride or delivery;
+// the customer opens this link and books it themselves. Same plain-pathname precedent as /verify.
+const bookMatch = window.location.pathname.match(/^\/book\/([A-Za-z0-9]+)/);
+const bookCode = bookMatch && isBookingCode(bookMatch[1].toUpperCase()) ? bookMatch[1].toUpperCase() : null;
+
 const isSupportConsole = window.location.pathname === '/support-console';
 
 // VerifyReceiptPage's "Sign in with Google to Approve" passes
@@ -83,8 +90,19 @@ if (!verifyMatch && window.location.hash.includes('access_token')) {
   }
 }
 
+// Same recovery as /verify: if Google sent the customer back to "/" (redirect allow-list), return to the booking link.
+if (!bookMatch && window.location.hash.includes('access_token')) {
+  const pendingBook = sessionStorage.getItem(BOOK_RETURN_CODE_KEY);
+  if (pendingBook) {
+    sessionStorage.removeItem(BOOK_RETURN_CODE_KEY);
+    window.location.replace(`/book/${pendingBook}${window.location.hash}`);
+  }
+}
+
 createRoot(document.getElementById("root")!).render(
-  verifyMatch ? (
+  bookCode ? (
+    <BookingConfirmPage code={bookCode} />
+  ) : verifyMatch ? (
     <VerifyReceiptPage code={verifyMatch[1]} />
   ) : ticketMatch ? (
     <TicketVerifyPage code={ticketMatch[1]} />

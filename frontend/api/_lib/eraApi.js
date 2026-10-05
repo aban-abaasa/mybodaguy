@@ -1,5 +1,5 @@
 /**
- * Era API gateway: the public, key-based, read-only API of the whole ICANERA family
+ * Era API gateway: the public, key-based API (reads, plus a few safe request-creating writes) of the whole ICANERA family
  * (ICANERA, BodaGoEra, SupermarketEra, FarmAgentEra).
  *
  * Route (served by api/v1/[...path].js in every app, so each app's own domain answers):
@@ -10,6 +10,8 @@
  *   POST /api/v1/developers/status    what the platform team decided about your app
  *   POST /api/v1/developers/key       issue / rotate a sandbox or live key (shown once)
  *   GET  /api/v1/<app>/<resource>     the data (needs a key)
+ *   POST /api/v1/business/...         the few write endpoints: payment REQUESTS and ride/delivery booking REQUESTS
+ *                                     (need a business key and an Idempotency-Key header; they never move money)
  *
  * This file is deliberately thin: authentication, scopes, rate limits, the sandbox and every handler live in the
  * database (supabase/migrations/20261005100000_era_api.sql) where they are tested. The gateway only
@@ -26,10 +28,11 @@ export const API_VERSION = 'v1';
 const BASE_PATH = '/api/v1';
 const RPC_TIMEOUT_MS = 8000;
 const MAX_BODY_BYTES = 16 * 1024;
+const IDEM_RE = /^[A-Za-z0-9_-]{8,64}$/;
 
 const EXPOSED_HEADERS = [
   'X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'X-Quota-Limit', 'X-Quota-Remaining',
-  'X-Era-Mode', 'X-Era-Version', 'X-Request-Id', 'Retry-After',
+  'X-Era-Mode', 'X-Era-Version', 'X-Request-Id', 'X-Idempotent-Replay', 'Retry-After',
 ].join(', ');
 
 // ---------------------------------------------------------------------------- pure helpers (unit tested)
@@ -74,6 +77,7 @@ export function mapPgError(err) {
   }
   const safe = typeof pg.message === 'string' ? pg.message.slice(0, 300) : 'Request failed.';
   if (code === 'ERA29' || code === '53400') return { status: 429, code: 'too_many_requests', message: safe };
+  if (code === 'ERA22') return { status: 422, code: 'unprocessable', message: safe };
   if (code === '22023') return { status: 400, code: 'bad_request', message: safe };
   if (code === 'P0002') return { status: 404, code: 'not_found', message: safe };
   if (code === '42501') return { status: 403, code: 'forbidden', message: safe };
@@ -82,6 +86,7 @@ export function mapPgError(err) {
 }
 
 const OPENAPI_TYPE = { string: 'string', integer: 'integer', number: 'number', boolean: 'boolean' };
+const OPENAPI_BODY = { string: { type: 'string' }, integer: { type: 'integer' }, number: { type: 'number' }, boolean: { type: 'boolean' }, object: { type: 'object' }, array: { type: 'array', items: {} } };
 
 /** The registry (from era_api_catalog) as an OpenAPI 3.0 document. */
 export function buildOpenApi(catalog, origin) {
@@ -98,38 +103,62 @@ export function buildOpenApi(catalog, origin) {
       schema: { type: OPENAPI_TYPE[p.type] || 'string', ...(p.default !== undefined ? { default: p.default } : {}) },
       ...(p.example !== undefined ? { example: p.example } : {}),
     }));
-    paths[ep.path] = {
-      get: {
-        operationId: String(ep.id).replace(/[^a-zA-Z0-9]+/g, '_'),
-        summary: ep.summary,
-        description: ep.description || undefined,
-        tags: [nameOf[ep.app] || ep.app],
-        parameters,
-        responses: {
-          200: {
-            description: 'OK. The payload is under `data`; `meta` says which app, endpoint and mode (sandbox or live) answered.',
-            headers: {
-              'X-RateLimit-Limit': { schema: { type: 'integer' }, description: 'Requests allowed per minute.' },
-              'X-RateLimit-Remaining': { schema: { type: 'integer' }, description: 'Requests left in this minute.' },
-              'X-Quota-Remaining': { schema: { type: 'integer' }, description: 'Requests left today (UTC).' },
-            },
-            content: { 'application/json': { schema: { type: 'object', properties: { data: {}, meta: { type: 'object' } } } } },
-          },
-          400: errorRef('A parameter is missing or invalid.'),
-          401: errorRef('Missing, malformed or revoked key.'),
-          403: errorRef('Your key is not approved for this app.'),
-          404: errorRef('Nothing found.'),
-          429: errorRef('Rate limit or daily quota reached. See Retry-After.'),
+    const isPost = String(ep.method || 'GET').toUpperCase() === 'POST';
+    const bodyFields = Array.isArray(ep.body) ? ep.body : [];
+    if (isPost) {
+      parameters.push({
+        name: 'Idempotency-Key', in: 'header', required: true,
+        description: '8 to 64 letters, digits, - or _. Send the same key when you retry the same request: you get the original answer back and nothing is created twice.',
+        schema: { type: 'string', minLength: 8, maxLength: 64 },
+      });
+    }
+    const responses = {
+      200: {
+        description: 'OK. The payload is under `data`; `meta` says which app, endpoint and mode (sandbox, live or business) answered.',
+        headers: {
+          'X-RateLimit-Limit': { schema: { type: 'integer' }, description: 'Requests allowed per minute.' },
+          'X-RateLimit-Remaining': { schema: { type: 'integer' }, description: 'Requests left in this minute.' },
+          'X-Quota-Remaining': { schema: { type: 'integer' }, description: 'Requests left today (UTC).' },
         },
+        content: { 'application/json': { schema: { type: 'object', properties: { data: {}, meta: { type: 'object' } } } } },
       },
+      400: errorRef('A parameter, the body or the Idempotency-Key is missing or invalid.'),
+      401: errorRef('Missing, malformed, expired or revoked key.'),
+      403: errorRef(ep.access === 'business' ? 'Your key does not have the scope this endpoint needs.' : 'Your key is not approved for this app.'),
+      404: errorRef('Nothing found.'),
+      429: errorRef('Rate limit or daily quota reached. See Retry-After.'),
     };
+    if (isPost) {
+      responses[201] = { ...responses[200], description: 'Created. A request was recorded; follow the instructions in `data` (nothing has moved).' };
+      responses[409] = errorRef('That Idempotency-Key was already used for a different request.');
+      responses[422] = errorRef('The request is well formed but not allowed (a cap, an unverified business, a limit).');
+    }
+    const op = {
+      operationId: String(ep.id).replace(/[^a-zA-Z0-9]+/g, '_'),
+      summary: ep.summary,
+      description: [ep.description, ep.scope ? `Needs the \`${ep.scope}\` scope on a business key.` : ''].filter(Boolean).join('\n\n') || undefined,
+      tags: [nameOf[ep.app] || ep.app],
+      parameters,
+      responses,
+    };
+    if (isPost) {
+      op.requestBody = {
+        required: bodyFields.some((f) => f.required),
+        content: { 'application/json': { schema: {
+          type: 'object',
+          properties: Object.fromEntries(bodyFields.map((f) => [f.name, { description: f.description, ...(OPENAPI_BODY[f.type] || { type: 'string' }), ...(f.example !== undefined ? { example: f.example } : {}) }])),
+          required: bodyFields.filter((f) => f.required).map((f) => f.name),
+        } } },
+      };
+    }
+    paths[ep.path] = { ...(paths[ep.path] || {}), [isPost ? 'post' : 'get']: op };
   }
   return {
     openapi: '3.0.3',
     info: {
       title: 'ICANERA Era API',
-      version: '1.0.0',
-      description: 'One read-only API across ICANERA, BodaGoEra, SupermarketEra and FarmAgentEra. Start with a free sandbox key at /developers: it works instantly and returns realistic fixture data. Live keys are approved by the platform team.',
+      version: '2.0.0',
+      description: 'One API across ICANERA, BodaGoEra, SupermarketEra and FarmAgentEra. Public data, plus private business endpoints (payment requests, inventory with expiry tracking, CMMS, ride and delivery booking requests) behind owner-issued scoped keys. The API never moves money and never books a ride by itself: a person confirms in the app. Start with a free sandbox key at /developers.',
     },
     servers: [{ url: `${origin}${BASE_PATH}` }],
     security: [{ bearerAuth: [] }, { apiKeyHeader: [] }],
@@ -137,7 +166,7 @@ export function buildOpenApi(catalog, origin) {
     paths,
     components: {
       securitySchemes: {
-        bearerAuth: { type: 'http', scheme: 'bearer', description: 'Authorization: Bearer era_test_...  (or era_live_...)' },
+        bearerAuth: { type: 'http', scheme: 'bearer', description: 'Authorization: Bearer era_test_... (sandbox), era_live_... (approved developer) or era_biz_... (a business key issued by its owner in ICAN).' },
         apiKeyHeader: { type: 'apiKey', in: 'header', name: 'X-API-Key' },
       },
       schemas: {
@@ -155,22 +184,27 @@ export function buildOpenApi(catalog, origin) {
 const errorBody = (status, code, message) => ({ error: { code, message, status } });
 
 async function readJson(req) {
-  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body;
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
+    if (Array.isArray(req.body)) throw Object.assign(new Error('not an object'), { notObject: true });
+    if (JSON.stringify(req.body).length > MAX_BODY_BYTES) throw Object.assign(new Error('too large'), { tooLarge: true });
+    return req.body;
+  }
   let raw = '';
   if (typeof req.body === 'string') raw = req.body;
   else if (Buffer.isBuffer(req.body)) raw = req.body.toString('utf8');
   else if (req.on) {
     raw = await new Promise((resolve, reject) => {
       let size = 0; const chunks = [];
-      req.on('data', (c) => { size += c.length; if (size > MAX_BODY_BYTES) { reject(new Error('too large')); } else chunks.push(c); });
+      req.on('data', (c) => { size += c.length; if (size > MAX_BODY_BYTES) { reject(Object.assign(new Error('too large'), { tooLarge: true })); } else chunks.push(c); });
       req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
       req.on('error', reject);
     });
   }
-  if (raw.length > MAX_BODY_BYTES) throw new Error('too large');
+  if (raw.length > MAX_BODY_BYTES) throw Object.assign(new Error('too large'), { tooLarge: true });
   if (!raw.trim()) return {};
   const parsed = JSON.parse(raw);
-  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw Object.assign(new Error('not an object'), { notObject: true });
+  return parsed;
 }
 
 const str = (v, max) => (v === undefined || v === null ? null : String(v).slice(0, max));
@@ -212,7 +246,7 @@ export function createEraHandler({ env = process.env, fetchImpl = globalThis.fet
       res.setHeader('Content-Type', 'application/json; charset=utf-8');
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Idempotency-Key');
       res.setHeader('Access-Control-Expose-Headers', EXPOSED_HEADERS);
       res.setHeader('Access-Control-Max-Age', '86400');
       res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -282,18 +316,34 @@ export function createEraHandler({ env = process.env, fetchImpl = globalThis.fet
     }
 
     // -------- the data
-    if (req.method !== 'GET' && !isHead) {
-      return send(405, errorBody(405, 'method_not_allowed', 'v1 is read-only: use GET.'), { Allow: 'GET, HEAD, OPTIONS' }, opts);
+    const isPost = req.method === 'POST';
+    if (req.method !== 'GET' && !isHead && !isPost) {
+      return send(405, errorBody(405, 'method_not_allowed', 'Use GET for data, POST for the few request-creating endpoints.'), { Allow: 'GET, HEAD, POST, OPTIONS' }, opts);
     }
     if (path.length > 200) return send(404, errorBody(404, 'unknown_endpoint', 'No such endpoint.'), {}, opts);
 
+    const args = {
+      p_key: extractKey(req.headers), p_method: isPost ? 'POST' : 'GET', p_path: path, p_query: query,
+      p_ip_hash: hashIp(req.headers, req.socket?.remoteAddress, env.ERA_API_IP_SALT || 'era-api', now()),
+    };
+    if (isPost) {
+      const ctype = String(req.headers['content-type'] || '').toLowerCase();
+      if (ctype && !ctype.startsWith('application/json')) {
+        return send(415, errorBody(415, 'unsupported_media_type', 'Send the body as application/json.'), {}, opts);
+      }
+      try { args.p_body = await readJson(req); } catch (e) {
+        if (e?.tooLarge) return send(413, errorBody(413, 'payload_too_large', 'The body is limited to 16 KB.'), {}, opts);
+        return send(400, errorBody(400, 'bad_json', 'Send a JSON object as the body.'), {}, opts);
+      }
+      const idem = String(req.headers['idempotency-key'] || '').trim();
+      if (idem && !IDEM_RE.test(idem)) {
+        return send(400, errorBody(400, 'bad_idempotency_key', 'Idempotency-Key must be 8 to 64 letters, digits, - or _.'), {}, opts);
+      }
+      args.p_idem = idem || null;
+    }
+
     let answer;
-    try {
-      answer = await rpc(c, 'era_api_call', {
-        p_key: extractKey(req.headers), p_method: 'GET', p_path: path, p_query: query,
-        p_ip_hash: hashIp(req.headers, req.socket?.remoteAddress, env.ERA_API_IP_SALT || 'era-api', now()),
-      });
-    } catch (e) { return fail(e); }
+    try { answer = await rpc(c, 'era_api_call', args); } catch (e) { return fail(e); }
     if (!answer || typeof answer.status !== 'number') return send(502, errorBody(502, 'upstream_error', 'Unexpected answer from the database.'), {}, opts);
     return send(answer.status, answer.body, answer.headers || {}, opts);
   };

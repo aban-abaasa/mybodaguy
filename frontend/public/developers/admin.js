@@ -24,6 +24,7 @@ const APPS = {
   supermarketera: { name: 'SupermarketEra', color: '#10b981' },
   farmagentera: { name: 'FarmAgentEra', color: '#84cc16' },
   platform: { name: 'Platform', color: '#38bdf8' },
+  business: { name: 'Your business', color: '#f43f5e' },
 };
 const FOUR = ['icanera', 'bodagoera', 'supermarketera', 'farmagentera'];
 
@@ -81,7 +82,7 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
   const style = document.createElement('style'); style.textContent = CSS; root.append(style);
   const app = document.createElement('div'); app.className = 'wrap'; root.append(app);
   let dead = false;
-  const S = { gate: 'checking', ov: null, tab: 'requests', pending: [], clients: [], status: '', endpoints: [], calls: [], callsFor: null, msg: null, busy: null, openClient: null };
+  const S = { gate: 'checking', ov: null, tab: 'requests', pending: [], clients: [], status: '', endpoints: [], calls: [], callsFor: null, msg: null, busy: null, openClient: null, chain: null };
 
   // ---------------------------------------------------------------- theme
   // A host that publishes the developer-panel variables (--dp-*) is followed as-is. Otherwise sample the panel's
@@ -145,6 +146,9 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
       ]);
       S.ov = ov; S.pending = pending || []; S.clients = clients || []; S.endpoints = endpoints || []; S.calls = calls || [];
     } catch (e) { if (!dead) { S.msg = { text: e.message, bad: true }; } }
+    // The business layer (owner keys, payment requests, booking requests, gas) is a second pair of migrations.
+    // Until it is applied the rest of the console works and this tab explains what to run.
+    try { S.chain = await call('era_api_admin_get_chain'); } catch (e) { S.chain = e.notInstalled ? null : (S.chain || null); }
     render();
   }
 
@@ -234,6 +238,33 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
         })))));
   }
 
+  function businessTab() {
+    if (!S.chain) {
+      return h('div', { class: 'card' }, h('h4', {}, 'The business layer is not installed yet'),
+        h('p', { class: 'sub', style: 'margin:8px 0 10px' }, 'Business keys, payment requests, inventory, CMMS, booking requests and gas estimates come from two more files. Run them in the SQL editor, in this order, then refresh:'),
+        h('pre', {}, 'supabase/migrations/20261006100000_era_api_business.sql\nsupabase/migrations/20261006100100_era_api_business_endpoints.sql'));
+    }
+    const o = S.ov || {};
+    return h('div', { style: 'display:grid;gap:14px' },
+      h('div', { class: 'grid4' },
+        tile('Business keys', fmt(o.business_keys_active), 'active, owner-issued'),
+        tile('Payment requests · 24h', fmt(o.payment_requests_24h), 'created through the API. None moves money.'),
+        tile('Booking links · 24h', fmt(o.booking_requests_24h), 'ride and delivery requests')),
+      h('div', { class: 'card', style: 'display:grid;gap:14px' }, h('h4', {}, 'Business rules'),
+        toggle('Payment keys need a verified business', 'On: only businesses whose profile is verified can mint a live key that creates payment requests. Test keys are always allowed.', !!((S.ov || {}).settings || {}).require_verified_for_payments,
+          (v) => act('sw4', () => call('era_api_admin_save_settings', { p_patch: { require_verified_for_payments: v } }), v ? 'Payment keys now need a verified business.' : 'Any owner may mint payment keys.'))),
+      h('div', { class: 'card' }, h('h4', {}, 'Blockchain gas inputs'),
+        h('p', { class: 'sub', style: 'margin:6px 0 10px' }, 'The gas endpoint estimates a network fee from these two numbers and says how old they are. We do not call out to a node, so keep them current. Leave both empty to make the endpoint answer “not configured”.'),
+        h('div', { class: 'scroll' }, h('table', {}, h('thead', {}, h('tr', {}, ...['Network', 'Gas price (gwei)', 'Coin price (USD)', 'Source', 'Updated', ''].map((x) => h('th', {}, x)))),
+          h('tbody', {}, ...S.chain.map((c) => {
+            const g = h('input', { type: 'number', min: 0, max: 100000, step: 'any', value: c.gas_price_gwei ?? '', 'aria-label': 'Gas price in gwei for ' + c.network, style: 'width:110px' });
+            const u = h('input', { type: 'number', min: 0, step: 'any', value: c.native_usd ?? '', 'aria-label': c.native_symbol + ' price in USD for ' + c.network, style: 'width:120px' });
+            const src = h('input', { type: 'text', maxlength: 80, value: c.source || '', placeholder: 'where the numbers came from', 'aria-label': 'Source for ' + c.network, style: 'width:190px' });
+            return h('tr', {}, h('td', {}, h('b', {}, c.network), h('div', { class: 'mute' }, c.native_symbol)), h('td', {}, g), h('td', {}, u), h('td', {}, src), h('td', { class: 'mute' }, when(c.updated_at)),
+              h('td', {}, h('button', { class: 'btn sm primary', type: 'button', onclick: () => act('chain' + c.network, () => call('era_api_admin_save_chain', { p_network: c.network, p_gas_price_gwei: g.value === '' ? null : Number(g.value), p_native_usd: u.value === '' ? null : Number(u.value), p_source: src.value }), c.network + ' saved.') }, 'Save')));
+          }))))));
+  }
+
   function activityTab() {
     const who = S.callsFor ? S.clients.concat(S.pending).find((c) => c.id === S.callsFor) : null;
     return h('div', { class: 'card' }, h('div', { class: 'row between', style: 'margin-bottom:10px' }, h('h4', {}, who ? `Calls by ${who.app_name}` : 'Latest calls (all apps)'), S.callsFor ? h('button', { class: 'btn sm', type: 'button', onclick: () => { S.callsFor = null; loadAll(); } }, 'Show all') : null),
@@ -251,21 +282,21 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
     if (S.gate === 'checking') { app.append(h('div', { class: 'card empty' }, 'Checking access…')); return; }
     if (S.gate === 'missing') {
       app.append(h('div', { class: 'card' }, h('h3', {}, 'The developer API is not switched on for this server yet'),
-        h('p', { class: 'sub', style: 'margin:8px 0 12px' }, 'Run these two files in the Supabase SQL editor (in this order), then check again. This can also appear if you are offline.'),
-        h('pre', {}, 'supabase/migrations/20261005100000_era_api.sql\nsupabase/migrations/20261005100100_era_api_endpoints.sql'),
+        h('p', { class: 'sub', style: 'margin:8px 0 12px' }, 'Run these four files in the Supabase SQL editor (in this order), then check again. This can also appear if you are offline.'),
+        h('pre', {}, 'supabase/migrations/20261005100000_era_api.sql\nsupabase/migrations/20261005100100_era_api_endpoints.sql\nsupabase/migrations/20261006100000_era_api_business.sql\nsupabase/migrations/20261006100100_era_api_business_endpoints.sql'),
         h('div', { style: 'margin-top:12px' }, h('button', { class: 'btn primary', type: 'button', onclick: gate }, 'Check again')))); return;
     }
     if (S.gate === 'locked') { app.append(lockedView()); return; }
 
     const o = S.ov || {}; const st = o.settings || {}; const cl = o.clients || {};
     app.append(...[
-      h('div', { class: 'row between' }, h('div', {}, h('h3', {}, 'Developer API'), h('p', { class: 'sub' }, 'One read-only API across ICANERA, BodaGoEra, SupermarketEra and FarmAgentEra. Approve developers, watch usage, switch things off.')),
+      h('div', { class: 'row between' }, h('div', {}, h('h3', {}, 'Developer API'), h('p', { class: 'sub' }, 'One API across ICANERA, BodaGoEra, SupermarketEra and FarmAgentEra. Approve developers, watch business keys, set gas inputs, switch things off.')),
         h('div', { class: 'row' }, h('a', { class: 'btn', href: '/developers', target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, '↗ Public page'), h('button', { class: 'btn', type: 'button', onclick: loadAll }, '⟳ Refresh'))),
       S.msg ? h('div', { class: 'msg ' + (S.msg.bad ? 'bad' : 'ok'), role: S.msg.bad ? 'alert' : 'status' }, S.msg.text) : null,
       st.enabled === false ? h('div', { class: 'msg warn' }, '⚠ The API is switched OFF: every call answers 503 right now.') : null,
       h('div', { class: 'grid4' },
         tile('Waiting for you', fmt(cl.pending), 'applications to review', cl.pending > 0 ? 'var(--warn)' : ''),
-        tile('Approved apps', fmt(cl.approved), `${fmt(o.keys_active)} active keys`),
+        tile('Approved apps', fmt(cl.approved), `${fmt(o.keys_active)} developer keys · ${fmt(o.business_keys_active)} business keys`),
         h('div', { class: 'card' }, h('div', { class: 'lab' }, 'Calls · 24h'), h('div', { class: 'big' }, fmt(o.calls_24h)), o.hourly ? sparkline(o.hourly) : null),
         tile('Errors · 24h', fmt(o.errors_24h), `${fmt(o.limited_24h)} rate-limited`, o.errors_24h > 0 ? 'var(--bad)' : 'var(--ok)')),
       h('div', { class: 'card', style: 'display:grid;gap:14px' }, h('h4', {}, 'Switches'),
@@ -277,9 +308,9 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
           return h('div', { class: 'row' }, h('span', { class: 'sub' }, 'Sandbox keys:'), r, h('span', { class: 'sub' }, '/ min'), d, h('span', { class: 'sub' }, '/ day'), h('button', { class: 'btn sm', type: 'button', onclick: () => act('lim', () => call('era_api_admin_save_settings', { p_patch: { sandbox_rate_per_min: Number(r.value), sandbox_daily_quota: Number(d.value) } }), 'Sandbox limits saved.') }, 'Save'));
         })()),
       h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'API administration' },
-        ...[['requests', 'Requests', cl.pending], ['apps', 'Apps & keys'], ['endpoints', 'Endpoints'], ['activity', 'Activity', o.errors_24h, true]].map(([id, label, n, red]) =>
+        ...[['requests', 'Requests', cl.pending], ['apps', 'Apps & keys'], ['business', 'Business & gas'], ['endpoints', 'Endpoints'], ['activity', 'Activity', o.errors_24h, true]].map(([id, label, n, red]) =>
           h('button', { class: 'tab', role: 'tab', type: 'button', 'aria-selected': String(S.tab === id), onclick: () => { S.tab = id; render(); } }, label, n > 0 ? h('span', { class: 'n' + (red ? ' red' : '') }, n) : null))),
-      S.tab === 'requests' ? requestsTab() : S.tab === 'apps' ? appsTab() : S.tab === 'endpoints' ? endpointsTab() : activityTab()].filter(Boolean));
+      S.tab === 'requests' ? requestsTab() : S.tab === 'apps' ? appsTab() : S.tab === 'business' ? businessTab() : S.tab === 'endpoints' ? endpointsTab() : activityTab()].filter(Boolean));
   }
 
   gate();

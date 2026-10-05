@@ -163,14 +163,101 @@ test('errors from the database layer are relayed as-is (401, 403, 429 with Retry
   assert.equal(json(res).error.code, 'rate_limited');
 });
 
-test('v1 is read-only: POST/PUT/DELETE on a data path is a 405 and never reaches the database', async () => {
+test('PUT, DELETE and PATCH are a 405 and never reach the database', async () => {
   const { handler, calls } = setup(() => { throw new Error('must not be called'); });
-  for (const m of ['POST', 'PUT', 'DELETE', 'PATCH']) {
+  for (const m of ['PUT', 'DELETE', 'PATCH']) {
     const res = await run(handler, fakeReq(m, '/api/v1/icanera/coin/price', { headers: { authorization: 'Bearer era_test_k' } }));
     assert.equal(res.statusCode, 405, m);
-    assert.equal(res.headers.allow, 'GET, HEAD, OPTIONS');
+    assert.equal(res.headers.allow, 'GET, HEAD, POST, OPTIONS');
   }
   assert.equal(calls.length, 0);
+});
+
+const BIZ = { authorization: 'Bearer era_biz_k', 'content-type': 'application/json', 'idempotency-key': 'order-1042-try1' };
+
+test('POST forwards the JSON body and the Idempotency-Key, and relays 201 and the replay header', async () => {
+  const { handler, calls } = setup(() => ({ status: 201, headers: { 'x-idempotent-replay': 'true' }, body: { data: { payment_code: 'PAY_X' } } }));
+  const res = await run(handler, fakeReq('POST', '/api/v1/business/payments', { headers: BIZ, body: { amount: 45000, description: 'Order 1042' } }));
+  assert.equal(res.statusCode, 201);
+  assert.equal(res.headers['x-idempotent-replay'], 'true');
+  assert.equal(calls[0].fn, 'era_api_call');
+  assert.equal(calls[0].args.p_method, 'POST');
+  assert.equal(calls[0].args.p_path, '/business/payments');
+  assert.deepEqual(calls[0].args.p_body, { amount: 45000, description: 'Order 1042' });
+  assert.equal(calls[0].args.p_idem, 'order-1042-try1');
+  assert.equal(calls[0].args.p_key, 'era_biz_k');
+});
+
+test('POST reads a raw JSON stream too (not only a parsed body)', async () => {
+  const { handler, calls } = setup(() => ({ status: 201, headers: {}, body: { data: 1 } }));
+  const req = fakeReq('POST', '/api/v1/business/bookings', { headers: BIZ });
+  const listeners = {};
+  req.on = (ev, fn) => { listeners[ev] = fn; };
+  const pending = run(handler, req);
+  await new Promise((r) => setTimeout(r, 5));
+  listeners.data(Buffer.from('{"kind":"ride"}')); listeners.end();
+  await pending;
+  assert.deepEqual(calls[0].args.p_body, { kind: 'ride' });
+});
+
+test('POST without an Idempotency-Key is forwarded as null so the database answers 400 with its own message', async () => {
+  const { handler, calls } = setup(() => ({ status: 400, headers: {}, body: { error: { code: 'idempotency_key_required' } } }));
+  const res = await run(handler, fakeReq('POST', '/api/v1/business/payments', { headers: { authorization: 'Bearer era_biz_k', 'content-type': 'application/json' }, body: { amount: 1 } }));
+  assert.equal(calls[0].args.p_idem, null);
+  assert.equal(res.statusCode, 400);
+});
+
+test('POST rejects a malformed Idempotency-Key, a non-JSON body, an array, bad JSON and an oversize body before the database', async () => {
+  const { handler, calls } = setup(() => { throw new Error('must not be called'); });
+  const bad = await run(handler, fakeReq('POST', '/api/v1/business/payments', { headers: { ...BIZ, 'idempotency-key': 'a b!' }, body: {} }));
+  assert.equal(bad.statusCode, 400); assert.equal(json(bad).error.code, 'bad_idempotency_key');
+  const ct = await run(handler, fakeReq('POST', '/api/v1/business/payments', { headers: { ...BIZ, 'content-type': 'text/plain' }, body: {} }));
+  assert.equal(ct.statusCode, 415);
+  const arr = await run(handler, fakeReq('POST', '/api/v1/business/payments', { headers: BIZ, body: [1, 2] }));
+  assert.equal(arr.statusCode, 400);
+  const str = await run(handler, fakeReq('POST', '/api/v1/business/payments', { headers: BIZ, body: '{not json' }));
+  assert.equal(str.statusCode, 400); assert.equal(json(str).error.code, 'bad_json');
+  const big = await run(handler, fakeReq('POST', '/api/v1/business/payments', { headers: BIZ, body: { note: 'x'.repeat(20000) } }));
+  assert.equal(big.statusCode, 413);
+  assert.equal(calls.length, 0);
+});
+
+test('POST to a data path never carries a body for GET and a GET never sends p_body or p_idem', async () => {
+  const { handler, calls } = setup(() => ({ status: 200, headers: {}, body: { data: 1 } }));
+  await run(handler, fakeReq('GET', '/api/v1/whoami', { headers: { authorization: 'Bearer era_test_k', 'idempotency-key': 'order-1042-try1' } }));
+  assert.ok(!('p_body' in calls[0].args) && !('p_idem' in calls[0].args));
+});
+
+test('the 422 database state (ERA22) maps to 422', () => {
+  assert.equal(mapPgError({ pg: { code: 'ERA22', message: 'verify the business first' } }).status, 422);
+});
+
+test('CORS lets browsers send the Idempotency-Key header and read the replay header', async () => {
+  const res = await run(setup(() => ({})).handler, fakeReq('OPTIONS', '/api/v1/business/payments'));
+  assert.match(res.headers['access-control-allow-headers'], /Idempotency-Key/);
+  assert.match(res.headers['access-control-expose-headers'], /X-Idempotent-Replay/);
+});
+
+test('buildOpenApi documents POST endpoints with a request body, Idempotency-Key and 201/409/422', () => {
+  const doc = buildOpenApi({
+    apps: [{ id: 'business', name: 'Your business', tagline: 't' }],
+    endpoints: [
+      { id: 'business.payment_create', app: 'business', method: 'POST', path: '/business/payments', summary: 'Create', scope: 'payments:request', access: 'business',
+        params: [], body: [{ name: 'amount', type: 'number', required: true, example: 45000, description: 'Amount' }, { name: 'stops', type: 'array', required: false, description: 's' }] },
+      { id: 'business.payments', app: 'business', method: 'GET', path: '/business/payments', summary: 'List', scope: 'payments:read', access: 'business', params: [] },
+    ],
+  }, 'https://icanera.space');
+  const post = doc.paths['/business/payments'].post;
+  const get = doc.paths['/business/payments'].get;
+  assert.ok(post && get, 'GET and POST live under the same path');
+  assert.ok(post.parameters.some((p) => p.name === 'Idempotency-Key' && p.in === 'header' && p.required));
+  assert.ok(!get.parameters.some((p) => p.name === 'Idempotency-Key'));
+  assert.deepEqual(post.requestBody.content['application/json'].schema.required, ['amount']);
+  assert.equal(post.requestBody.content['application/json'].schema.properties.amount.type, 'number');
+  assert.equal(post.requestBody.content['application/json'].schema.properties.stops.type, 'array');
+  for (const code of ['201', '409', '422']) assert.ok(post.responses[code], code);
+  assert.match(post.description, /payments:request/);
+  assert.match(doc.components.securitySchemes.bearerAuth.description, /era_biz_/);
 });
 
 test('HEAD answers like GET without a body', async () => {
