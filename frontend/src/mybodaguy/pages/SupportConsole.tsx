@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Bike, MessageSquare, Mail, Users, RefreshCw, Trash2, Send, CheckCircle, Globe, Lock } from 'lucide-react';
+import {
+  Bike, MessageSquare, Mail, Users, RefreshCw, Trash2, Send, CheckCircle, Globe, Lock,
+  Search, Eye, EyeOff, Loader2, ShieldAlert, AlertTriangle, ChevronLeft, LogOut,
+} from 'lucide-react';
 import { supabase } from '../services/supabaseClient';
 import { Linkify } from '../utils/linkify';
 
@@ -28,6 +31,42 @@ const getTokenFromUrl = (): string => {
 
 type Status = 'checking' | 'invalid' | 'password_required' | 'granted';
 
+const TAB_META: Record<string, { label: string; Icon: any }> = {
+  'public-board': { label: 'Public Board', Icon: MessageSquare },
+  messages: { label: 'Messages', Icon: Mail },
+  users: { label: 'Users', Icon: Users },
+};
+
+// Same ivory / ink / gold look as the customer + rider dashboards
+// (.classic-* in index.css): serif headings, gold hairlines, rounded cards.
+const GOLD_BORDER = 'border-[rgba(196,160,82,0.35)]';
+
+function Avatar({ name, size = 40 }: { name?: string | null; size?: number }) {
+  const initials = (name || '?').split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('') || '?';
+  return (
+    <span
+      className="grid flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-orange-400 to-amber-500 font-classic-display font-bold text-white ring-2 ring-[#e6c980]"
+      style={{ width: size, height: size, fontSize: size * 0.38 }}
+    >
+      {initials}
+    </span>
+  );
+}
+
+function Brand({ label }: { label?: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-white ring-2 ring-[#e6c980] shadow-md">
+        <Bike size={20} />
+      </span>
+      <div className="min-w-0">
+        <p className="font-classic-display text-[20px] font-bold leading-none tracking-tight text-slate-900">BodaGoEra</p>
+        <p className="classic-eyebrow mt-1 truncate">{label || 'Support Console'}</p>
+      </div>
+    </div>
+  );
+}
+
 export default function SupportConsole() {
   const [token] = useState(getTokenFromUrl);
   const [status, setStatus] = useState<Status>('checking');
@@ -38,6 +77,7 @@ export default function SupportConsole() {
   const [activeTab, setActiveTab] = useState<string>('');
 
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const initRef = useRef(false);
 
@@ -81,93 +121,125 @@ export default function SupportConsole() {
   };
 
   if (status === 'granted' && boardSecret) {
-    const TAB_META: Record<string, { label: string; Icon: any }> = {
-      'public-board': { label: 'Public Board', Icon: MessageSquare },
-      messages: { label: 'Messages', Icon: Mail },
-      users: { label: 'Users', Icon: Users },
-    };
-
+    const tabs = allowedTabs.filter((id) => TAB_META[id]);
     return (
-      <div className="min-h-screen bg-slate-50">
-        <header className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-lg sticky top-0 z-50">
-          <div className="container mx-auto px-4">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center gap-3">
-                <Bike size={28} />
-                <div>
-                  <h1 className="text-xl font-bold">BodaGoEra</h1>
-                  <p className="text-xs opacity-90">{label || 'Support Console'}</p>
-                </div>
-              </div>
-            </div>
+      <div className="classic-page min-h-[100dvh]">
+        <header className={`sticky top-0 z-30 border-b ${GOLD_BORDER} bg-[#faf8f3]/90 backdrop-blur`} style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4">
+            <Brand label={label} />
+            <button onClick={() => window.location.reload()} className="classic-btn classic-btn-ghost" aria-label="Lock console">
+              <LogOut size={16} /> <span className="hidden sm:inline">Lock</span>
+            </button>
           </div>
-        </header>
-        <div className="container mx-auto px-4 py-8">
-          {allowedTabs.length > 1 && (
-            <div className="bg-white rounded-xl shadow-md p-2 mb-8 flex gap-2 overflow-x-auto">
-              {allowedTabs.map((id) => {
-                const meta = TAB_META[id];
-                if (!meta) return null;
-                const { label: tabLabel, Icon } = meta;
+          {/* desktop / tablet tabs */}
+          {tabs.length > 1 && (
+            <div className="mx-auto hidden max-w-6xl gap-2 px-4 pb-3 md:flex">
+              {tabs.map((id) => {
+                const { label: tabLabel, Icon } = TAB_META[id];
                 return (
-                  <button
-                    key={id}
-                    onClick={() => setActiveTab(id)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-all whitespace-nowrap ${
-                      activeTab === id ? 'bg-gradient-to-r from-orange-500 to-yellow-500 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    <Icon size={18} /> {tabLabel}
+                  <button key={id} onClick={() => setActiveTab(id)} aria-current={activeTab === id ? 'page' : undefined}
+                    className={`classic-chip ${activeTab === id ? 'is-active' : ''}`}>
+                    <Icon size={14} /> {tabLabel}
                   </button>
                 );
               })}
             </div>
           )}
-          <div className="bg-white rounded-xl shadow-lg p-6">
-            {activeTab === 'public-board' && <SupportPublicBoardTab secret={boardSecret} />}
-            {activeTab === 'messages' && <SupportMessagesTab secret={boardSecret} />}
-            {activeTab === 'users' && <SupportUsersTab secret={boardSecret} />}
-          </div>
-        </div>
+        </header>
+
+        <main className={`mx-auto max-w-6xl px-4 py-5 ${tabs.length > 1 ? 'pb-[calc(6rem+env(safe-area-inset-bottom))] md:pb-8' : 'pb-8'}`}>
+          {activeTab === 'public-board' && <SupportPublicBoardTab secret={boardSecret} />}
+          {activeTab === 'messages' && <SupportMessagesTab secret={boardSecret} />}
+          {activeTab === 'users' && <SupportUsersTab secret={boardSecret} />}
+        </main>
+
+        {/* mobile bottom tab bar — same pattern as the customer / rider apps */}
+        {tabs.length > 1 && (
+          <nav className={`fixed inset-x-0 bottom-0 z-30 border-t ${GOLD_BORDER} bg-[#fffdf8]/95 backdrop-blur md:hidden`} style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+            <div className="flex">
+              {tabs.map((id) => {
+                const { label: tabLabel, Icon } = TAB_META[id];
+                const active = activeTab === id;
+                return (
+                  <button key={id} onClick={() => { setActiveTab(id); window.scrollTo({ top: 0 }); }} aria-current={active ? 'page' : undefined}
+                    className={`relative flex min-w-[72px] flex-1 flex-col items-center gap-0.5 py-2 transition active:scale-95 ${active ? 'text-[#7a5a12]' : 'text-slate-500'}`}>
+                    {active && <span className="absolute inset-x-6 top-0 h-0.5 rounded-b-full bg-[#c4a052]" />}
+                    <span className={`flex h-7 w-12 items-center justify-center rounded-full transition ${active ? 'bg-[#fbf3dc]' : ''}`}><Icon size={19} /></span>
+                    <span className="text-[10px] font-bold leading-none">{tabLabel}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </nav>
+        )}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-lg">
-        <div className="flex items-center gap-2 mb-4">
-          <Bike className="text-orange-500" size={24} />
-          <h1 className="text-lg font-black text-slate-800">BodaGoEra Support Console</h1>
+    <div className="classic-page flex min-h-[100dvh] items-center justify-center px-4 py-8">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 text-center">
+          <span className="mx-auto mb-4 grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-orange-500 to-amber-500 text-white ring-4 ring-[#e6c980]/70 shadow-lg">
+            <Bike size={30} />
+          </span>
+          <p className="classic-eyebrow">Support Console</p>
+          <h1 className="mt-1 font-classic-display text-[30px] font-bold leading-tight tracking-tight text-slate-900">BodaGoEra</h1>
+          <div className="landing-classic-divider mx-auto mt-3 w-40" />
         </div>
 
-        {status === 'checking' && <p className="text-sm text-slate-500">Loading…</p>}
+        <div className="classic-card p-5 sm:p-6">
+          {status === 'checking' && (
+            <div className="flex flex-col items-center gap-3 py-6" role="status">
+              <Loader2 size={26} className="animate-spin text-[#c4a052]" />
+              <p className="text-sm text-slate-500">Checking your link…</p>
+            </div>
+          )}
 
-        {status === 'invalid' && (
-          <p className="text-sm text-rose-500">{error || 'This link is invalid or has been revoked.'}</p>
-        )}
+          {status === 'invalid' && (
+            <div className="flex flex-col items-center gap-3 py-3 text-center">
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-rose-50 text-rose-500 ring-1 ring-rose-200"><ShieldAlert size={22} /></span>
+              <p className="font-classic-display text-lg font-semibold text-slate-800">Link not available</p>
+              <p className="text-sm text-rose-500">{error || 'This link is invalid or has been revoked.'}</p>
+              <p className="text-xs text-slate-500">Ask the BodaGoEra team to send you a fresh support link.</p>
+            </div>
+          )}
 
-        {status === 'password_required' && (
-          <>
-            <p className="mb-5 text-sm text-slate-600">
-              {label ? `Enter the password for "${label}".` : 'Enter the password you were given for this link.'}
-            </p>
-            <form onSubmit={handleSubmit} className="space-y-2">
-              {error && <p className="text-xs text-rose-500">{error}</p>}
-              <input
-                type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="Password" autoFocus
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
-              />
-              <button
-                type="submit" disabled={verifying || !password.trim()}
-                className="w-full rounded-xl py-2.5 text-sm font-semibold text-white disabled:opacity-50 bg-gradient-to-r from-orange-500 to-yellow-500"
-              >
-                {verifying ? 'Checking…' : 'Enter'}
+          {status === 'password_required' && (
+            <form onSubmit={handleSubmit} className="space-y-3">
+              <div>
+                <h2 className="font-classic-display text-xl font-semibold text-slate-800">Welcome back</h2>
+                <p className="mt-0.5 text-sm text-slate-500">
+                  {label ? `Enter the password for “${label}”.` : 'Enter the password you were given for this link.'}
+                </p>
+              </div>
+              {error && (
+                <div role="alert" className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs text-rose-600">
+                  <AlertTriangle size={14} className="mt-px flex-shrink-0" /> <span>{error}</span>
+                </div>
+              )}
+              <div className="relative">
+                <Lock size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#a17c28]" />
+                <input
+                  type={showPassword ? 'text' : 'password'} value={password} onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Password" autoFocus autoComplete="current-password" aria-label="Password"
+                  className="classic-input !pl-10 !pr-11"
+                />
+                <button type="button" onClick={() => setShowPassword((v) => !v)} aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  className="absolute right-1.5 top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-lg text-slate-400 transition hover:text-[#7a5a12] active:scale-90">
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <button type="submit" disabled={verifying || !password.trim()} className="classic-btn classic-btn-primary">
+                {verifying ? <><Loader2 size={16} className="animate-spin" /> Checking…</> : 'Enter console'}
               </button>
             </form>
-          </>
-        )}
+          )}
+        </div>
+
+        <p className="mt-5 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
+          <Lock size={11} /> Secured access · BodaGoEra support team only
+        </p>
       </div>
     </div>
   );
@@ -183,11 +255,73 @@ const fmtTime = (d?: string | null) => {
   return new Date(d).toLocaleDateString();
 };
 
+const fmtClock = (d?: string | null) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+
+const dayLabel = (d: string) => {
+  const date = new Date(d);
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((startOf(new Date()) - startOf(date)) / 86400000);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  return date.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+};
+
+function SectionTitle({ title, sub, onRefresh, loading }: { title: string; sub?: string; onRefresh: () => void; loading: boolean }) {
+  return (
+    <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="font-classic-display text-2xl font-bold leading-tight text-slate-900">{title}</h2>
+          {sub && <p className="mt-0.5 text-xs text-slate-500">{sub}</p>}
+        </div>
+        <button onClick={onRefresh} disabled={loading} aria-label={`Refresh ${title}`} className="classic-btn classic-btn-outline !w-11 !min-h-[44px] !p-0 flex-shrink-0">
+          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+        </button>
+      </div>
+      <div className="landing-classic-divider mt-3" />
+    </div>
+  );
+}
+
+function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <div className="relative">
+      <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#a17c28]" />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={placeholder} className="classic-input !pl-10" />
+    </div>
+  );
+}
+
+function EmptyState({ title, hint, Icon = MessageSquare }: { title: string; hint?: string; Icon?: any }) {
+  return (
+    <div className="flex flex-col items-center gap-2 px-6 py-14 text-center">
+      <span className="grid h-14 w-14 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#e6c980]"><Icon size={22} /></span>
+      <p className="font-classic-display text-lg font-semibold text-slate-800">{title}</p>
+      {hint && <p className="max-w-xs text-xs text-slate-500">{hint}</p>}
+    </div>
+  );
+}
+
+function ListSkeleton({ rows = 3 }: { rows?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex animate-pulse items-center gap-3 px-4 py-4">
+          <div className="h-11 w-11 rounded-full bg-[#f3e9d2]" />
+          <div className="flex-1 space-y-2"><div className="h-3 w-2/5 rounded bg-[#f3e9d2]" /><div className="h-3 w-4/5 rounded bg-[#f7f0e1]" /></div>
+        </div>
+      ))}
+    </>
+  );
+}
+
 // ── Public Board — reuses the SAME dev_get_landing_messages/reply/mark/
 // delete RPCs the real DeveloperDashboard uses, passing board_secret as
 // their existing dev_token argument (landing_messages_is_dev() already
 // recognizes a valid support-link secret — see ADD_SUPPORT_CONSOLE.sql).
 // No "grant ICAN" here — that stays real-developer-only.
+type BoardFilter = 'all' | 'needs_reply' | 'public' | 'private';
+
 function SupportPublicBoardTab({ secret }: { secret: string }) {
   const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -196,6 +330,8 @@ function SupportPublicBoardTab({ secret }: { secret: string }) {
   const [replyDraft, setReplyDraft] = useState('');
   const [replying, setReplying] = useState(false);
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<BoardFilter>('all');
+  const [query, setQuery] = useState('');
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -243,83 +379,116 @@ function SupportPublicBoardTab({ secret }: { secret: string }) {
     }
   };
 
-  const topLevel = items.filter((m) => !m.parent_id);
+  const allTop = items.filter((m) => !m.parent_id);
+  const hasTeamReply = (m: any) => items.some((i) => i.parent_id === m.id && i.sender_role === 'dev');
+  const needsReply = allTop.filter((m) => m.is_public && !hasTeamReply(m)).length;
+  const q = query.trim().toLowerCase();
+  const topLevel = allTop.filter((m) =>
+    (filter === 'all' ||
+      (filter === 'public' && m.is_public) ||
+      (filter === 'private' && !m.is_public) ||
+      (filter === 'needs_reply' && m.is_public && !hasTeamReply(m))) &&
+    (!q || [m.name, m.email, m.message].some((v) => String(v || '').toLowerCase().includes(q)))
+  );
+
+  const filters: { id: BoardFilter; label: string }[] = [
+    { id: 'all', label: 'All' },
+    { id: 'needs_reply', label: `Needs reply${needsReply ? ` (${needsReply})` : ''}` },
+    { id: 'public', label: 'Public' },
+    { id: 'private', label: 'Private' },
+  ];
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-slate-800">Public Board</h2>
-        <button onClick={refresh} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg disabled:opacity-50">
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+    <div className="space-y-4">
+      <SectionTitle title="Public Board" sub={`Landing page messages · ${allTop.length} total`} onRefresh={refresh} loading={loading} />
+      <SearchBox value={query} onChange={setQuery} placeholder="Search name, email or message…" />
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0" style={{ scrollbarWidth: 'none' }}>
+        {filters.map((f) => (
+          <button key={f.id} onClick={() => setFilter(f.id)} className={`classic-chip flex-shrink-0 ${filter === f.id ? 'is-active' : ''}`}>{f.label}</button>
+        ))}
       </div>
-      <div className="rounded-xl border border-slate-200 overflow-hidden">
-        <div className="max-h-[65vh] divide-y divide-slate-100 overflow-y-auto">
-          {topLevel.map((m) => {
-            const replies = items.filter((i) => i.parent_id === m.id);
-            const isExpanded = expandedId === m.id;
-            return (
-              <div key={m.id} className="px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <button onClick={() => { setExpandedId(isExpanded ? null : m.id); setReplyDraft(''); }} className="min-w-0 flex-1 text-left">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="text-sm font-medium text-slate-800">{m.name || 'Website visitor'}</p>
-                      <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${m.is_public ? 'border-orange-200 bg-orange-50 text-orange-600' : 'border-amber-200 bg-amber-50 text-amber-600'}`}>
-                        {m.is_public ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
-                        {m.is_public ? 'Public' : 'Private'}
-                      </span>
-                      <span className="text-[10px] text-slate-400">{fmtTime(m.created_at)}</span>
-                      {replies.length > 0 && <span className="text-[10px] text-slate-400">· {replies.length} {replies.length === 1 ? 'reply' : 'replies'}</span>}
-                    </div>
-                    <p className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{m.message}</p>
-                  </button>
-                  <button onClick={() => handleDelete(m.id)} disabled={deletingId === m.id} className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg text-rose-500 hover:bg-rose-50 disabled:opacity-40">
-                    <Trash2 className="h-4 w-4" />
-                  </button>
+
+      {loading && <div className="classic-card divide-y divide-[rgba(196,160,82,0.2)]"><ListSkeleton /></div>}
+
+      {!loading && topLevel.length === 0 && (
+        <div className="classic-card">
+          <EmptyState
+            title={allTop.length === 0 ? 'No messages yet' : 'No messages match'}
+            hint={allTop.length === 0 ? 'Questions from the landing page will show up here.' : 'Try another filter or clear the search.'}
+          />
+        </div>
+      )}
+
+      {topLevel.map((m) => {
+        const replies = items.filter((i) => i.parent_id === m.id);
+        const isExpanded = expandedId === m.id;
+        return (
+          <div key={m.id} className="classic-card p-4">
+            <div className="flex items-start gap-3">
+              <Avatar name={m.name || 'Website visitor'} />
+              <button onClick={() => { setExpandedId(isExpanded ? null : m.id); setReplyDraft(''); }} className="min-w-0 flex-1 text-left" aria-expanded={isExpanded}>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <p className="font-classic-display text-base font-semibold text-slate-900">{m.name || 'Website visitor'}</p>
+                  <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${m.is_public ? 'border-orange-200 bg-orange-50 text-orange-600' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                    {m.is_public ? <Globe className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                    {m.is_public ? 'Public' : 'Private'}
+                  </span>
                 </div>
-                {isExpanded && (
-                  <div className="mt-3 space-y-2 border-l-2 border-slate-100 pl-3">
-                    {replies.map((r) => (
-                      <div key={r.id} className={`flex items-start justify-between gap-2 rounded-lg px-3 py-2 ${r.sender_role === 'dev' ? 'bg-orange-50' : 'bg-slate-50'}`}>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-xs font-semibold text-slate-800">{r.sender_role === 'dev' ? 'BodaGoEra Team' : (r.name || 'Website visitor')}</p>
-                            <span className="text-[10px] text-slate-400">{fmtTime(r.created_at)}</span>
-                          </div>
-                          <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700"><Linkify text={r.message} /></p>
-                          {r.sender_role !== 'dev' && r.user_id && !r.rewarded_at && (
-                            <button onClick={() => handleMarkCorrect(r.id)} disabled={markingId === r.id} className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 disabled:opacity-40">
-                              <CheckCircle className="h-3 w-3" /> {markingId === r.id ? 'Marking…' : 'Mark correct answer'}
-                            </button>
-                          )}
-                        </div>
-                        <button onClick={() => handleDelete(r.id)} disabled={deletingId === r.id} className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-rose-500 hover:bg-rose-50 disabled:opacity-40">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                <p className="text-[11px] text-slate-400">
+                  {fmtTime(m.created_at)}{replies.length > 0 && ` · ${replies.length} ${replies.length === 1 ? 'reply' : 'replies'}`}
+                  {m.email && ` · ${m.email}`}
+                </p>
+                <p className="mt-1.5 whitespace-pre-wrap break-words text-sm text-slate-700">{m.message}</p>
+              </button>
+              <button onClick={() => handleDelete(m.id)} disabled={deletingId === m.id} aria-label="Delete message"
+                className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-xl text-rose-500 transition hover:bg-rose-50 active:scale-90 disabled:opacity-40">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+
+            {isExpanded && (
+              <div className="mt-3 space-y-2 border-l-2 border-[#e6c980] pl-3">
+                {replies.map((r) => (
+                  <div key={r.id} className={`flex items-start justify-between gap-2 rounded-xl px-3 py-2 ${r.sender_role === 'dev' ? 'bg-[#fbf3dc]' : 'bg-slate-50'}`}>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-xs font-semibold text-slate-800">{r.sender_role === 'dev' ? 'BodaGoEra Team' : (r.name || 'Website visitor')}</p>
+                        <span className="text-[10px] text-slate-400">{fmtTime(r.created_at)}</span>
                       </div>
-                    ))}
-                    {replies.length === 0 && <p className="text-xs text-slate-500">No replies yet.</p>}
-                    {m.is_public && (
-                      <div className="flex items-center gap-2 pt-1">
-                        <input
-                          value={replyDraft} onChange={(e) => setReplyDraft(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') handleReply(m.id); }}
-                          placeholder="Reply as BodaGoEra Team…"
-                          className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
-                        />
-                        <button onClick={() => handleReply(m.id)} disabled={replying || !replyDraft.trim()} className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-gradient-to-r from-orange-500 to-yellow-500 text-white disabled:opacity-40">
-                          <Send className="h-4 w-4" />
+                      <p className="mt-0.5 whitespace-pre-wrap break-words text-sm text-slate-700"><Linkify text={r.message} /></p>
+                      {r.sender_role !== 'dev' && r.user_id && !r.rewarded_at && (
+                        <button onClick={() => handleMarkCorrect(r.id)} disabled={markingId === r.id}
+                          className="mt-1.5 inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 disabled:opacity-40">
+                          <CheckCircle className="h-3 w-3" /> {markingId === r.id ? 'Marking…' : 'Mark correct answer'}
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
+                    <button onClick={() => handleDelete(r.id)} disabled={deletingId === r.id} aria-label="Delete reply"
+                      className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-lg text-rose-500 transition hover:bg-rose-50 disabled:opacity-40">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+                {replies.length === 0 && <p className="text-xs text-slate-500">No replies yet.</p>}
+                {m.is_public && (
+                  <div className="flex items-center gap-2 pt-1">
+                    <input
+                      value={replyDraft} onChange={(e) => setReplyDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleReply(m.id); }}
+                      placeholder="Reply as BodaGoEra Team…" aria-label="Reply"
+                      className="classic-input"
+                    />
+                    <button onClick={() => handleReply(m.id)} disabled={replying || !replyDraft.trim()} aria-label="Send reply"
+                      className="classic-btn classic-btn-primary !w-12 !min-h-[46px] flex-shrink-0 !p-0">
+                      <Send className="h-4 w-4" />
+                    </button>
                   </div>
                 )}
               </div>
-            );
-          })}
-          {!loading && topLevel.length === 0 && <p className="px-4 py-10 text-center text-sm text-slate-500">No messages yet.</p>}
-        </div>
-      </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -337,6 +506,10 @@ function SupportMessagesTab({ secret }: { secret: string }) {
   const [reply, setReply] = useState('');
   const [sending, setSending] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState('');
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -361,7 +534,33 @@ function SupportMessagesTab({ secret }: { secret: string }) {
     return () => { cancelled = true; };
   }, [selectedId, secret]);
 
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [messages]);
+
+  // Composer grows with its content (up to ~5 lines)
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [reply, selectedId]);
+
+  // Full-screen chat on phones: stop the page behind it scrolling
+  useEffect(() => {
+    if (!selectedId || window.matchMedia('(min-width: 1024px)').matches) return undefined;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = prev; };
+  }, [selectedId]);
+
   const selected = conversations.find((c) => c.id === selectedId);
+  const unreadCount = conversations.filter((c) => c.unread_by_dev).length;
+  const q = query.trim().toLowerCase();
+  const visible = conversations.filter((c) =>
+    (!unreadOnly || c.unread_by_dev) &&
+    (!q || [c.guest_name, c.guest_email, c.last_message_preview].some((v) => String(v || '').toLowerCase().includes(q)))
+  );
 
   const handleReply = async () => {
     const body = reply.trim();
@@ -378,67 +577,130 @@ function SupportMessagesTab({ secret }: { secret: string }) {
     }
   };
 
+  // Enter sends on desktop; on touch keyboards Enter is a newline.
+  const onComposerKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey || (e.nativeEvent as any).isComposing) return;
+    if (window.matchMedia('(pointer: coarse)').matches) return;
+    e.preventDefault();
+    handleReply();
+  };
+
+  type Row = { type: 'day'; key: string; label: string } | { type: 'msg'; key: string; m: any; first: boolean };
+  const timeline: Row[] = [];
+  messages.forEach((m, i) => {
+    const prev = messages[i - 1];
+    if (!prev || dayLabel(prev.created_at) !== dayLabel(m.created_at)) {
+      timeline.push({ type: 'day', key: `day-${m.id}`, label: dayLabel(m.created_at) });
+    }
+    timeline.push({ type: 'msg', key: m.id, m, first: !prev || prev.sender_role !== m.sender_role || timeline[timeline.length - 1].type === 'day' });
+  });
+
   return (
-    <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
-      <div className="rounded-xl border border-slate-200 overflow-hidden">
-        <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">Conversations ({conversations.length})</span>
-          <button onClick={refresh} className="text-slate-400 hover:text-slate-600"><RefreshCw size={14} className={loading ? 'animate-spin' : ''} /></button>
-        </div>
-        <div className="max-h-[65vh] overflow-y-auto">
-          {conversations.map((c) => (
-            <button
-              key={c.id} onClick={() => setSelectedId(c.id)}
-              className={`w-full border-b border-slate-100 last:border-0 px-4 py-3 text-left transition ${selectedId === c.id ? 'bg-orange-50' : 'hover:bg-slate-50'}`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium text-slate-800 truncate">{c.guest_name || c.role || 'Guest'}</p>
-                {c.unread_by_dev && <span className="h-2 w-2 flex-shrink-0 rounded-full bg-red-500" />}
-              </div>
-              <p className="text-xs text-slate-500 truncate">{c.guest_email}</p>
-              <p className="mt-1 text-[10px] text-slate-400">{fmtTime(c.last_message_at)}</p>
-            </button>
-          ))}
-          {!loading && conversations.length === 0 && <p className="px-4 py-10 text-center text-sm text-slate-500">No conversations yet.</p>}
-        </div>
+    <div className="space-y-4">
+      <div className={selectedId ? 'hidden lg:block' : ''}>
+        <SectionTitle title="Messages" sub={`${conversations.length} conversations${unreadCount ? ` · ${unreadCount} unread` : ''}`} onRefresh={refresh} loading={loading} />
       </div>
-      <div className="flex flex-col overflow-hidden rounded-xl border border-slate-200">
-        {!selected ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-slate-500">
-            <div className="text-center"><MessageSquare className="mx-auto mb-2 h-8 w-8 opacity-40" />Select a conversation to reply</div>
-          </div>
-        ) : (
-          <>
-            <div className="border-b border-slate-200 px-4 py-3">
-              <p className="text-sm font-semibold text-slate-800">{selected.guest_name || 'Guest'}</p>
-              <p className="text-xs text-slate-500">{selected.guest_email}</p>
+
+      <div className="grid gap-4 lg:h-[calc(100dvh-14rem)] lg:min-h-[480px] lg:grid-cols-[340px_1fr]">
+        {/* conversation list */}
+        <div className={`${selectedId ? 'hidden lg:flex' : 'flex'} classic-card min-h-0 flex-col overflow-hidden`}>
+          <div className="space-y-2.5 border-b border-[rgba(196,160,82,0.25)] p-3">
+            <SearchBox value={query} onChange={setQuery} placeholder="Search conversations…" />
+            <div className="flex gap-2">
+              <button onClick={() => setUnreadOnly(false)} className={`classic-chip ${!unreadOnly ? 'is-active' : ''}`}>All</button>
+              <button onClick={() => setUnreadOnly(true)} className={`classic-chip ${unreadOnly ? 'is-active' : ''}`}>Unread{unreadCount ? ` (${unreadCount})` : ''}</button>
             </div>
-            <div className="flex-1 space-y-2 overflow-y-auto px-4 py-3" style={{ maxHeight: '48vh' }}>
-              {messages.map((m) => {
-                const fromDev = m.sender_role === 'dev';
-                return (
-                  <div key={m.id} className={`flex ${fromDev ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-[75%] rounded-2xl px-3 py-2 text-sm ${fromDev ? 'bg-gradient-to-br from-orange-500 to-yellow-500 text-white' : 'bg-slate-100 text-slate-800'}`}>
-                      {!fromDev && <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500">{m.sender_name || selected.role}</p>}
-                      <p className="whitespace-pre-wrap break-words"><Linkify text={m.body} /></p>
+          </div>
+          <div className="max-h-[calc(100dvh-22rem)] flex-1 divide-y divide-[rgba(196,160,82,0.2)] overflow-y-auto overscroll-contain lg:max-h-none">
+            {loading && conversations.length === 0 && <ListSkeleton rows={4} />}
+            {visible.map((c) => {
+              const active = selectedId === c.id;
+              return (
+                <button key={c.id} onClick={() => setSelectedId(c.id)}
+                  className={`relative flex w-full items-center gap-3 px-4 py-3 text-left transition active:bg-[#fbf3dc] ${active ? 'bg-[#fbf3dc]' : 'hover:bg-[#fffdf8]'}`}>
+                  {active && <span className="absolute inset-y-0 left-0 w-0.5 bg-[#c4a052]" />}
+                  <Avatar name={c.guest_name || c.role || 'Guest'} size={44} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className={`truncate font-classic-display text-[15px] text-slate-900 ${c.unread_by_dev ? 'font-bold' : 'font-semibold'}`}>{c.guest_name || c.role || 'Guest'}</p>
+                      <span className={`flex-shrink-0 text-[10px] ${c.unread_by_dev ? 'font-semibold text-orange-600' : 'text-slate-400'}`}>{fmtTime(c.last_message_at)}</span>
+                    </div>
+                    <div className="mt-0.5 flex items-center justify-between gap-2">
+                      <p className={`truncate text-xs ${c.unread_by_dev ? 'text-slate-700' : 'text-slate-500'}`}>{c.last_message_preview || c.guest_email || 'No messages yet'}</p>
+                      {c.unread_by_dev && <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-orange-500" />}
                     </div>
                   </div>
-                );
-              })}
+                </button>
+              );
+            })}
+            {!loading && visible.length === 0 && (
+              <EmptyState title={conversations.length === 0 ? 'No conversations yet' : 'No matches'}
+                hint={conversations.length === 0 ? 'New chats will appear here — tap refresh to check.' : 'Try a different search or switch back to All.'} />
+            )}
+          </div>
+        </div>
+
+        {/* chat pane — full screen on phones */}
+        <div className={`${selectedId ? 'fixed inset-0 z-50 flex lg:relative lg:inset-auto lg:z-auto' : 'hidden lg:flex lg:relative'} classic-page min-h-0 flex-col overflow-hidden lg:rounded-[20px] lg:border lg:border-[rgba(196,160,82,0.26)]`}
+          style={selectedId ? { paddingTop: 'env(safe-area-inset-top)' } : undefined}>
+          {!selected ? (
+            <div className="flex flex-1 items-center justify-center bg-white/60">
+              <EmptyState title="Select a conversation" hint="Pick a chat on the left to read and reply." />
             </div>
-            <div className="flex items-center gap-2 border-t border-slate-200 px-3 py-3">
-              <input
-                value={reply} onChange={(e) => setReply(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') handleReply(); }}
-                placeholder="Reply as BodaGoEra Team…"
-                className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
-              />
-              <button onClick={handleReply} disabled={sending || !reply.trim()} className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-r from-orange-500 to-yellow-500 text-white disabled:opacity-40">
-                <Send className="h-4 w-4" />
-              </button>
-            </div>
-          </>
-        )}
+          ) : (
+            <>
+              <div className={`flex items-center gap-2 border-b ${GOLD_BORDER} bg-[#faf8f3]/95 px-3 py-2.5 backdrop-blur`}>
+                <button onClick={() => setSelectedId(null)} aria-label="Back to conversations"
+                  className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full text-slate-600 transition active:scale-90 lg:hidden">
+                  <ChevronLeft className="h-5 w-5" />
+                </button>
+                <Avatar name={selected.guest_name || 'Guest'} size={38} />
+                <div className="min-w-0">
+                  <p className="truncate font-classic-display text-base font-semibold text-slate-900">{selected.guest_name || 'Guest'}</p>
+                  <p className="truncate text-[11px] text-slate-500">{selected.guest_email}</p>
+                </div>
+              </div>
+
+              <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain px-3 py-3 sm:px-4">
+                {messages.length === 0 && <p className="py-10 text-center text-xs text-slate-500">No messages yet.</p>}
+                {timeline.map((row) => {
+                  if (row.type === 'day') {
+                    return (
+                      <div key={row.key} className="my-3 flex items-center gap-3">
+                        <div className="landing-classic-divider flex-1" />
+                        <span className="classic-eyebrow !text-[10px]">{row.label}</span>
+                        <div className="landing-classic-divider flex-1" />
+                      </div>
+                    );
+                  }
+                  const { m, first } = row;
+                  const fromDev = m.sender_role === 'dev';
+                  return (
+                    <div key={row.key} className={`flex ${fromDev ? 'justify-end' : 'justify-start'} ${first ? 'mt-3' : 'mt-0.5'}`}>
+                      <div className={`max-w-[85%] px-3 py-2 text-sm shadow-sm sm:max-w-[70%] ${fromDev
+                        ? 'rounded-2xl rounded-br-md bg-gradient-to-br from-orange-500 to-amber-500 text-white'
+                        : 'rounded-2xl rounded-bl-md border border-[rgba(196,160,82,0.3)] bg-white text-slate-800'}`}>
+                        {!fromDev && first && <p className="mb-0.5 text-[10px] font-bold uppercase tracking-wide text-[#a17c28]">{m.sender_name || selected.role}</p>}
+                        <p className="whitespace-pre-wrap break-words"><Linkify text={m.body} /></p>
+                        <p className={`mt-0.5 text-right text-[10px] leading-none ${fromDev ? 'text-white/75' : 'text-slate-400'}`}>{fmtClock(m.created_at)}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className={`flex items-end gap-2 border-t ${GOLD_BORDER} bg-[#faf8f3]/95 px-3 pt-2.5`} style={{ paddingBottom: 'calc(0.625rem + env(safe-area-inset-bottom))' }}>
+                <textarea ref={inputRef} rows={1} value={reply} onChange={(e) => setReply(e.target.value)} onKeyDown={onComposerKeyDown}
+                  placeholder="Reply as BodaGoEra Team…" aria-label="Reply"
+                  className="classic-input max-h-[120px] min-h-[44px] flex-1 resize-none !rounded-2xl" />
+                <button onClick={handleReply} disabled={sending || !reply.trim()} aria-label="Send reply"
+                  className="classic-btn classic-btn-primary !w-11 !min-h-[44px] flex-shrink-0 !rounded-full !p-0">
+                  <Send className="h-4 w-4" />
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -468,32 +730,24 @@ function SupportUsersTab({ secret }: { secret: string }) {
   );
 
   return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl font-bold text-slate-800">Users (read-only)</h2>
-        <button onClick={refresh} disabled={loading} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg disabled:opacity-50">
-          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
-      </div>
-      <input
-        value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by name or email…"
-        className="w-full mb-4 px-3 py-2 border border-slate-200 rounded-lg text-sm text-slate-800 outline-none focus:ring-2 focus:ring-orange-400"
-      />
-      <div className="rounded-xl border border-slate-200 overflow-hidden">
-        <div className="max-h-[65vh] divide-y divide-slate-100 overflow-y-auto">
-          {filtered.map((u) => (
-            <div key={u.id} className="px-4 py-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium text-slate-800 truncate">{u.full_name || u.email}</p>
-                <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-semibold text-orange-700 capitalize">
-                  {(u.committee_role || u.role_type || '').replace(/_/g, ' ')}
-                </span>
-              </div>
-              <p className="text-xs text-slate-500 truncate">{u.email}</p>
+    <div className="space-y-4">
+      <SectionTitle title="Users" sub={`Read-only · ${users.length} total`} onRefresh={refresh} loading={loading} />
+      <SearchBox value={query} onChange={setQuery} placeholder="Search by name or email…" />
+      <div className="classic-card divide-y divide-[rgba(196,160,82,0.2)] overflow-hidden">
+        {loading && <ListSkeleton rows={4} />}
+        {filtered.map((u) => (
+          <div key={u.id} className="flex items-center gap-3 px-4 py-3">
+            <Avatar name={u.full_name || u.email} size={42} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate font-classic-display text-[15px] font-semibold text-slate-900">{u.full_name || u.email}</p>
+              <p className="truncate text-xs text-slate-500">{u.email}</p>
             </div>
-          ))}
-          {!loading && filtered.length === 0 && <p className="px-4 py-10 text-center text-sm text-slate-500">No users found.</p>}
-        </div>
+            <span className="flex-shrink-0 rounded-full border border-[#e6c980] bg-[#fbf3dc] px-2.5 py-0.5 text-[10px] font-semibold capitalize text-[#7a5a12]">
+              {(u.committee_role || u.role_type || '').replace(/_/g, ' ')}
+            </span>
+          </div>
+        ))}
+        {!loading && filtered.length === 0 && <EmptyState title="No users found" Icon={Users} hint={users.length ? 'Try a different search.' : undefined} />}
       </div>
     </div>
   );
