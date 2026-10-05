@@ -27,12 +27,22 @@ const APPS = {
   business: { name: 'Your business', color: '#f43f5e' },
 };
 const FOUR = ['icanera', 'bodagoera', 'supermarketera', 'farmagentera'];
+// The Products tab: what we offer, in the order a visitor meets it. Taglines come from /developers/catalog.json when it loads.
+const PRODUCTS = [
+  { id: 'icanera', kind: 'app', tagline: 'Coin price, valuation, supply, FX, tax rules, chain fees and the public business directory.' },
+  { id: 'bodagoera', kind: 'app', tagline: 'Stages, ports, journey and delivery quotes, and rider-card checks.' },
+  { id: 'supermarketera', kind: 'app', tagline: 'Stores, a product catalogue across every category, clearance deals and barcode lookups.' },
+  { id: 'farmagentera', kind: 'app', tagline: 'Marketplace listings, a produce price board and crop knowledge.' },
+  { id: 'platform', kind: 'app', tagline: 'Who you are, how much you have left, and one call that sees the whole family.' },
+  { id: 'business', kind: 'business', tagline: 'Private, owner-issued: payment requests, inventory with expiry tracking, CMMS and booking requests.' },
+];
+const ROMAN = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII'];
 
 const CSS = `
 :host{display:block;
   --c-card:var(--dp-card,#0f172a);--c-bd:var(--dp-card-bd,#1e293b);--c-inner:var(--dp-inner,#0b1224);--c-inner-bd:var(--dp-inner-bd,#1e293b);
   --c-input:var(--dp-input,#0b1224);--c-input-bd:var(--dp-input-bd,#334155);--c-txt:var(--dp-txt,#e2e8f0);--c-sub:var(--dp-sub,#94a3b8);--c-mute:var(--dp-muted,#64748b);
-  --brand:#0ea5e9;--ok:#10b981;--warn:#f59e0b;--bad:#ef4444;
+  --brand:#0ea5e9;--ok:#10b981;--warn:#f59e0b;--bad:#ef4444;--gold:#c9a24b;--serif:Georgia,"Iowan Old Style","Palatino Linotype",Palatino,"Times New Roman",serif;
   font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--c-txt)}
 @media (prefers-color-scheme: light){:host{--c-card:var(--dp-card,#fff);--c-bd:var(--dp-card-bd,#e2e8f0);--c-inner:var(--dp-inner,#f8fafc);--c-inner-bd:var(--dp-inner-bd,#e2e8f0);--c-input:var(--dp-input,#fff);--c-input-bd:var(--dp-input-bd,#cbd5e1);--c-txt:var(--dp-txt,#0f172a);--c-sub:var(--dp-sub,#475569);--c-mute:var(--dp-muted,#64748b)}}
 :host([data-era-theme=light]){--c-card:#fff;--c-bd:#e2e8f0;--c-inner:#f8fafc;--c-inner-bd:#e2e8f0;--c-input:#fff;--c-input-bd:#cbd5e1;--c-txt:#0f172a;--c-sub:#475569;--c-mute:#64748b}
@@ -43,7 +53,7 @@ const CSS = `
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center} .between{justify-content:space-between}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:12px} .grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
 @media(max-width:760px){.grid4,.grid2{grid-template-columns:1fr 1fr}} @media(max-width:480px){.grid4,.grid2{grid-template-columns:1fr}}
-h3,h4,p{margin:0} h3{font-size:15px;font-weight:800} h4{font-size:13px;font-weight:800}
+h2,h3,h4,p{margin:0} h3{font-size:16px;font-weight:700} h4{font-size:14px;font-weight:700} h2,h3,h4,.big,.serif{font-family:var(--serif)}
 .lab{font:700 10px/1.2 system-ui;letter-spacing:.12em;text-transform:uppercase;color:var(--c-mute)}
 .big{font-size:24px;font-weight:900;margin-top:4px} .sub{font-size:11.5px;color:var(--c-sub)} .mute{color:var(--c-mute);font-size:12px}
 .btn{font:700 12px system-ui;color:var(--c-txt);background:transparent;border:1px solid var(--c-input-bd);border-radius:11px;padding:7px 12px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
@@ -55,9 +65,11 @@ h3,h4,p{margin:0} h3{font-size:15px;font-weight:800} h4{font-size:13px;font-weig
 input,select,textarea{font:13px system-ui;color:var(--c-txt);background:var(--c-input);border:1px solid var(--c-input-bd);border-radius:10px;padding:8px 10px;width:100%;outline:none}
 input:focus,select:focus,textarea:focus{border-color:var(--brand)} input[type=number]{width:96px} input[type=checkbox]{width:auto}
 label.f{display:block} label.f>span{display:block;margin-bottom:4px} label.chk{display:inline-flex;gap:6px;align-items:center;border:1px solid var(--c-inner-bd);border-radius:10px;padding:5px 10px;cursor:pointer}
-.tabs{display:flex;gap:6px;flex-wrap:wrap}
-.tab{font:700 12px system-ui;color:var(--c-sub);background:transparent;border:1px solid var(--c-inner-bd);border-radius:11px;padding:8px 14px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
-.tab[aria-selected=true]{color:var(--c-txt);border-color:var(--brand);box-shadow:inset 0 -2px 0 var(--brand);background:linear-gradient(rgba(14,165,233,.14),rgba(14,165,233,.14))}
+.tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--c-bd);padding:0 4px}
+.tab{font:600 13px var(--serif);letter-spacing:.02em;color:var(--c-sub);background:transparent;border:1px solid transparent;border-bottom:0;border-radius:9px 9px 0 0;margin-bottom:-1px;padding:9px 16px;cursor:pointer;display:inline-flex;gap:6px;align-items:center}
+.tab:hover{color:var(--c-txt)}
+.tab[aria-selected=true]{color:var(--c-txt);background:var(--c-card);border-color:var(--c-bd);box-shadow:inset 0 2px 0 var(--gold)}
+.tab:focus-visible,.mrow:focus-visible,.plate-h:focus-visible,.chip:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
 .n{font:800 10px system-ui;border-radius:99px;padding:1px 6px;background:var(--warn);color:#111} .n.red{background:var(--bad);color:#fff}
 .pill{display:inline-flex;gap:5px;align-items:center;font:700 10px system-ui;letter-spacing:.05em;text-transform:uppercase;border:1px solid var(--c-inner-bd);border-radius:99px;padding:2px 8px;color:var(--c-sub)}
 .pill.ok{color:var(--ok);border-color:#10b98155} .pill.warn{color:var(--warn);border-color:#f59e0b55} .pill.bad{color:var(--bad);border-color:#ef444455}
@@ -71,6 +83,40 @@ td{padding:7px 8px;border-bottom:1px solid var(--c-inner-bd);vertical-align:top}
 .sw i{position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;transition:left .15s} .sw[aria-checked=true] i{left:20px}
 pre{margin:0;padding:10px;border:1px solid var(--c-inner-bd);border-radius:10px;background:var(--c-inner);overflow:auto;font-size:11.5px}
 .empty{padding:26px;text-align:center;color:var(--c-mute);font-size:12.5px}
+
+/* ---- Products: the catalogue ---- */
+.mast{position:relative;text-align:center;padding:26px 18px 20px;background:var(--c-card);border:1px solid var(--c-bd);border-radius:6px}
+.mast::before{content:"";position:absolute;inset:5px;border:1px solid var(--c-inner-bd);border-radius:3px;pointer-events:none}
+.orn{display:flex;align-items:center;gap:12px;color:var(--gold);font-size:11px;max-width:340px;margin:0 auto 10px}
+.orn::before,.orn::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,transparent,var(--gold))} .orn::after{transform:scaleX(-1)}
+.mast h2{font-size:30px;font-weight:400;letter-spacing:.03em;line-height:1.15}
+.mast .est{font:italic 13.5px var(--serif);color:var(--c-sub);margin-top:6px}
+.ledger{display:flex;justify-content:center;flex-wrap:wrap;margin-top:18px;border-top:1px solid var(--c-inner-bd);padding-top:14px}
+.ledger>div{padding:0 22px;border-left:1px solid var(--c-inner-bd);min-width:96px} .ledger>div:first-child{border-left:0}
+.ledger b{display:block;font:400 26px var(--serif)} .ledger span{font:700 9.5px system-ui;letter-spacing:.14em;text-transform:uppercase;color:var(--c-mute)}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.bar input[type=search]{flex:1;min-width:200px;border-radius:99px;padding:8px 14px}
+.chip{font:600 12px var(--serif);color:var(--c-sub);background:transparent;border:1px solid var(--c-inner-bd);border-radius:99px;padding:6px 13px;cursor:pointer}
+.chip[aria-pressed=true]{color:var(--c-txt);border-color:var(--gold);background:linear-gradient(rgba(201,162,75,.14),rgba(201,162,75,.14))}
+.plate{background:var(--c-card);border:1px solid var(--c-bd);border-top:3px solid var(--ac);border-radius:4px;overflow:hidden}
+.plate-h{all:unset;box-sizing:border-box;display:flex;width:100%;align-items:center;gap:16px;padding:16px 18px;cursor:pointer}
+.plate-h:hover{background:var(--c-inner)}
+.num{font:italic 400 28px var(--serif);color:var(--ac);min-width:46px;text-align:center;padding-right:16px;border-right:1px solid var(--c-inner-bd)}
+.ph{flex:1;min-width:0;display:grid;gap:2px} .pt{font:400 21px var(--serif);letter-spacing:.02em} .ptag{font:italic 13px/1.4 var(--serif);color:var(--c-sub)}
+.pc{text-align:right;white-space:nowrap;display:grid;gap:4px;justify-items:end} .pc small{font-size:11.5px;color:var(--c-sub)}
+.chev{color:var(--c-mute);transition:transform .15s;display:inline-block} [aria-expanded=true]>.chev{transform:rotate(90deg)}
+.menu{list-style:none;margin:0;padding:4px 0 10px;border-top:1px solid var(--c-inner-bd)}
+.menu li+li{border-top:1px dashed var(--c-inner-bd)}
+.mrow{all:unset;box-sizing:border-box;display:flex;align-items:baseline;gap:9px;width:100%;padding:9px 18px 9px 80px;cursor:pointer}
+.mrow:hover{background:var(--c-inner)}
+.mname{font:400 15.5px var(--serif)} .off .mname{color:var(--c-mute);text-decoration:line-through}
+.lead{flex:1;min-width:20px;border-bottom:2px dotted var(--c-input-bd);transform:translateY(-4px);opacity:.7}
+.mpath{font:11.5px ui-monospace,Menlo,monospace;color:var(--c-sub)}
+.detail{padding:4px 18px 16px 80px;display:grid;gap:10px}
+.detail p{font:italic 14px/1.55 var(--serif);color:var(--c-sub);max-width:70ch}
+.facts{display:flex;flex-wrap:wrap;gap:6px 18px} .facts div{font-size:12px;color:var(--c-sub)} .facts b{color:var(--c-txt)}
+@media(max-width:620px){.mrow,.detail{padding-left:18px}.mrow{flex-wrap:wrap}.lead{display:none}.plate-h{gap:12px;padding:14px}.num{min-width:34px;padding-right:12px;font-size:22px}.pc{display:none}.ledger>div{padding:0 12px}}
+.colophon{text-align:center;font:italic 12.5px var(--serif);color:var(--c-mute);padding:6px 0 2px}
 `;
 
 const NOT_INSTALLED = /PGRST202|42883|Could not find the function|does not exist/i;
@@ -82,7 +128,7 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
   const style = document.createElement('style'); style.textContent = CSS; root.append(style);
   const app = document.createElement('div'); app.className = 'wrap'; root.append(app);
   let dead = false;
-  const S = { gate: 'checking', ov: null, tab: 'requests', pending: [], clients: [], status: '', endpoints: [], calls: [], callsFor: null, msg: null, busy: null, openClient: null, chain: null };
+  const S = { gate: 'checking', ov: null, tab: 'requests', pending: [], clients: [], status: '', endpoints: [], calls: [], callsFor: null, msg: null, busy: null, openClient: null, chain: null, cat: null, q: '', pf: 'all', closed: new Set(), openRow: new Set() };
 
   // ---------------------------------------------------------------- theme
   // A host that publishes the developer-panel variables (--dp-*) is followed as-is. Otherwise sample the panel's
@@ -210,6 +256,82 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
     }));
   }
 
+  // The catalogue: every service we offer, grouped by product, laid out like the menu of a classic restaurant.
+  function productsTab() {
+    const cat = S.cat || {};
+    const meta = new Map((cat.endpoints || []).map((e) => [e.id, e]));
+    const tagOf = new Map((cat.apps || []).map((a) => [a.id, a.tagline]));
+    const all = (S.endpoints.length ? S.endpoints : (cat.endpoints || []).map((e) => ({ ...e, enabled: true }))).map((e) => ({ ...(meta.get(e.id) || {}), ...e }));
+    const live = all.filter((e) => e.enabled !== false).length;
+    const stat = (n, label) => h('div', {}, h('b', {}, fmt(n)), h('span', {}, label));
+
+    const list = h('div', { class: 'wrap' });
+    const KINDS = [['all', 'All services'], ['app', 'Public data'], ['business', 'For businesses']];
+    const chips = h('div', { class: 'row', role: 'group', 'aria-label': 'Filter products' });
+    const search = h('input', { type: 'search', placeholder: 'Search services, paths or scopes…', 'aria-label': 'Search services', value: S.q, oninput: (e) => { S.q = e.target.value; paint(); } });
+    const toggleAll = h('button', { class: 'btn sm', type: 'button' });
+
+    function paint() {
+      const q = S.q.trim().toLowerCase();
+      chips.textContent = '';
+      chips.append(...KINDS.map(([id, label]) => h('button', { class: 'chip', type: 'button', 'aria-pressed': String(S.pf === id), onclick: () => { S.pf = id; paint(); } }, label)));
+      const hit = (e) => !q || [e.summary, e.path, e.description, e.scope, e.method, e.app].some((v) => v && String(v).toLowerCase().includes(q));
+      const groups = PRODUCTS.map((p, i) => ({ p, i, rows: all.filter((e) => e.app === p.id && hit(e)) }))
+        .filter((g) => g.rows.length && (S.pf === 'all' || g.p.kind === S.pf));
+      const allOpen = groups.every((g) => !S.closed.has(g.p.id));
+      toggleAll.textContent = allOpen ? 'Fold all' : 'Unfold all';
+      toggleAll.onclick = () => { groups.forEach((g) => (allOpen ? S.closed.add(g.p.id) : S.closed.delete(g.p.id))); paint(); };
+      list.textContent = '';
+      if (!groups.length) { list.append(h('div', { class: 'card empty' }, all.length ? 'Nothing on the menu matches that. Try a shorter word.' : 'No services found yet. Run the API migrations, then refresh.')); return; }
+      list.append(...groups.map(({ p, i, rows }) => {
+        const color = (APPS[p.id] || {}).color || '#888';
+        const open = !!q || !S.closed.has(p.id);
+        const off = rows.filter((e) => e.enabled === false).length;
+        return h('section', { class: 'plate', style: `--ac:${color}` },
+          h('button', { class: 'plate-h', type: 'button', 'aria-expanded': String(open), onclick: () => { if (S.closed.has(p.id)) S.closed.delete(p.id); else S.closed.add(p.id); paint(); } },
+            h('span', { class: 'num', 'aria-hidden': 'true' }, ROMAN[i] || i + 1),
+            h('span', { class: 'ph' }, h('span', { class: 'pt' }, (APPS[p.id] || { name: p.id }).name), h('span', { class: 'ptag' }, tagOf.get(p.id) || p.tagline)),
+            h('span', { class: 'pc' },
+              h('span', { class: 'pill ' + (off === 0 ? 'ok' : off === rows.length ? 'bad' : 'warn') }, off === 0 ? 'All live' : off === rows.length ? 'Switched off' : `${off} off`),
+              h('small', {}, `${rows.length} service${rows.length === 1 ? '' : 's'} · ${p.kind === 'business' ? 'owner key' : 'approved key'}`)),
+            h('span', { class: 'chev', 'aria-hidden': 'true' }, '›')),
+          open ? h('ul', { class: 'menu' }, ...rows.map(row)) : null);
+      }));
+    }
+
+    function row(e) {
+      const isOpen = S.openRow.has(e.id);
+      const url = location.origin + '/api/v1' + (e.example_path || e.path);
+      const copy = h('button', { class: 'btn sm', type: 'button', onclick: () => {
+        const done = (t) => { copy.textContent = t; setTimeout(() => { copy.textContent = 'Copy URL'; }, 1600); };
+        if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => done('Copied ✓'), () => done('Select & copy by hand')); else done('Select & copy by hand');
+      } }, 'Copy URL');
+      return h('li', { class: e.enabled === false ? 'off' : '' },
+        h('button', { class: 'mrow', type: 'button', 'aria-expanded': String(isOpen), onclick: () => { if (S.openRow.has(e.id)) S.openRow.delete(e.id); else S.openRow.add(e.id); paint(); } },
+          h('span', { class: 'mname' }, e.summary || e.path), e.enabled === false ? h('span', { class: 'pill bad' }, 'off') : null, h('i', { class: 'lead' }),
+          e.method ? h('span', { class: 'pill' }, e.method) : null, h('span', { class: 'mpath' }, e.path)),
+        isOpen ? h('div', { class: 'detail' },
+          e.description ? h('p', {}, e.description) : null,
+          h('div', { class: 'facts' },
+            e.access ? h('div', {}, 'Access: ', h('b', {}, e.access === 'business' ? `owner key · ${e.scope || 'any scope'}` : 'any key approved for this app')) : null,
+            h('div', {}, 'Cached: ', h('b', {}, e.cache_seconds ? `${e.cache_seconds}s` : 'never')),
+            h('div', {}, 'Last 24h: ', h('b', {}, `${fmt(e.calls_24h)} calls`), e.errors_24h > 0 ? h('b', { style: 'color:var(--bad)' }, ` · ${fmt(e.errors_24h)} errors`) : null)),
+          h('pre', {}, `${e.method || 'GET'} ${url}`),
+          h('div', { class: 'row' }, copy, h('a', { class: 'btn sm', href: '/developers/#playground', target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, 'Try it live ↗'))) : null);
+    }
+
+    paint();
+    return h('div', { class: 'wrap' },
+      h('div', { class: 'mast' },
+        h('div', { class: 'orn', 'aria-hidden': 'true' }, '◆'),
+        h('h2', {}, 'The Era Catalogue'),
+        h('p', { class: 'est' }, 'Every service we offer, from one key. Public data, and private tools for the businesses that run on it.'),
+        h('div', { class: 'ledger' }, stat(PRODUCTS.length, 'Products'), stat(all.length, 'Services'), stat(live, 'Switched on'), stat(all.reduce((n, e) => n + (e.calls_24h || 0), 0), 'Calls · 24h'))),
+      h('div', { class: 'bar' }, search, chips, toggleAll),
+      list,
+      h('p', { class: 'colophon' }, 'Switch a single service off, or tune its cache, in the Endpoints tab.'));
+  }
+
   function appsTab() {
     const sel = h('select', { 'aria-label': 'Filter by status', style: 'width:auto', onchange: (e) => { S.status = e.target.value; loadAll(); } },
       ...[['', 'All apps'], ['pending', 'Pending'], ['approved', 'Approved'], ['suspended', 'Suspended'], ['rejected', 'Rejected']].map(([v, l]) => h('option', { value: v, selected: S.status === v }, l)));
@@ -308,10 +430,13 @@ export function mountEraApiAdmin(host, { rpc, signIn, theme } = {}) {
           return h('div', { class: 'row' }, h('span', { class: 'sub' }, 'Sandbox keys:'), r, h('span', { class: 'sub' }, '/ min'), d, h('span', { class: 'sub' }, '/ day'), h('button', { class: 'btn sm', type: 'button', onclick: () => act('lim', () => call('era_api_admin_save_settings', { p_patch: { sandbox_rate_per_min: Number(r.value), sandbox_daily_quota: Number(d.value) } }), 'Sandbox limits saved.') }, 'Save'));
         })()),
       h('div', { class: 'tabs', role: 'tablist', 'aria-label': 'API administration' },
-        ...[['requests', 'Requests', cl.pending], ['apps', 'Apps & keys'], ['business', 'Business & gas'], ['endpoints', 'Endpoints'], ['activity', 'Activity', o.errors_24h, true]].map(([id, label, n, red]) =>
+        ...[['products', 'Products'], ['requests', 'Requests', cl.pending], ['apps', 'Apps & keys'], ['business', 'Business & gas'], ['endpoints', 'Endpoints'], ['activity', 'Activity', o.errors_24h, true]].map(([id, label, n, red]) =>
           h('button', { class: 'tab', role: 'tab', type: 'button', 'aria-selected': String(S.tab === id), onclick: () => { S.tab = id; render(); } }, label, n > 0 ? h('span', { class: 'n' + (red ? ' red' : '') }, n) : null))),
-      S.tab === 'requests' ? requestsTab() : S.tab === 'apps' ? appsTab() : S.tab === 'business' ? businessTab() : S.tab === 'endpoints' ? endpointsTab() : activityTab()].filter(Boolean));
+      S.tab === 'products' ? productsTab() : S.tab === 'requests' ? requestsTab() : S.tab === 'apps' ? appsTab() : S.tab === 'business' ? businessTab() : S.tab === 'endpoints' ? endpointsTab() : activityTab()].filter(Boolean));
   }
+
+  // Descriptions, methods and scopes for the Products tab. Optional: without it the tab still lists what the database knows.
+  fetch('/developers/catalog.json').then((r) => (r.ok ? r.json() : null)).then((c) => { if (c && !dead) { S.cat = c; if (S.gate === 'ok' && S.tab === 'products') render(); } }).catch(() => {});
 
   gate();
   return {
