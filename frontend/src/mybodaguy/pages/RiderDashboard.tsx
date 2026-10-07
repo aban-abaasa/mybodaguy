@@ -8,6 +8,7 @@ import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
+import MobileBottomTabs from '../components/common/MobileBottomTabs';
 import RiderICANEarnings from '../components/RiderICANEarnings';
 import RiderMyCard from '../components/RiderMyCard';
 import IcanCoinCard from '../components/IcanCoinCard';
@@ -50,6 +51,11 @@ const TAB_META: Record<TabType, { label: string; emoji: string; icon: LucideIcon
   vote:         { label: 'Vote',       emoji: '🗳️', icon: Vote },
 };
 const NAV_TABS: TabType[] = ['overview', 'card', 'mode', 'locations', 'partnerships', 'deliveries', 'rewards'];
+
+// Phone bottom tab bar — the four things a rider reaches for mid-shift. The
+// rest stay in the header Menu sheet.
+const BOTTOM_TAB_IDS: TabType[] = ['overview', 'requests', 'deliveries', 'card'];
+const BOTTOM_TAB_LABELS: Partial<Record<TabType, string>> = { overview: 'Home', requests: 'Requests', deliveries: 'Deliveries', card: 'My Card' };
 
 // True while this user has an active (accepted/in_progress) ride that is
 // the dispatched vehicle for a journey's sea_leg — i.e. mid-voyage, departed
@@ -995,6 +1001,12 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
           </div>
         </div>
       )}
+
+      <MobileBottomTabs
+        tabs={BOTTOM_TAB_IDS.map(id => ({ id, label: BOTTOM_TAB_LABELS[id] ?? TAB_META[id].label, icon: TAB_META[id].icon }))}
+        activeTab={activeTab}
+        onSelect={switchTab}
+      />
 
       {/* Profile Modal */}
       <ProfileModal

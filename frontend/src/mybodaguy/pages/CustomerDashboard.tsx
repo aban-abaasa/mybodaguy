@@ -6,6 +6,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
+import MobileBottomTabs from '../components/common/MobileBottomTabs';
 import { toast } from 'sonner';
 import EnhancedRideRequest from '../components/EnhancedRideRequest';
 import BecomeOperatorForm from '../components/BecomeOperatorForm';
@@ -71,6 +72,15 @@ const ALL_TABS: { id: TabType; label: string; emoji: string; icon: LucideIcon }[
   { id: 'become-operator', label: 'Become a Driver', emoji: '🚚', icon: Truck },
   { id: 'manage-business', label: 'Manage Your Business', emoji: '🏢', icon: Building2 },
   { id: 'profile',   label: 'Profile',   emoji: '👤', icon: User },
+];
+
+// Phone bottom tab bar — the four most-used destinations. 'wallet' isn't a tab
+// (it hands off to the parent's wallet view), so it's special-cased in onSelect.
+const BOTTOM_TABS: { id: TabType | 'wallet'; label: string; icon: LucideIcon }[] = [
+  { id: 'overview',  label: 'Home',   icon: Home },
+  { id: 'book-ride', label: 'Ride',   icon: Bike },
+  { id: 'orders',    label: 'Orders', icon: ClipboardList },
+  { id: 'wallet',    label: 'Wallet', icon: Wallet },
 ];
 
 // ── Ride/delivery row — collapsed to one line, expands in place on click ──────
@@ -1066,6 +1076,13 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
           </div>
         </div>
       )}
+
+      {/* Phone bottom tabs — the four vital destinations; the rest live in Menu. */}
+      <MobileBottomTabs
+        tabs={BOTTOM_TABS}
+        activeTab={activeTab}
+        onSelect={(id) => (id === 'wallet' ? goToWallet() : switchTab(id))}
+      />
     </div>
   );
 }

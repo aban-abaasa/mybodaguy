@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Bike, Users, DollarSign, MapPin, LogOut, UserPlus, ChevronRight, ChevronDown, TrendingUp, User, X, Check, Search, Calendar, CreditCard, BarChart3, Settings, LayoutGrid, Printer, Vote } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import MobileBottomTabs from '../components/common/MobileBottomTabs';
 import { chairpersonService, SubordinateChairperson, CommitteeMember, CommissionRecord } from '../services/chairpersonService';
 import { riderService, Rider } from '../services/riderService';
 import { supabase } from '../services/supabaseClient';
@@ -951,6 +952,17 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
           }}
         />
       )}
+
+      {/* Phone bottom tabs — the four vital sections (Riders replaces Vote for stage roles). */}
+      <MobileBottomTabs
+        hideFrom="md"
+        tabs={(['overview', 'subordinates', 'riders', 'commission', 'vote'] as TabType[])
+          .map(id => tabs.find(t => t.id === id))
+          .filter((t): t is NonNullable<typeof t> => !!t)
+          .slice(0, 4)}
+        activeTab={activeTab}
+        onSelect={setActiveTab}
+      />
     </div>
   );
 }

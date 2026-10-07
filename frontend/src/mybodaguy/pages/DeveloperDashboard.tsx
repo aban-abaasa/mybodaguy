@@ -6,6 +6,7 @@ import {
   ShoppingBag, ChevronRight, Truck, XCircle, Activity, Share2, Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import MobileBottomTabs from '../components/common/MobileBottomTabs';
 import { userService } from '../services/userService';
 import { roleService } from '../services/roleService';
 import RegionsManagement from '../components/RegionsManagement';
@@ -256,7 +257,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
       )}
 
       {/* Main Content */}
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 pb-28 sm:pb-8">
         {/* Tabs */}
         <div className="bg-white rounded-xl shadow-md p-2 mb-8 overflow-x-auto">
           <div className="flex gap-2 min-w-max">
@@ -310,6 +311,15 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
           {activeTab === 'era-api' && permissions.isMain && <EraApiDevTab />}
         </div>
       </div>
+
+      {/* Phone bottom tabs — four vital sections, limited to what this developer may open. */}
+      <MobileBottomTabs
+        tabs={['overview', 'users', 'applications', 'commissions']
+          .map(id => tabs.find(t => t.id === id))
+          .filter((t): t is NonNullable<typeof t> => !!t)}
+        activeTab={activeTab}
+        onSelect={setActiveTab}
+      />
     </div>
   );
 }
