@@ -1660,45 +1660,30 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
   return (
     <div className="space-y-5">
-      {/* Hero — same ink-and-gold treatment as the Overview's Book a Ride tile */}
-      <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-4 min-[360px]:p-5 text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40">
-        <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full border border-[#c4a052]/25" />
-        <span aria-hidden className="pointer-events-none absolute -right-5 -top-5 h-28 w-28 rounded-full border border-[#c4a052]/20" />
-        <span aria-hidden className="pointer-events-none absolute -bottom-14 -left-10 h-40 w-40 rounded-full bg-orange-500/20 blur-2xl" />
-        <div className="relative flex items-center justify-between gap-4">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]">{isDelivery ? 'Send anything' : 'Get moving'}</p>
-            <h2 className="mt-1 font-classic-display text-[24px] font-bold leading-tight">{formTitle}</h2>
-            <p className="mt-1 text-[13px] text-white/70">
-              {isDelivery ? 'The nearest available rider collects and delivers it' : 'Boda, car, van or truck — nearest driver first'}
-            </p>
-          </div>
-          <span className="grid h-14 w-14 flex-shrink-0 place-items-center rounded-full bg-white/5 ring-1 ring-[#c4a052]/50 min-[360px]:h-16 min-[360px]:w-16">
-            {isDelivery
-              ? <Package size={30} strokeWidth={1.4} className="text-[#e6c980]" />
-              : <Bike size={32} strokeWidth={1.4} className="text-[#e6c980]" />}
-          </span>
-        </div>
+      {/* Slim title — the big hero card is gone so the form starts right away.
+          Phones already show the tab name in the section bar, so only >=sm. */}
+      <div className="hidden items-center gap-2 px-1 sm:flex">
+        {isDelivery
+          ? <Package size={18} className="flex-shrink-0 text-orange-500" />
+          : <Bike size={18} className="flex-shrink-0 text-orange-500" />}
+        <h2 className="font-classic-display text-xl font-bold leading-tight text-slate-800">{formTitle}</h2>
+        <span className="truncate text-sm text-slate-500">
+          · {isDelivery ? 'The nearest available rider collects and delivers it' : 'Boda, car, van or truck — nearest driver first'}
+        </span>
       </div>
 
       {showJourneyOption && (
         <button
           type="button"
           onClick={() => setBookingMode('journey')}
-          className="classic-card flex w-full items-center gap-3 p-3.5 text-left transition-all active:scale-[0.99] hover:border-violet-300"
+          className="flex w-full items-center gap-2 px-1 py-1 text-left text-sm text-violet-700 transition-colors hover:text-violet-900"
         >
-          <span className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-2xl bg-violet-50 text-violet-600 ring-1 ring-inset ring-black/5">
-            <Plane size={20} />
+          <Plane size={15} className="flex-shrink-0" />
+          <span className="min-w-0 flex-1 truncate">
+            <strong className="font-semibold">{isDelivery ? 'Sending it overseas?' : 'Flying somewhere?'}</strong>{' '}
+            <span className="text-slate-500">{isDelivery ? 'Book a cargo journey' : 'Book a flight + rides'}</span>
           </span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-[15px] font-semibold leading-tight text-slate-800">
-              {isDelivery ? 'Sending it overseas?' : 'Flying somewhere?'}
-            </span>
-            <span className="mt-0.5 block text-xs text-slate-500">
-              {isDelivery ? 'Book a full journey to ship cargo across borders' : 'Book a full journey — flight plus a ride at each end'}
-            </span>
-          </span>
-          <ArrowRight size={16} className="flex-shrink-0 text-slate-400" />
+          <ArrowRight size={14} className="flex-shrink-0 text-slate-400" />
         </button>
       )}
 
@@ -1738,7 +1723,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
       {/* Delivery details — store picker, personal/business, delivery window */}
       {isDelivery && (
-        <div className="classic-card p-4 sm:p-5 space-y-4">
+        <div className="space-y-4">
           <StepHeading n={1}>Delivery details</StepHeading>
           {/* Delivery mode + supermarket picker */}
           {serviceType === 'delivery' && (
@@ -2069,7 +2054,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       )}
 
       {/* Route */}
-      <div className="classic-card p-4 sm:p-5 space-y-4">
+      <div className="space-y-4">
         <StepHeading
           n={1 + stepBase}
           action={
@@ -2261,7 +2246,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       </div>
 
       {/* Ride options */}
-      <div className="classic-card p-4 sm:p-5 space-y-4">
+      <div className="space-y-4">
         <StepHeading n={2 + stepBase}>{needsCrossBorderPath ? 'Your courier' : isDelivery ? 'Choose a vehicle' : 'Choose your ride'}</StepHeading>
 
         {/* Cross-border delivery: mode/vehicle-type/power/rain-cover filters
@@ -2343,9 +2328,12 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             )}
 
             {/* Fare style — filters matched riders by their real pricing mode */}
-            <div>
-              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Fare style</p>
-              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 scrollbar-hide">
+            <details className="group">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 [&::-webkit-details-marker]:hidden">
+                <span>Fare style · <span className="normal-case tracking-normal text-slate-700">{({ all: 'All', normal: 'Normal', vip: 'VIP +10%', discount: 'Discount −10%', return: 'Return home −30%' } as Record<string, string>)[modePreference] ?? 'All'}</span></span>
+                <ChevronDown size={14} className="transition-transform group-open:rotate-180" />
+              </summary>
+              <div className="-mx-1 mt-2 flex gap-2 overflow-x-auto px-1 pb-1 scrollbar-hide">
                 {(
                   [
                     { id: 'all' as ModePreference, label: 'All', icon: null },
@@ -2375,13 +2363,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                   );
                 })}
               </div>
-            </div>
+            </details>
           </>
         )}
       </div>
 
       {/* Payment + extras */}
-      <div className="classic-card p-4 sm:p-5 space-y-4">
+      <div className="space-y-4">
         <StepHeading n={3 + stepBase}>Payment</StepHeading>
 
         {/* Payment method — Wallet settles automatically the instant the
@@ -2614,17 +2602,14 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           the system decide whether the escort transports you directly
           or a driver gets paired in alongside them. */}
       {serviceType === 'ride' && !needsCrossBorderPath && (
-        <div className="classic-card !border-violet-200 p-4 sm:p-5 space-y-3">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-2xl bg-violet-50 text-violet-600 ring-1 ring-inset ring-black/5">
-              <ShieldCheck size={19} />
-            </span>
-            <div className="min-w-0">
-              <p className="font-classic-display text-base font-semibold leading-tight text-slate-800">No transport of your own?</p>
-              <p className="text-xs text-slate-500">Just send security — the nearest available escort comes to you.</p>
-            </div>
-          </div>
-
+        <details className="group border-t border-violet-200 pt-3">
+          <summary className="flex cursor-pointer list-none items-center gap-2 text-sm font-semibold text-slate-700 [&::-webkit-details-marker]:hidden">
+            <ShieldCheck size={16} className="flex-shrink-0 text-violet-600" />
+            <span>No transport of your own?</span>
+            <span className="hidden truncate text-xs font-normal text-slate-500 sm:inline">Just send security — the nearest escort comes to you.</span>
+            <ChevronDown size={16} className="ml-auto flex-shrink-0 text-slate-400 transition-transform group-open:rotate-180" />
+          </summary>
+          <div className="mt-3 space-y-3">
           <div className="grid grid-cols-2 gap-2">
             <select
               value={selectedSecurityCompanyId}
@@ -2683,7 +2668,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               </>
             )}
           </button>
-        </div>
+          </div>
+        </details>
       )}
 
       {/* Matched Riders */}
@@ -2693,7 +2679,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           : matchedRiders.filter(r => r.mode === modePreference);
 
         return (
-          <div ref={resultsRef} className="classic-card scroll-mt-32 p-4 sm:p-5">
+          <div ref={resultsRef} className="scroll-mt-32">
             <div className="mb-4 flex items-center gap-3">
               <h3 className="font-classic-display text-lg font-semibold text-slate-800">
                 Available Riders ({displayedRiders.length})
