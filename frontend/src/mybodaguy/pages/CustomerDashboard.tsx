@@ -635,9 +635,10 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
       {/* ── Tab Content ── */}
       {/* Generous bottom padding so the floating chat button never sits on
           top of the last card when scrolled to the end. */}
-      {/* Shop runs edge-to-edge: no centred container or side gutters, so the
-          product grid gets the whole screen. Every other tab keeps the container. */}
-      <div className={activeTab === 'shop' ? 'w-full px-2 pt-2 pb-28' : 'container mx-auto px-4 pt-5 pb-28'}>
+      {/* Shop, Book a Ride and Delivery run edge-to-edge: no centred container or
+          side gutters, so products / the booking form get the whole screen.
+          Every other tab keeps the container. */}
+      <div className={activeTab === 'shop' || activeTab === 'book-ride' || activeTab === 'delivery' ? 'w-full px-2 pt-2 pb-28' : 'container mx-auto px-4 pt-5 pb-28'}>
 
         {/* Overview */}
         {activeTab === 'overview' && (
@@ -793,13 +794,15 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             flight, driver at destination) is inbuilt here as a mode toggle,
             not a separate tab */}
         {activeTab === 'book-ride' && (
-          <EnhancedRideRequest
-            customerId={user?.id}
-            fixedServiceType="ride"
-            showJourneyOption
-            openJourneyId={openJourneyId}
-            onJourneyClosed={() => setOpenJourneyId(null)}
-          />
+          <div className="mx-auto w-full max-w-5xl">
+            <EnhancedRideRequest
+              customerId={user?.id}
+              fixedServiceType="ride"
+              showJourneyOption
+              openJourneyId={openJourneyId}
+              onJourneyClosed={() => setOpenJourneyId(null)}
+            />
+          </div>
         )}
 
         {/* Delivery — same real matching-engine flow as Book a Ride, locked
@@ -807,7 +810,9 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             cross-bloc delivery (e.g. Uganda -> USA) reach ship-cargo journey
             booking, same as the ride tab already does for flights. */}
         {activeTab === 'delivery' && (
-          <EnhancedRideRequest customerId={user?.id} fixedServiceType="delivery" showJourneyOption />
+          <div className="mx-auto w-full max-w-5xl">
+            <EnhancedRideRequest customerId={user?.id} fixedServiceType="delivery" showJourneyOption />
+          </div>
         )}
 
         {/* Become a transport service provider — self-service application,
