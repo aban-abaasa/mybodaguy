@@ -714,6 +714,8 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                             <ToneChip tone="warn"><CreditCard size={10} /> Card requested</ToneChip>
                           ) : riderCards[rider.id].status === 'pending_payment' ? (
                             <ToneChip tone="warn"><CreditCard size={10} /> Card unpaid</ToneChip>
+                          ) : riderCards[rider.id].card_expired ? (
+                            <ToneChip tone="bad"><CreditCard size={10} /> Card expired</ToneChip>
                           ) : (
                             <ToneChip tone="ok"><CreditCard size={10} /> Card active</ToneChip>
                           )
@@ -2135,7 +2137,9 @@ function ManageRiderModal({ rider, card, onClose, onSuccess }: ManageRiderModalP
                 <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-500">
                   {card.status === 'pending_payment'
                     ? 'You can print this card once the rider has paid for it.'
-                    : 'This card can’t be printed while the rider is not active.'}
+                    : card.card_expired
+                      ? 'This card has expired. The rider can renew it from their dashboard, then it can be printed again.'
+                      : 'This card can’t be printed while the rider is not active.'}
                 </p>
               )}
             </div>

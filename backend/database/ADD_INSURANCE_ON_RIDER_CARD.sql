@@ -19,6 +19,10 @@
 --   * mbg_rider_insurance_summary — new, internal wrapper that never throws
 --   * mbg_business_driver_cover   — new: a company sees which of its drivers are covered
 --
+-- The card payload and QR check here also carry the card's one-year expiry and the rider's
+-- next of kin / home (ADD_RIDER_CARD_EXPIRY_AND_KIN.sql), so this file and that one can be
+-- run in either order.
+--
 -- Run after ADD_RIDER_ID_CARDS.sql. Safe to re-run.
 -- ============================================================================
 
@@ -87,20 +91,34 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     'license_expiry',     r.license_expiry,
     'permit_status',      public.mbg_permit_status(r.license_expiry),
     'permit_days_left',   (r.license_expiry - current_date),
+    -- The card's own one-year validity (ADD_RIDER_CARD_EXPIRY_AND_KIN.sql). Read through
+    -- jsonb so this works before that file is run; an expired card owes its fee again.
+    'expires_at',         (to_jsonb(c) ->> 'expires_at'),
+    'card_expired',       x.expired,
+    'card_days_left',     CASE WHEN c.status = 'active' AND (to_jsonb(c) ->> 'expires_at') IS NOT NULL
+                               THEN ((to_jsonb(c) ->> 'expires_at')::timestamptz::date - current_date) END,
     -- Fees to the chairpersons: the card fee, and ride commission still owed
     -- (read through jsonb so this works before ADD_CASH_COMMISSION_DEBT_TRACKING.sql).
-    'card_fee_status',    CASE c.status WHEN 'active' THEN 'paid'
-                                        WHEN 'pending_payment' THEN 'pending'
-                                        ELSE 'cancelled' END,
+    'card_fee_status',    CASE WHEN c.status = 'pending_payment' OR x.expired THEN 'pending'
+                               WHEN c.status = 'active' THEN 'paid'
+                               ELSE 'cancelled' END,
     'commission_owed_ugx', COALESCE((to_jsonb(r) ->> 'cash_commission_debt_ugx')::numeric, 0),
-    'fees_status',        CASE WHEN c.status = 'pending_payment'
+    'fees_status',        CASE WHEN c.status = 'pending_payment' OR x.expired
                                  OR COALESCE((to_jsonb(r) ->> 'cash_commission_debt_ugx')::numeric, 0) > 0
-                               THEN 'pending' ELSE 'paid' END
+                               THEN 'pending' ELSE 'paid' END,
+    -- Next of kin and home: for the rider and the chairpersons over them, never the public QR.
+    'next_of_kin_name',         (to_jsonb(r) ->> 'next_of_kin_name'),
+    'next_of_kin_phone',        (to_jsonb(r) ->> 'next_of_kin_phone'),
+    'next_of_kin_relationship', (to_jsonb(r) ->> 'next_of_kin_relationship'),
+    'home_location',            (to_jsonb(r) ->> 'home_location')
   ) || jsonb_build_object(
     -- Insurance cover: { state: active | grace | waiting | expired | none | unavailable, policies: [...] }
     'insurance',          public.mbg_rider_insurance_summary(r.user_id, r.id)
   )
   FROM public.mbg_rider_cards c
+  CROSS JOIN LATERAL (
+    SELECT COALESCE(c.status = 'active' AND (to_jsonb(c) ->> 'expires_at')::timestamptz < now(), false) AS expired
+  ) x
   JOIN public.mbg_riders r  ON r.id = c.rider_id
   JOIN public.mbg_users  u  ON u.id = r.user_id
   LEFT JOIN public.mbg_user_profiles up ON up.user_id = r.user_id
@@ -141,13 +159,17 @@ BEGIN
   v_state := CASE
     WHEN v_card ->> 'status' = 'revoked'         THEN 'cancelled'
     WHEN v_card ->> 'status' = 'pending_payment' THEN 'unpaid'
+    WHEN (v_card ->> 'card_expired')::boolean    THEN 'expired'
     WHEN v_card ->> 'rider_status' <> 'active'   THEN 'suspended'
     ELSE 'valid'
   END;
 
-  -- An unpaid or cancelled card is not a card: say so, and nothing about the rider.
-  IF v_state IN ('unpaid', 'cancelled') THEN
-    RETURN jsonb_build_object('is_valid', false, 'state', v_state, 'card_number', v_card ->> 'card_number');
+  -- An unpaid, cancelled or expired card is not a card: say so, and nothing about the rider.
+  IF v_state IN ('unpaid', 'cancelled', 'expired') THEN
+    RETURN jsonb_build_object(
+      'is_valid', false, 'state', v_state, 'card_number', v_card ->> 'card_number',
+      'expires_at', CASE WHEN v_state = 'expired' THEN v_card ->> 'expires_at' END
+    );
   END IF;
 
   RETURN jsonb_build_object(
@@ -164,6 +186,7 @@ BEGIN
     'completed_rides', v_card -> 'completed_rides',
     'member_since',    v_card ->> 'member_since',
     'issued_at',       v_card ->> 'issued_at',
+    'expires_at',      v_card ->> 'expires_at',
     'stage',           v_card ->> 'stage',
     'parish',          v_card ->> 'parish',
     'subcounty',       v_card ->> 'subcounty',

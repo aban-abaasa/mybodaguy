@@ -4,10 +4,11 @@ import { CardBack, CardFront, cardColourStyle } from './RiderIdCard';
 import type { RiderCard } from '../services/riderCardService';
 import './riderCard.css';
 
-// Only a paid card of a rider who is still active is worth printing: an unpaid
-// card has no QR yet, and a suspended rider's card must not go back into use.
-export const isPrintableCard = (card: Pick<RiderCard, 'status' | 'rider_status'>) =>
-  card.status === 'active' && card.rider_status === 'active';
+// Only a paid, unexpired card of a rider who is still active is worth printing: an
+// unpaid card has no QR yet, an expired card must be renewed first, and a suspended
+// rider's card must not go back into use.
+export const isPrintableCard = (card: Pick<RiderCard, 'status' | 'rider_status' | 'card_expired'>) =>
+  card.status === 'active' && !card.card_expired && card.rider_status === 'active';
 
 let mounted: { el: HTMLElement; root: Root } | null = null;
 
@@ -62,7 +63,7 @@ async function sheetReady(el: HTMLElement) {
 export async function printRiderCards(cards: RiderCard[]): Promise<number> {
   const printable = cards.filter(isPrintableCard);
   if (printable.length === 0) {
-    toast.error(cards.length > 0 ? 'Only paid cards of active riders can be printed.' : 'There are no cards to print.');
+    toast.error(cards.length > 0 ? 'Only paid, unexpired cards of active riders can be printed.' : 'There are no cards to print.');
     return 0;
   }
 

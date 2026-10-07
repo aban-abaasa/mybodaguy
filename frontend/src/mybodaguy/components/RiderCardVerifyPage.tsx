@@ -72,6 +72,7 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
     : state === 'suspended' ? { icon: <Ban size={44} />, cls: 'text-red-600', title: 'Rider not active', sub: 'This card is genuine but the rider is currently suspended or inactive. Do not treat it as valid.' }
     : state === 'unpaid' ? { icon: <Clock size={44} />, cls: 'text-amber-600', title: 'Card not activated', sub: 'This card has not been paid for yet, so it is not valid.' }
     : state === 'cancelled' ? { icon: <XCircle size={44} />, cls: 'text-red-600', title: 'Card cancelled', sub: 'This card was cancelled. Do not accept it.' }
+    : state === 'expired' ? { icon: <Clock size={44} />, cls: 'text-red-600', title: 'Card expired', sub: `This card expired${proof?.expires_at ? ` on ${fmtDate(proof.expires_at)}` : ''}. The rider must renew it, so do not treat it as valid.` }
     : { icon: <XCircle size={44} />, cls: 'text-red-600', title: 'Not a valid card', sub: 'No rider card matches this code. It may be forged or mistyped.' };
 
   const showDetails = state === 'valid' || state === 'suspended';
@@ -104,6 +105,7 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
         member_since: proof.member_since ?? '',
         license_expiry: proof.license_expiry ?? null,
         issued_at: proof.issued_at ?? '',
+        expires_at: proof.expires_at ?? null,
         accent_color: proof.accent_color ?? null,
         insurance: proof.insurance ?? null,
       }

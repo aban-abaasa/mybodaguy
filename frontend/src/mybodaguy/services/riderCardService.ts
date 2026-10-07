@@ -66,12 +66,50 @@ export interface RiderCard {
   license_expiry: string | null;
   permit_status: PermitStatus;
   permit_days_left: number | null;
+  // The card's own one-year validity. Absent until ADD_RIDER_CARD_EXPIRY_AND_KIN.sql has been run.
+  expires_at?: string | null;
+  card_expired?: boolean;
+  card_days_left?: number | null;
   // Fees to the chairpersons
   card_fee_status: 'paid' | 'pending' | 'cancelled';
   commission_owed_ugx: number;
   fees_status: FeesStatus;
+  // Next of kin and home — private to the rider and the chairpersons over them.
+  next_of_kin_name?: string | null;
+  next_of_kin_phone?: string | null;
+  next_of_kin_relationship?: string | null;
+  home_location?: string | null;
   // Insurance cover, read live. Absent until ADD_INSURANCE_ON_RIDER_CARD.sql has been run.
   insurance?: CardInsurance | null;
+}
+
+// A paid card can be renewed once it has expired or has this many days (or fewer) left.
+export const CARD_RENEW_WINDOW_DAYS = 30;
+
+export const isCardExpired = (card: Pick<RiderCard, 'status' | 'card_expired'>) =>
+  card.status === 'active' && !!card.card_expired;
+
+// Expired, or inside the renewal window: the rider can pay the fee again for another year.
+export const canRenewCard = (card: Pick<RiderCard, 'status' | 'card_expired' | 'card_days_left'>) =>
+  card.status === 'active' &&
+  (!!card.card_expired || (card.card_days_left != null && card.card_days_left <= CARD_RENEW_WINDOW_DAYS));
+
+export const cardValidityDetail = (card: Pick<RiderCard, 'expires_at' | 'card_expired' | 'card_days_left'>) => {
+  if (!card.expires_at) return null;
+  const when = new Date(card.expires_at).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+  if (card.card_expired) return `Expired ${when}`;
+  const d = card.card_days_left;
+  if (d != null && d <= CARD_RENEW_WINDOW_DAYS) {
+    return d <= 0 ? `Expires today (${when})` : `Expires in ${d} day${d === 1 ? '' : 's'} (${when})`;
+  }
+  return `Valid until ${when}`;
+};
+
+export interface KinDetails {
+  next_of_kin_name: string;
+  next_of_kin_phone: string;
+  next_of_kin_relationship: string;
+  home_location: string;
 }
 
 // One row of the district chairperson's list: a rider and their live card, if any.
@@ -92,6 +130,11 @@ export interface DistrictRiderRow {
   license_expiry: string | null;
   permit_status: PermitStatus;
   permit_days_left: number | null;
+  // Next of kin and home, so the chairperson can fill them in for a rider without a card.
+  next_of_kin_name?: string | null;
+  next_of_kin_phone?: string | null;
+  next_of_kin_relationship?: string | null;
+  home_location?: string | null;
   card: RiderCard | null;
 }
 
@@ -128,8 +171,10 @@ export type CardRegionInfoFields = Pick<CardRegionInfo, 'code' | 'contact_name' 
 // What the public QR page gets back — public-safe fields only.
 export interface RiderCardProof {
   is_valid: boolean;
-  state?: 'valid' | 'unpaid' | 'suspended' | 'cancelled';
+  state?: 'valid' | 'unpaid' | 'suspended' | 'cancelled' | 'expired';
   card_number?: string;
+  // The card's one-year expiry (also sent for an expired card, so the page can say when).
+  expires_at?: string | null;
   full_name?: string;
   avatar_url?: string | null;
   vehicle_type?: string;
@@ -302,6 +347,26 @@ export const riderCardService = {
     return res?.success
       ? { success: true, permitStatus: res.permit_status }
       : { success: false, error: res?.error || 'Could not save the permit' };
+  },
+
+  // The rider for themselves, or their district chairperson: next of kin + home
+  // location. A blank field clears it; name and phone go together.
+  async setKinDetails(
+    riderId: string,
+    d: KinDetails
+  ): Promise<{ success: boolean; error?: string; card?: RiderCard | null }> {
+    const { data, error } = await supabase.rpc('mbg_set_rider_kin_details', {
+      p_rider_id: riderId,
+      p_kin_name: d.next_of_kin_name.trim() || null,
+      p_kin_phone: d.next_of_kin_phone.trim() || null,
+      p_kin_relation: d.next_of_kin_relationship.trim() || null,
+      p_home: d.home_location.trim() || null,
+    });
+    if (error) return { success: false, error: error.message };
+    const res = data as { success?: boolean; error?: string; card?: RiderCard | null } | null;
+    return res?.success
+      ? { success: true, card: res.card ?? null }
+      : { success: false, error: res?.error || 'Could not save' };
   },
 
   // Rider: ask for my own card. It is issued on the spot (no approval), as

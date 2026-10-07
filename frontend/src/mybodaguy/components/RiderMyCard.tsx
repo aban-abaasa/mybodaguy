@@ -1,12 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { ArrowRight, IdCard, Receipt, Shield, Sparkles } from 'lucide-react';
+import { ArrowRight, CalendarClock, Home, IdCard, Receipt, Shield, Sparkles } from 'lucide-react';
 import RiderIdCard, { FeesChip, InsuranceChip, PermitChip, RiderCardVisual } from './RiderIdCard';
+import RiderKinForm, { kinFromRecord } from './RiderKinForm';
 import SetPinPrompt from './SetPinPrompt';
 import { supabase } from '../services/supabaseClient';
 import { hasPinSet, validatePIN, verifyPin } from '../services/pinService';
 import {
   DEFAULT_RIDER_CARD_FEE_ICAN,
+  canRenewCard,
+  cardValidityDetail,
+  isCardExpired,
   riderCardService,
   type RequestableRider,
   type RiderCard,
@@ -45,11 +49,13 @@ const friendlyPayError = (message?: string) => {
 // transaction PIN, like every other wallet payment in the app. The PIN is
 // checked first; nothing is charged until it is right.
 function PayPanel({
-  card, userId, autoStart, onPaid, onGoToWallet,
+  card, userId, autoStart, renew = false, onPaid, onGoToWallet,
 }: {
   card: RiderCard;
   userId?: string;
   autoStart: boolean;
+  // Paying again for a card that has expired (or is about to) rather than activating a new one.
+  renew?: boolean;
   onPaid: () => void;
   onGoToWallet?: () => void;
 }) {
@@ -108,7 +114,7 @@ function PayPanel({
       }
       const result = await riderCardService.payCard(card.card_id);
       if (result.success) {
-        toast.success('Card paid. Your QR code is ready.', {
+        toast.success(renew ? 'Card renewed for another year.' : 'Card paid. Your QR code is ready.', {
           action: onGoToWallet ? { label: 'View in wallet', onClick: onGoToWallet } : undefined,
         });
         onPaid();
@@ -146,7 +152,7 @@ function PayPanel({
         <div role="alert" className="space-y-2 rounded-xl bg-amber-50 p-3 text-xs text-amber-900 ring-1 ring-inset ring-amber-200">
           <p className="font-semibold">Your wallet doesn't have enough IcanEra for this card.</p>
           <p>
-            You have {fmtIcan(balance!)} and the card costs {card.fee_ican}. Add {fmtIcan(card.fee_ican - balance!)} more, then come back to pay.
+            You have {fmtIcan(balance!)} and {renew ? 'renewing the card' : 'the card'} costs {card.fee_ican}. Add {fmtIcan(card.fee_ican - balance!)} more, then come back to pay.
           </p>
           {onGoToWallet && (
             <button type="button" onClick={onGoToWallet} className="classic-btn classic-btn-outline !w-auto !min-h-[36px] !rounded-full !px-5 !py-1.5 !text-[13px]">
@@ -181,13 +187,13 @@ function PayPanel({
               Not now
             </button>
             <button type="submit" disabled={busy || !validatePIN(pin)} className="classic-btn classic-btn-primary !rounded-full whitespace-nowrap">
-              {busy ? 'Paying…' : `Pay ${card.fee_ican} ICAN`}
+              {busy ? 'Paying…' : `${renew ? 'Renew for' : 'Pay'} ${card.fee_ican} ICAN`}
             </button>
           </div>
         </form>
       ) : (
         <button type="button" onClick={start} className="classic-btn classic-btn-primary !rounded-full">
-          Pay {card.fee_ican} ICAN to activate
+          {renew ? `Renew for ${card.fee_ican} ICAN` : `Pay ${card.fee_ican} ICAN to activate`}
         </button>
       )}
     </div>
@@ -211,6 +217,83 @@ function PaidReceipt({ card, onGoToWallet }: { card: RiderCard; onGoToWallet?: (
           View
         </button>
       )}
+    </div>
+  );
+}
+
+// Next of kin and home location, printed on the back of the card. Opens by itself
+// while nothing has been added, so a new card does not go out without them.
+function KinPanel({ card, onSaved }: { card: RiderCard; onSaved: () => void }) {
+  const missing = !card.next_of_kin_name && !card.next_of_kin_phone && !card.home_location;
+  const [open, setOpen] = useState(missing);
+  const hasKin = !!(card.next_of_kin_name || card.next_of_kin_phone);
+
+  return (
+    <div className={`classic-card space-y-3 p-4 ${missing ? '!border-amber-300' : ''}`}>
+      <div className="flex items-start gap-3">
+        <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-sky-50 ring-1 ring-inset ring-sky-100">
+          <Home size={17} className="text-sky-600" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-classic-display text-base font-semibold leading-tight text-slate-800">Next of kin &amp; home</p>
+          {missing ? (
+            <p className="mt-0.5 text-xs text-amber-800">Not added yet. Add who to call in an emergency and where you live; it is printed on the back of your card.</p>
+          ) : (
+            <p className="mt-0.5 text-xs text-slate-500">
+              {hasKin ? [card.next_of_kin_name, card.next_of_kin_relationship && `(${card.next_of_kin_relationship})`, card.next_of_kin_phone].filter(Boolean).join(' ') : 'No next of kin'}
+              {card.home_location ? ` · ${card.home_location}` : ''}
+            </p>
+          )}
+        </div>
+        {!open && (
+          <button type="button" onClick={() => setOpen(true)} className="flex-shrink-0 text-xs font-semibold text-[#7a5a12] underline decoration-dotted">
+            {missing ? 'Add' : 'Edit'}
+          </button>
+        )}
+      </div>
+      {open && (
+        <RiderKinForm
+          riderId={card.rider_id}
+          idPrefix={`kin-${card.card_id}`}
+          initial={kinFromRecord(card)}
+          onSaved={() => { setOpen(false); onSaved(); }}
+          onCancel={missing ? undefined : () => setOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// An expired card — or one inside its last 30 days — is renewed by paying the fee again.
+// The new year is added on top of what is left, so renewing early loses nothing.
+function RenewPanel({
+  card, userId, onPaid, onGoToWallet,
+}: {
+  card: RiderCard;
+  userId?: string;
+  onPaid: () => void;
+  onGoToWallet?: () => void;
+}) {
+  const expired = isCardExpired(card);
+  return (
+    <div className={`classic-card space-y-3 p-4 ${expired ? '!border-red-300 ring-2 ring-red-100' : '!border-amber-300'}`}>
+      <div className="flex items-start gap-3">
+        <span className={`grid h-10 w-10 flex-shrink-0 place-items-center rounded-full ring-1 ring-inset ${expired ? 'bg-red-50 ring-red-100' : 'bg-amber-50 ring-amber-100'}`}>
+          <CalendarClock size={17} className={expired ? 'text-red-600' : 'text-amber-600'} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="font-classic-display text-base font-semibold leading-tight text-slate-800">
+            {expired ? 'Your card has expired' : 'Your card expires soon'}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-500">
+            {cardValidityDetail(card)}.{' '}
+            {expired
+              ? 'Its QR code no longer verifies. Renew it for another year to unlock the QR code again.'
+              : 'Renew now and a new year is added on top of the days you have left.'}
+          </p>
+        </div>
+      </div>
+      <PayPanel card={card} userId={userId} autoStart={false} renew onPaid={onPaid} onGoToWallet={onGoToWallet} />
     </div>
   );
 }
@@ -260,18 +343,24 @@ export default function RiderMyCard({ variant = 'page', userId, onPaid, onOpen, 
     if (loading || (cards.length === 0 && requestable.length === 0)) return null;
     const pending = cards.some((c) => c.status === 'pending_payment');
     const active = cards.find((c) => c.status === 'active');
-    const title = pending ? 'Your rider ID card is ready' : active ? 'My rider ID card' : 'Get your rider ID card';
+    const renewDue = !!active && canRenewCard(active);
+    const title = pending ? 'Your rider ID card is ready'
+      : active && isCardExpired(active) ? 'Your rider ID card has expired'
+      : active ? 'My rider ID card'
+      : 'Get your rider ID card';
     const caption = pending
       ? `Pay ${fee} ICAN to activate it`
-      : active
-        ? 'Tap to show your QR card'
-        : 'Issued instantly when you ask';
+      : active && renewDue
+        ? `${cardValidityDetail(active)} · renew for ${fee} ICAN`
+        : active
+          ? 'Tap to show your QR card'
+          : 'Issued instantly when you ask';
     return (
       <button
         type="button"
         onClick={onOpen}
         className={`classic-card flex w-full items-center gap-4 p-4 text-left transition-all hover:border-orange-300 active:scale-[0.99] ${
-          pending ? '!border-orange-400 ring-2 ring-orange-200/70' : ''
+          pending || renewDue ? '!border-orange-400 ring-2 ring-orange-200/70' : ''
         }`}
       >
         <span className="grid h-12 w-12 flex-shrink-0 place-items-center rounded-full bg-orange-50 ring-1 ring-inset ring-orange-100">
@@ -321,7 +410,7 @@ export default function RiderMyCard({ variant = 'page', userId, onPaid, onOpen, 
         <p className="classic-eyebrow">Identity</p>
         <h2 className="mt-1 font-classic-display text-[28px] font-bold leading-tight tracking-tight text-slate-900">My Card</h2>
         <p className="mt-1 text-sm text-slate-500">
-          Your BodaGoEra rider ID. The QR code shows your details, driving permit status and fees to anyone who scans it.
+          Your BodaGoEra rider ID, valid for one year at a time. The QR code shows your details, driving permit status and fees to anyone who scans it. Your next of kin and home are on the back of the card only.
         </p>
         <div className="landing-classic-divider mt-4" />
       </div>
@@ -382,27 +471,34 @@ export default function RiderMyCard({ variant = 'page', userId, onPaid, onOpen, 
               return (
                 <div key={card.card_id} className="space-y-3">
                   <RiderIdCard card={card} />
+                  {canRenewCard(card) && (
+                    <RenewPanel card={card} userId={userId} onPaid={() => { onPaid?.(); reload(); }} onGoToWallet={onGoToWallet} />
+                  )}
+                  <KinPanel card={card} onSaved={reload} />
                   <PaidReceipt card={card} onGoToWallet={onGoToWallet} />
                 </div>
               );
             }
             return (
-              <div key={card.card_id} className="classic-card space-y-3 !border-orange-400 p-4 ring-2 ring-orange-200/70">
-                <RiderCardVisual data={card} status="pending" />
-                <p className="text-sm text-slate-600">
-                  {card.requested_by_rider ? 'Your QR ID card has been issued.' : 'Your district chairperson issued you a QR ID card.'}{' '}
-                  Pay <span className="font-semibold text-slate-800">{card.fee_ican} ICAN</span> from your wallet to activate it.
-                </p>
-                <p className="text-xs text-slate-500">
-                  The fee is shared equally between the chairpersons of your stage, parish, subcounty, division and district.
-                </p>
-                <PayPanel
-                  card={card}
-                  userId={userId}
-                  autoStart={autoStartId === card.card_id}
-                  onPaid={() => { onPaid?.(); reload(); }}
-                  onGoToWallet={onGoToWallet}
-                />
+              <div key={card.card_id} className="space-y-3">
+                <div className="classic-card space-y-3 !border-orange-400 p-4 ring-2 ring-orange-200/70">
+                  <RiderCardVisual data={card} status="pending" />
+                  <p className="text-sm text-slate-600">
+                    {card.requested_by_rider ? 'Your QR ID card has been issued.' : 'Your district chairperson issued you a QR ID card.'}{' '}
+                    Pay <span className="font-semibold text-slate-800">{card.fee_ican} ICAN</span> from your wallet to activate it. It is then valid for one year.
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    The fee is shared equally between the chairpersons of your stage, parish, subcounty, division and district.
+                  </p>
+                  <PayPanel
+                    card={card}
+                    userId={userId}
+                    autoStart={autoStartId === card.card_id}
+                    onPaid={() => { onPaid?.(); reload(); }}
+                    onGoToWallet={onGoToWallet}
+                  />
+                </div>
+                <KinPanel card={card} onSaved={reload} />
               </div>
             );
           })}

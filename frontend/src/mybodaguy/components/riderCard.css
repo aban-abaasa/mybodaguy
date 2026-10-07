@@ -288,6 +288,10 @@
   white-space: nowrap;
   pointer-events: none;
 }
+.rc-stamp.is-expired {
+  border-color: rgba(252, 165, 165, 0.9);
+  color: rgba(254, 202, 202, 0.97);
+}
 
 /* ── Back ──────────────────────────────────────────────────────────────── */
 .rc-back {
@@ -371,6 +375,25 @@
 .rc-fine { min-width: 0; font-size: 2.9cqw; line-height: 1.4; color: rgba(255, 255, 255, 0.82); }
 .rc-fine strong { display: block; font-size: 3.6cqw; color: #fff; margin-bottom: 0.6cqw; }
 .rc-fine small { display: block; margin-top: 1cqw; font-size: 2.3cqw; color: rgba(255, 255, 255, 0.5); }
+
+/* Next of kin + home, printed on the back. One line each so the block never outgrows the QR. */
+.rc-kin { display: block; margin-top: 1.2cqw; font-size: 2.5cqw; line-height: 1.35; }
+.rc-kin b {
+  display: block;
+  font-size: 1.9cqw;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+.rc-kin span {
+  display: block;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rc-kin b:not(:first-child) { margin-top: 0.6cqw; }
 
 /* ── Motion ────────────────────────────────────────────────────────────── */
 @keyframes rc-sweep {

@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Ban, ChevronDown, FileCheck, IdCard, Pencil, Printer, Search, UserCheck, X } from 'lucide-react';
-import RiderIdCard, { FeesChip, InsuranceChip, PermitChip, ToneChip } from './RiderIdCard';
+import { Ban, ChevronDown, FileCheck, Home, IdCard, Pencil, Printer, Search, UserCheck, X } from 'lucide-react';
+import RiderIdCard, { CardValidityChip, FeesChip, InsuranceChip, PermitChip, ToneChip } from './RiderIdCard';
+import RiderKinForm, { kinFromRecord } from './RiderKinForm';
 import { isPrintableCard, printRiderCards } from './RiderCardPrint';
 import {
   DEFAULT_RIDER_CARD_FEE_ICAN,
+  canRenewCard,
+  cardValidityDetail,
+  isCardExpired,
   isFreshRequest,
   permitDetail,
   riderCardService,
@@ -16,13 +20,14 @@ import {
   type RiderCard,
 } from '../services/riderCardService';
 
-type Filter = 'all' | 'no_card' | 'awaiting' | 'active' | 'permit' | 'uninsured';
+type Filter = 'all' | 'no_card' | 'awaiting' | 'active' | 'renewal' | 'permit' | 'uninsured';
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'no_card', label: 'No card' },
   { id: 'awaiting', label: 'Awaiting payment' },
   { id: 'active', label: 'Active' },
+  { id: 'renewal', label: 'Expired / due' },
   { id: 'permit', label: 'Permit attention' },
   { id: 'uninsured', label: 'Not insured' },
 ];
@@ -75,6 +80,7 @@ export default function RiderCardsPanel() {
   const [issueFor, setIssueFor] = useState<DistrictRiderRow | null>(null);
   const [cancelFor, setCancelFor] = useState<DistrictRiderRow | null>(null);
   const [permitFor, setPermitFor] = useState<DistrictRiderRow | null>(null);
+  const [kinFor, setKinFor] = useState<DistrictRiderRow | null>(null);
 
   const [regionInfo, setRegionInfo] = useState<CardRegionInfoSet | null>(null);
   const [regionOpen, setRegionOpen] = useState(false);
@@ -104,7 +110,7 @@ export default function RiderCardsPanel() {
 
   const counts = useMemo(() => ({
     riders: rows.length,
-    active: rows.filter((r) => r.card?.status === 'active').length,
+    active: rows.filter((r) => r.card?.status === 'active' && !r.card.card_expired).length,
     awaiting: rows.filter((r) => r.card?.status === 'pending_payment').length,
     none: rows.filter((r) => !r.card).length,
     insuranceKnown: rows.some(hasInsuranceData),
@@ -115,7 +121,8 @@ export default function RiderCardsPanel() {
     return rows.filter((r) => {
       if (filter === 'no_card' && r.card) return false;
       if (filter === 'awaiting' && r.card?.status !== 'pending_payment') return false;
-      if (filter === 'active' && r.card?.status !== 'active') return false;
+      if (filter === 'active' && (r.card?.status !== 'active' || r.card.card_expired)) return false;
+      if (filter === 'renewal' && !(r.card && canRenewCard(r.card))) return false;
       if (filter === 'permit' && r.permit_status === 'valid') return false;
       if (filter === 'uninsured' && !isUninsured(r)) return false;
       if (!q) return true;
@@ -234,7 +241,8 @@ export default function RiderCardsPanel() {
                       <UserCheck size={10} /> Requested by rider{card.requested_at ? ` · ${timeAgo(card.requested_at)}` : ''}
                     </ToneChip>
                   )}
-                  {card?.status === 'active' && <ToneChip tone="ok">Card active</ToneChip>}
+                  {card?.status === 'active' && !isCardExpired(card) && <ToneChip tone="ok">Card active</ToneChip>}
+                  {card && <CardValidityChip card={card} />}
                   {row.rider_status !== 'active' && <ToneChip tone="bad">Rider {row.rider_status}</ToneChip>}
                   <PermitChip status={row.permit_status} />
                   {card && <FeesChip status={card.fees_status} />}
@@ -242,7 +250,11 @@ export default function RiderCardsPanel() {
                 </div>
                 <p className="mt-1.5 text-[11px] text-slate-500">
                   {permitDetail(row.permit_status, row.license_expiry, row.permit_days_left)}
+                  {card?.status === 'active' && cardValidityDetail(card) && <> · Card: {cardValidityDetail(card)}</>}
                 </p>
+                {!row.next_of_kin_name && !row.next_of_kin_phone && !row.home_location && (
+                  <p className="mt-0.5 text-[11px] text-amber-700">No next of kin or home location on file.</p>
+                )}
 
                 <div className="mt-3 flex flex-wrap gap-2">
                   {canIssue && (
@@ -265,6 +277,9 @@ export default function RiderCardsPanel() {
                   )}
                   <button type="button" onClick={() => setPermitFor(row)} className="classic-btn classic-btn-ghost !w-auto !min-h-[36px] !gap-1.5 !rounded-full !px-3 !py-1.5 !text-[13px]">
                     <FileCheck size={14} /> Permit
+                  </button>
+                  <button type="button" onClick={() => setKinFor(row)} className="classic-btn classic-btn-ghost !w-auto !min-h-[36px] !gap-1.5 !rounded-full !px-3 !py-1.5 !text-[13px]">
+                    <Home size={14} /> Kin &amp; home
                   </button>
                 </div>
               </li>
@@ -348,6 +363,21 @@ export default function RiderCardsPanel() {
           onClose={() => setPermitFor(null)}
           onDone={() => { setPermitFor(null); load(); }}
         />
+      )}
+
+      {kinFor && (
+        <Modal title="Next of kin & home" onClose={() => setKinFor(null)}>
+          <p className="mb-3 text-sm text-slate-600">
+            {kinFor.full_name} · <span className="uppercase">{kinFor.plate_number}</span>. Printed on the back of the rider's card; the public QR page does not show it.
+          </p>
+          <RiderKinForm
+            riderId={kinFor.rider_id}
+            idPrefix={`kin-${kinFor.rider_id}`}
+            initial={kinFromRecord(kinFor)}
+            onSaved={() => { setKinFor(null); load(); }}
+            onCancel={() => setKinFor(null)}
+          />
+        </Modal>
       )}
 
       {editRegion && (

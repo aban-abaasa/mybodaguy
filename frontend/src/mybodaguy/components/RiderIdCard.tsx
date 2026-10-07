@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
-import { Clock, FileCheck, Lock, MapPin, Phone, RotateCw, Shield, ShieldAlert, ShieldCheck, ShieldOff, UserCheck, Wallet } from 'lucide-react';
+import { CalendarClock, Clock, FileCheck, Home, Lock, MapPin, Phone, RotateCw, Shield, ShieldAlert, ShieldCheck, ShieldOff, UserCheck, Wallet } from 'lucide-react';
 import {
   CARD_INSURANCE_META,
   POLICY_STATE_META,
@@ -9,7 +9,10 @@ import {
 } from '../services/insuranceService';
 import {
   PERMIT_META,
+  canRenewCard,
+  cardValidityDetail,
   formatUgx,
+  isCardExpired,
   isFreshRequest,
   permitDetail,
   riderCardVerifyUrl,
@@ -43,6 +46,18 @@ export function PermitChip({ status }: { status: PermitStatus }) {
   return (
     <ToneChip tone={meta.tone}>
       <FileCheck size={10} /> Permit: {meta.label}
+    </ToneChip>
+  );
+}
+
+// How long the card itself stays valid (one year from payment). Nothing for an unpaid card.
+export function CardValidityChip({ card }: { card: Pick<RiderCard, 'status' | 'expires_at' | 'card_expired' | 'card_days_left'> }) {
+  if (card.status !== 'active' || !card.expires_at) return null;
+  const tone: Tone = card.card_expired ? 'bad' : canRenewCard(card) ? 'warn' : 'ok';
+  const text = card.card_expired ? 'Expired' : canRenewCard(card) ? 'Expiring soon' : 'Valid';
+  return (
+    <ToneChip tone={tone}>
+      <CalendarClock size={10} /> Card: {text}
     </ToneChip>
   );
 }
@@ -89,16 +104,25 @@ export interface CardVisualData {
   accent_color: string | null;
   verify_code?: string;
   fee_ican?: number;
+  // The card's one-year expiry, printed as "Expires" on the front.
+  expires_at?: string | null;
+  // Printed on the back. Only the rider's own card and their chairpersons' views carry these;
+  // the public QR page never does.
+  next_of_kin_name?: string | null;
+  next_of_kin_phone?: string | null;
+  next_of_kin_relationship?: string | null;
+  home_location?: string | null;
   // Cover shown on the face of the card, read live from the database.
   insurance?: CardInsurance | null;
 }
 
-export type CardVisualStatus = 'active' | 'pending' | 'suspended';
+export type CardVisualStatus = 'active' | 'pending' | 'suspended' | 'expired';
 
 const STATUS_LABEL: Record<CardVisualStatus, { text: string; tone: 'ok' | 'warn' | 'bad' }> = {
   active: { text: 'Active', tone: 'ok' },
   pending: { text: 'Unpaid', tone: 'warn' },
   suspended: { text: 'Suspended', tone: 'bad' },
+  expired: { text: 'Expired', tone: 'bad' },
 };
 
 // Darken a #rrggbb colour towards black by t (0..1).
@@ -201,7 +225,7 @@ export function CardFront({
   const accent = safeAccent(data.accent_color);
   const label = STATUS_LABEL[status];
   return (
-    <div className={`rc-face rc-front ${status === 'pending' ? 'is-pending' : ''}`} aria-hidden={hidden}>
+    <div className={`rc-face rc-front ${status === 'pending' || status === 'expired' ? 'is-pending' : ''}`} aria-hidden={hidden}>
       <div className="rc-pad">
         <div className="rc-top">
           <div className="rc-logo">
@@ -218,7 +242,7 @@ export function CardFront({
 
       <EmvChip idPrefix={uid} />
 
-      {status !== 'pending' && <InsuranceStrip insurance={data.insurance} />}
+      {status !== 'pending' && status !== 'expired' && <InsuranceStrip insurance={data.insurance} />}
 
       {data.avatar_url ? (
         <img className="rc-photo" src={data.avatar_url} alt="" />
@@ -244,8 +268,8 @@ export function CardFront({
         </div>
         <div className="rc-meta">
           <div>
-            <span className="rc-label">Since</span>
-            <b className="rc-emboss">{monthYear(data.member_since)}</b>
+            <span className="rc-label">Expires</span>
+            <b className="rc-emboss">{status === 'pending' ? '—' : monthYear(data.expires_at)}</b>
           </div>
           <div>
             <span className="rc-label">Permit</span>
@@ -255,6 +279,7 @@ export function CardFront({
       </div>
 
       {status === 'pending' && <div className="rc-stamp">Unpaid</div>}
+      {status === 'expired' && <div className="rc-stamp is-expired">Expired</div>}
     </div>
   );
 }
@@ -269,6 +294,7 @@ export function CardBack({
   hidden?: boolean;
 }) {
   const active = status === 'active' && !!data.verify_code;
+  const hasKin = !!(data.next_of_kin_name || data.next_of_kin_phone);
   return (
     <div className="rc-face rc-back" aria-hidden={hidden}>
       <div className="rc-stripe" />
@@ -287,10 +313,29 @@ export function CardBack({
           </div>
         )}
         <div className="rc-fine">
-          <strong>{active ? 'Scan to verify' : 'QR locked'}</strong>
+          <strong>{active ? 'Scan to verify' : status === 'expired' ? 'Card expired' : 'QR locked'}</strong>
           {active
-            ? "Shows this rider's details, driving permit, fees and insurance cover, live."
-            : `Pay ${data.fee_ican ?? 2} ICAN to unlock this card's QR code.`}
+            ? 'Rider details, permit, fees and insurance, live.'
+            : status === 'expired'
+              ? `Renew for ${data.fee_ican ?? 2} ICAN to unlock this card's QR code.`
+              : `Pay ${data.fee_ican ?? 2} ICAN to unlock this card's QR code.`}
+          <span className="rc-kin">
+            <b>Next of kin</b>
+            {hasKin ? (
+              <>
+                <span>
+                  {[data.next_of_kin_name, data.next_of_kin_relationship && `(${data.next_of_kin_relationship})`]
+                    .filter(Boolean)
+                    .join(' ')}
+                </span>
+                {data.next_of_kin_phone && <span>{data.next_of_kin_phone}</span>}
+              </>
+            ) : (
+              <span>Not added yet</span>
+            )}
+            <b>Home</b>
+            <span>{data.home_location || 'Not added yet'}</span>
+          </span>
           <small>
             Issued {fullDate(data.issued_at)} · {data.card_number}
           </small>
@@ -385,7 +430,12 @@ function Contact({ label, name, phone }: { label: string; name: string | null; p
 // beneath it.
 export default function RiderIdCard({ card }: { card: RiderCard }) {
   const status: CardVisualStatus =
-    card.status === 'pending_payment' ? 'pending' : card.rider_status === 'active' ? 'active' : 'suspended';
+    card.status === 'pending_payment' ? 'pending'
+    : isCardExpired(card) ? 'expired'
+    : card.rider_status === 'active' ? 'active'
+    : 'suspended';
+  const validity = cardValidityDetail(card);
+  const hasKin = !!(card.next_of_kin_name || card.next_of_kin_phone);
   const notes = [card.division_notes, card.stage_notes].filter((n): n is string => !!n);
   const fresh = isFreshRequest(card);
 
@@ -443,10 +493,12 @@ export default function RiderIdCard({ card }: { card: RiderCard }) {
       {/* Standing — driving permit, fees and insurance */}
       <div className="space-y-1.5">
         <div className="flex flex-wrap gap-1.5">
+          <CardValidityChip card={card} />
           <PermitChip status={card.permit_status} />
           <FeesChip status={card.fees_status} />
           <InsuranceChip insurance={card.insurance} />
         </div>
+        {validity && <p className="text-[11px] text-slate-500">Card: {validity}</p>}
         <p className="text-[11px] text-slate-500">
           {permitDetail(card.permit_status, card.license_expiry, card.permit_days_left)}
           {card.license_masked && <span className="font-mono"> · No. {card.license_masked}</span>}
@@ -455,11 +507,45 @@ export default function RiderIdCard({ card }: { card: RiderCard }) {
           <p className="flex items-start gap-1 text-[11px] text-amber-700">
             <Clock size={12} className="mt-0.5 flex-shrink-0" />
             <span>
-              {card.card_fee_status === 'pending' && `Card fee ${card.fee_ican} ICAN not paid yet. `}
+              {card.card_fee_status === 'pending' &&
+                (isCardExpired(card)
+                  ? `Card expired — ${card.fee_ican} ICAN renews it for another year. `
+                  : `Card fee ${card.fee_ican} ICAN not paid yet. `)}
               {card.commission_owed_ugx > 0 && `${formatUgx(card.commission_owed_ugx)} ride commission owed.`}
             </span>
           </p>
         )}
+      </div>
+
+      {/* Next of kin and home — printed on the back of the card, never on the public QR page */}
+      <div className="rounded-xl bg-white p-3 ring-1 ring-black/5">
+        <p className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+          <Home size={11} /> Next of kin &amp; home
+        </p>
+        <dl className="space-y-1.5 text-xs">
+          <div>
+            <dt className="text-[10px] text-slate-400">Next of kin</dt>
+            <dd className="font-semibold text-slate-800">
+              {hasKin ? (
+                <>
+                  {card.next_of_kin_name}
+                  {card.next_of_kin_relationship && <span className="font-normal text-slate-500"> ({card.next_of_kin_relationship})</span>}
+                  {card.next_of_kin_phone && (
+                    <a href={`tel:${card.next_of_kin_phone.replace(/[^\d+]/g, '')}`} className="ml-2 inline-flex items-center gap-0.5 font-medium underline decoration-dotted">
+                      <Phone size={10} /> {card.next_of_kin_phone}
+                    </a>
+                  )}
+                </>
+              ) : (
+                <span className="font-normal text-slate-400">Not added yet</span>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-[10px] text-slate-400">Home location</dt>
+            <dd className={card.home_location ? 'font-semibold text-slate-800' : 'text-slate-400'}>{card.home_location || 'Not added yet'}</dd>
+          </div>
+        </dl>
       </div>
 
       {/* Insurance — which company covers this rider, with which plan, until when */}
