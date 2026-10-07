@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Bike, Clock, LogOut, Package, History, Gift, User, Wallet,
   X, CheckCircle, ChevronDown, ArrowRight, Home, ClipboardList, MapPin,
-  CalendarDays, Truck, Building2, LayoutGrid, ScanLine, Trash2,
+  CalendarDays, Truck, Building2, LayoutGrid, ScanLine, Trash2, Shield,
   type LucideIcon,
 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
@@ -15,6 +15,7 @@ import BrowseServicesAndBook from '../components/booking/BrowseServicesAndBook';
 import IcanCoinCard from '../components/IcanCoinCard';
 import RewardsPointsCard from '../components/RewardsPointsCard';
 import RewardsHub from '../components/RewardsHub';
+import RiderCover from '../components/cover/RiderCover';
 import CustomerAreaManager from '../components/CustomerAreaManager';
 import RideCommsBar from '../components/RideCommsBar';
 import RideTrackingModal from '../components/RideTrackingModal';
@@ -56,7 +57,7 @@ interface CustomerDashboardProps {
 // delivery toggle and vice versa. Book a Journey is inbuilt into Book a
 // Ride itself (a mode toggle inside EnhancedRideRequest, showJourneyOption)
 // rather than its own tab.
-type TabType = 'overview' | 'book-ride' | 'shop' | 'book-service' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'become-operator' | 'manage-business' | 'profile';
+type TabType = 'overview' | 'book-ride' | 'shop' | 'book-service' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'cover' | 'become-operator' | 'manage-business' | 'profile';
 
 // emoji drives the desktop tab strip; icon drives the phone header + menu
 // sheet, where crisp line icons read as more refined than mixed-font emoji.
@@ -69,6 +70,7 @@ const ALL_TABS: { id: TabType; label: string; emoji: string; icon: LucideIcon }[
   { id: 'orders',    label: 'Orders',    emoji: '📋', icon: ClipboardList },
   { id: 'areas',     label: 'My Areas',  emoji: '📍', icon: MapPin },
   { id: 'rewards',   label: 'Rewards',   emoji: '🎁', icon: Gift },
+  { id: 'cover',     label: 'Cover',     emoji: '🛡️', icon: Shield },
   { id: 'become-operator', label: 'Become a Driver', emoji: '🚚', icon: Truck },
   { id: 'manage-business', label: 'Manage Your Business', emoji: '🏢', icon: Building2 },
   { id: 'profile',   label: 'Profile',   emoji: '👤', icon: User },
@@ -918,6 +920,9 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
 
         {/* Rewards */}
         {activeTab === 'rewards' && <RewardsHub user={user} role="customer" onGoToWallet={goToWallet} />}
+
+        {/* Insurance cover — personal cover, paid with ICAN or reward points */}
+        {activeTab === 'cover' && user?.id && <RiderCover userId={user.id} audience="person" onGoToWallet={goToWallet} />}
 
         {/* Profile */}
         {activeTab === 'profile' && (

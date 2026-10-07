@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { Ban, ChevronDown, FileCheck, IdCard, Pencil, Printer, Search, UserCheck, X } from 'lucide-react';
-import RiderIdCard, { FeesChip, PermitChip, ToneChip } from './RiderIdCard';
+import RiderIdCard, { FeesChip, InsuranceChip, PermitChip, ToneChip } from './RiderIdCard';
 import { isPrintableCard, printRiderCards } from './RiderCardPrint';
 import {
   DEFAULT_RIDER_CARD_FEE_ICAN,
@@ -16,7 +16,7 @@ import {
   type RiderCard,
 } from '../services/riderCardService';
 
-type Filter = 'all' | 'no_card' | 'awaiting' | 'active' | 'permit';
+type Filter = 'all' | 'no_card' | 'awaiting' | 'active' | 'permit' | 'uninsured';
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -24,7 +24,16 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'awaiting', label: 'Awaiting payment' },
   { id: 'active', label: 'Active' },
   { id: 'permit', label: 'Permit attention' },
+  { id: 'uninsured', label: 'Not insured' },
 ];
+
+// A card whose insurance has not been put in yet (the SQL isn't run) says nothing either way.
+const hasInsuranceData = (row: DistrictRiderRow) =>
+  !!row.card?.insurance && row.card.insurance.state !== 'unavailable';
+const isUninsured = (row: DistrictRiderRow) => {
+  const s = row.card?.insurance?.state;
+  return s === 'none' || s === 'expired' || s === 'grace';
+};
 
 const vehicleLabel = (type: string) => type.charAt(0).toUpperCase() + type.slice(1);
 
@@ -98,6 +107,7 @@ export default function RiderCardsPanel() {
     active: rows.filter((r) => r.card?.status === 'active').length,
     awaiting: rows.filter((r) => r.card?.status === 'pending_payment').length,
     none: rows.filter((r) => !r.card).length,
+    insuranceKnown: rows.some(hasInsuranceData),
   }), [rows]);
 
   const visible = useMemo(() => {
@@ -107,6 +117,7 @@ export default function RiderCardsPanel() {
       if (filter === 'awaiting' && r.card?.status !== 'pending_payment') return false;
       if (filter === 'active' && r.card?.status !== 'active') return false;
       if (filter === 'permit' && r.permit_status === 'valid') return false;
+      if (filter === 'uninsured' && !isUninsured(r)) return false;
       if (!q) return true;
       return [r.full_name, r.plate_number, r.stage, r.division, r.parish]
         .some((v) => v && v.toLowerCase().includes(q));
@@ -174,7 +185,7 @@ export default function RiderCardsPanel() {
           />
         </div>
         <div className="flex flex-wrap gap-2">
-          {FILTERS.map((f) => (
+          {FILTERS.filter((f) => f.id !== 'uninsured' || counts.insuranceKnown).map((f) => (
             <button
               key={f.id}
               type="button"
@@ -227,6 +238,7 @@ export default function RiderCardsPanel() {
                   {row.rider_status !== 'active' && <ToneChip tone="bad">Rider {row.rider_status}</ToneChip>}
                   <PermitChip status={row.permit_status} />
                   {card && <FeesChip status={card.fees_status} />}
+                  {card && <InsuranceChip insurance={card.insurance} />}
                 </div>
                 <p className="mt-1.5 text-[11px] text-slate-500">
                   {permitDetail(row.permit_status, row.license_expiry, row.permit_days_left)}

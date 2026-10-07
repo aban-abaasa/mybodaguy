@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Truck, ShieldCheck, ExternalLink, Users, DollarSign, Camera } from 'lucide-react';
+import { Truck, ShieldCheck, ExternalLink, Users, DollarSign, Camera, Shield } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../../services/supabaseClient';
 import BusinessRegistrationModal, { type BusinessCategory } from './BusinessRegistrationModal';
 import BusinessDriverRoster from './BusinessDriverRoster';
 import BusinessPricingSettings from './BusinessPricingSettings';
+import BusinessCover from './cover/BusinessCover';
 import { businessLogoService } from '../services/businessLogoService';
 
 interface Business {
@@ -30,7 +31,7 @@ export default function ManageBusinessPanel() {
   const [loading, setLoading] = useState(true);
   const [registerCategory, setRegisterCategory] = useState<BusinessCategory | null>(null);
   const [activeBusinessId, setActiveBusinessId] = useState<string | null>(null);
-  const [activeSection, setActiveSection] = useState<'roster' | 'pricing'>('roster');
+  const [activeSection, setActiveSection] = useState<'roster' | 'pricing' | 'cover'>('roster');
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [uploadingLogoFor, setUploadingLogoFor] = useState<string | null>(null);
 
@@ -190,6 +191,14 @@ export default function ManageBusinessPanel() {
               >
                 <DollarSign size={14} /> Pricing
               </button>
+              <button
+                onClick={() => setActiveSection('cover')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium ${
+                  activeSection === 'cover' ? 'bg-orange-500 text-white' : 'text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                <Shield size={14} /> Insurance
+              </button>
             </div>
 
             {activeSection === 'roster' && (
@@ -197,6 +206,9 @@ export default function ManageBusinessPanel() {
             )}
             {activeSection === 'pricing' && (
               <BusinessPricingSettings businessProfileId={activeBusiness.id} category={activeBusiness.category_key} />
+            )}
+            {activeSection === 'cover' && (
+              <BusinessCover businessProfileId={activeBusiness.id} category={activeBusiness.category_key} />
             )}
           </div>
         </div>
