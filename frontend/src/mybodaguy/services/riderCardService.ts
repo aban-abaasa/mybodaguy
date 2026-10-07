@@ -1,6 +1,8 @@
 import { supabase } from './supabaseClient';
+import type { CardInsurance } from './insuranceService';
 
 // Rider ID cards — see backend/database/ADD_RIDER_ID_CARDS.sql.
+// The live card also carries the rider's insurance cover (ADD_INSURANCE_ON_RIDER_CARD.sql).
 // The district chairperson issues a card, the rider pays the fee from their own
 // ICAN wallet (shared equally across their stage / parish / subcounty / division /
 // district chairpersons), and the card's QR opens the public /rider-card/<code> page.
@@ -68,6 +70,8 @@ export interface RiderCard {
   card_fee_status: 'paid' | 'pending' | 'cancelled';
   commission_owed_ugx: number;
   fees_status: FeesStatus;
+  // Insurance cover, read live. Absent until ADD_INSURANCE_ON_RIDER_CARD.sql has been run.
+  insurance?: CardInsurance | null;
 }
 
 // One row of the district chairperson's list: a rider and their live card, if any.
@@ -161,6 +165,7 @@ export interface RiderCardProof {
     card_fee_paid_at: string | null;
     commission_owed_ugx: number;
   };
+  insurance?: CardInsurance | null;
 }
 
 export interface CardResult {

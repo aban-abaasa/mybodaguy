@@ -1,6 +1,12 @@
 import { useId, useState } from 'react';
 import { QRCodeCanvas } from 'qrcode.react';
-import { Clock, FileCheck, Lock, MapPin, Phone, RotateCw, UserCheck, Wallet } from 'lucide-react';
+import { Clock, FileCheck, Lock, MapPin, Phone, RotateCw, Shield, ShieldAlert, ShieldCheck, ShieldOff, UserCheck, Wallet } from 'lucide-react';
+import {
+  CARD_INSURANCE_META,
+  POLICY_STATE_META,
+  coverTypeLabel,
+  type CardInsurance,
+} from '../services/insuranceService';
 import {
   PERMIT_META,
   formatUgx,
@@ -49,6 +55,20 @@ export function FeesChip({ status }: { status: 'paid' | 'pending' }) {
   );
 }
 
+const INSURANCE_CHIP_TEXT: Record<Exclude<CardInsurance['state'], 'unavailable'>, string> = {
+  active: 'Active', grace: 'Renew now', waiting: 'Starts soon', expired: 'Expired', none: 'None',
+};
+
+// Nothing at all until insurance is installed, so the card looks exactly as before.
+export function InsuranceChip({ insurance }: { insurance?: CardInsurance | null }) {
+  if (!insurance || insurance.state === 'unavailable') return null;
+  return (
+    <ToneChip tone={CARD_INSURANCE_META[insurance.state].tone}>
+      <Shield size={10} /> Insurance: {INSURANCE_CHIP_TEXT[insurance.state]}
+    </ToneChip>
+  );
+}
+
 // ── The card itself ───────────────────────────────────────────────────────
 
 // What the two faces of the card print. A full RiderCard has all of it; the
@@ -69,6 +89,8 @@ export interface CardVisualData {
   accent_color: string | null;
   verify_code?: string;
   fee_ican?: number;
+  // Cover shown on the face of the card, read live from the database.
+  insurance?: CardInsurance | null;
 }
 
 export type CardVisualStatus = 'active' | 'pending' | 'suspended';
@@ -145,6 +167,24 @@ function EmvChip({ idPrefix }: { idPrefix: string }) {
   );
 }
 
+// Insurance on the face of the card: who insures this rider and until when. It sits in the
+// open space between the chip and the photo.
+function InsuranceStrip({ insurance }: { insurance?: CardInsurance | null }) {
+  if (!insurance || insurance.state === 'unavailable') return null;
+  const meta = CARD_INSURANCE_META[insurance.state];
+  const top = insurance.policies[0];
+  const Icon = insurance.state === 'active' ? ShieldCheck : insurance.state === 'none' ? ShieldOff : ShieldAlert;
+  return (
+    <div className={`rc-insure ${meta.tone}`}>
+      <Icon aria-hidden />
+      <div>
+        <b>{meta.label}</b>
+        <span>{top ? `${top.insurer} · ${monthYear(top.valid_until)}` : 'No cover on record'}</span>
+      </div>
+    </div>
+  );
+}
+
 // The two faces of the card. Shared by the on-screen flip card and the print
 // sheet, so what is printed is exactly what is shown.
 export function CardFront({
@@ -177,6 +217,8 @@ export function CardFront({
       </div>
 
       <EmvChip idPrefix={uid} />
+
+      {status !== 'pending' && <InsuranceStrip insurance={data.insurance} />}
 
       {data.avatar_url ? (
         <img className="rc-photo" src={data.avatar_url} alt="" />
@@ -247,7 +289,7 @@ export function CardBack({
         <div className="rc-fine">
           <strong>{active ? 'Scan to verify' : 'QR locked'}</strong>
           {active
-            ? "Shows this rider's details, driving permit status and fees, live."
+            ? "Shows this rider's details, driving permit, fees and insurance cover, live."
             : `Pay ${data.fee_ican ?? 2} ICAN to unlock this card's QR code.`}
           <small>
             Issued {fullDate(data.issued_at)} · {data.card_number}
@@ -398,11 +440,12 @@ export default function RiderIdCard({ card }: { card: RiderCard }) {
         ))}
       </div>
 
-      {/* Standing — driving permit and fees */}
+      {/* Standing — driving permit, fees and insurance */}
       <div className="space-y-1.5">
         <div className="flex flex-wrap gap-1.5">
           <PermitChip status={card.permit_status} />
           <FeesChip status={card.fees_status} />
+          <InsuranceChip insurance={card.insurance} />
         </div>
         <p className="text-[11px] text-slate-500">
           {permitDetail(card.permit_status, card.license_expiry, card.permit_days_left)}
@@ -418,6 +461,33 @@ export default function RiderIdCard({ card }: { card: RiderCard }) {
           </p>
         )}
       </div>
+
+      {/* Insurance — which company covers this rider, with which plan, until when */}
+      {card.insurance && card.insurance.state !== 'unavailable' && (
+        <div className="rounded-xl bg-white p-3 ring-1 ring-black/5">
+          <p className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+            <Shield size={11} /> Insurance cover
+          </p>
+          {card.insurance.policies.length === 0 ? (
+            <p className="text-xs text-slate-500">No insurance cover on record yet.</p>
+          ) : (
+            <ul className="space-y-2">
+              {card.insurance.policies.map((p) => (
+                <li key={p.ref} className="flex items-start justify-between gap-2 text-xs">
+                  <span className="min-w-0">
+                    <span className="block font-semibold text-slate-800">{p.plan} · {coverTypeLabel(p.cover_type)}</span>
+                    <span className="block text-slate-500">
+                      {p.insurer} · until {fullDate(p.valid_until)}
+                      <span className="font-mono"> · {p.ref}</span>
+                    </span>
+                  </span>
+                  <ToneChip tone={POLICY_STATE_META[p.state].tone}>{POLICY_STATE_META[p.state].label}</ToneChip>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }

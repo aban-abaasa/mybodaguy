@@ -9,6 +9,7 @@ import {
   type RewardSummary, type RewardCatalogItem, type RewardTransaction, type RewardRedemption,
 } from '../services/rewardsService';
 import ReferralCard from './ReferralCard';
+import CoverPointsTile from './cover/CoverPointsTile';
 
 interface Props {
   user: any;
@@ -168,6 +169,9 @@ export default function RewardsHub({ user, role, onGoToWallet }: Props) {
           </button>
         )}
       </div>
+
+      {/* Insurance — points can pay for cover; it shows on the live rider card */}
+      {user?.id && <CoverPointsTile userId={user.id} role={role} points={balance} onChanged={reload} onGoToWallet={onGoToWallet} />}
 
       {/* Redeemable catalog */}
       <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">

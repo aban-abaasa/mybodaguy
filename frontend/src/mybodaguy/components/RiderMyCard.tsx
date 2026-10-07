@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { ArrowRight, IdCard, Receipt, Sparkles } from 'lucide-react';
-import RiderIdCard, { FeesChip, PermitChip, RiderCardVisual } from './RiderIdCard';
+import { ArrowRight, IdCard, Receipt, Shield, Sparkles } from 'lucide-react';
+import RiderIdCard, { FeesChip, InsuranceChip, PermitChip, RiderCardVisual } from './RiderIdCard';
 import SetPinPrompt from './SetPinPrompt';
 import { supabase } from '../services/supabaseClient';
 import { hasPinSet, validatePIN, verifyPin } from '../services/pinService';
@@ -23,6 +23,8 @@ interface Props {
   onOpen?: () => void;
   // Opens the wallet — to top up when funds are short, or to see the payment afterwards.
   onGoToWallet?: () => void;
+  // Page only: opens the Insurance tab (buy, renew, claims, what is shared).
+  onOpenInsurance?: () => void;
 }
 
 const vehicleLabel = (type: string) => type.charAt(0).toUpperCase() + type.slice(1);
@@ -248,7 +250,7 @@ function useMyCards() {
 //  * Unpaid card: shows the card, what it costs and who the fee is shared with;
 //    paying it from their own wallet activates the QR.
 //  * Active card: the credit-card-style ID, tap to flip it for the QR.
-export default function RiderMyCard({ variant = 'page', userId, onPaid, onOpen, onGoToWallet }: Props) {
+export default function RiderMyCard({ variant = 'page', userId, onPaid, onOpen, onGoToWallet, onOpenInsurance }: Props) {
   const { cards, requestable, fee, loading, cardsError, requestError, reload } = useMyCards();
   const [autoStartId, setAutoStartId] = useState<string | null>(null);
   const [requesting, setRequesting] = useState<string | null>(null);
@@ -282,6 +284,12 @@ export default function RiderMyCard({ variant = 'page', userId, onPaid, onOpen, 
             <span className="mt-1.5 flex flex-wrap gap-1.5">
               <PermitChip status={active.permit_status} />
               <FeesChip status={active.fees_status} />
+              <InsuranceChip insurance={active.insurance} />
+            </span>
+          )}
+          {active?.insurance?.state === 'active' && active.insurance.policies[0] && (
+            <span className="mt-1 block truncate text-xs font-semibold text-emerald-700">
+              🛡️ {active.insurance.policies[0].plan} · {active.insurance.policies[0].insurer}
             </span>
           )}
         </span>
@@ -422,6 +430,27 @@ export default function RiderMyCard({ variant = 'page', userId, onPaid, onOpen, 
             </div>
           )}
         </>
+      )}
+
+      {/* Insurance — what the rider holds shows on the card above and on its public QR page;
+          buying, renewing, claims and sharing live on the Insurance tab. */}
+      {!loading && onOpenInsurance && (
+        <button
+          type="button"
+          onClick={onOpenInsurance}
+          className="classic-card flex w-full items-center gap-4 p-4 text-left transition-all hover:border-orange-300 active:scale-[0.99]"
+        >
+          <span className="grid h-12 w-12 flex-shrink-0 place-items-center rounded-full bg-emerald-50 ring-1 ring-inset ring-emerald-100">
+            <Shield size={21} className="text-emerald-600" />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-classic-display text-lg font-semibold leading-tight text-slate-800">Insurance cover</span>
+            <span className="mt-0.5 block text-xs text-slate-500">
+              Get insured with ICAN or reward points. Your cover shows on this card.
+            </span>
+          </span>
+          <ArrowRight size={18} className="flex-shrink-0 text-[#c4a052]" />
+        </button>
       )}
     </div>
   );

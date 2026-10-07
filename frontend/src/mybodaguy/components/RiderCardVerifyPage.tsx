@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, Ban, CheckCircle, Clock, FileCheck, MapPin, Phone, ShieldCheck, Star, Wallet, XCircle } from 'lucide-react';
-import { FeesChip, PermitChip, RiderCardVisual, ToneChip, type CardVisualData } from './RiderIdCard';
+import { AlertTriangle, Ban, CheckCircle, Clock, FileCheck, MapPin, Phone, Shield, ShieldCheck, Star, Wallet, XCircle } from 'lucide-react';
+import { FeesChip, InsuranceChip, PermitChip, RiderCardVisual, ToneChip, type CardVisualData } from './RiderIdCard';
+import { POLICY_STATE_META, coverTypeLabel } from '../services/insuranceService';
 import {
   formatUgx,
   permitDetail,
@@ -83,6 +84,9 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
     if (permit === 'expiring_soon') warnings.push('The driving permit expires soon.');
     if (fees?.card_fee_status === 'pending') warnings.push('The ID card fee is pending.');
     if ((fees?.commission_owed_ugx ?? 0) > 0) warnings.push('Ride commission is still owed to the chairpersons.');
+    // Never having been insured is not a warning (cover is new); a lapse is.
+    if (proof?.insurance?.state === 'expired') warnings.push('The insurance cover has expired.');
+    if (proof?.insurance?.state === 'grace') warnings.push('The insurance cover has ended and is in its grace days.');
   }
   const notes = [proof?.division_notes, proof?.stage_notes].filter((n): n is string => !!n);
   // The same credit-card visual riders carry, built from what the public page may show.
@@ -101,8 +105,10 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
         license_expiry: proof.license_expiry ?? null,
         issued_at: proof.issued_at ?? '',
         accent_color: proof.accent_color ?? null,
+        insurance: proof.insurance ?? null,
       }
     : null;
+  const insurance = proof?.insurance && proof.insurance.state !== 'unavailable' ? proof.insurance : null;
 
   return (
     <div className="min-h-screen bg-[#f7f1e3] px-4 py-8">
@@ -189,6 +195,33 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
                   </div>
                   <p className="text-sm text-slate-700">{permitDetail(permit, proof.license_expiry, proof.permit_days_left)}</p>
                 </Section>
+
+                {/* Insurance cover — read live, so a lapse shows the moment it happens */}
+                {insurance && (
+                  <Section icon={<Shield size={12} />} title="Insurance cover">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <InsuranceChip insurance={insurance} />
+                    </div>
+                    {insurance.policies.length === 0 ? (
+                      <p className="text-sm text-slate-700">No insurance cover on record for this rider.</p>
+                    ) : (
+                      <ul className="space-y-2.5">
+                        {insurance.policies.map((p) => (
+                          <li key={p.ref} className="flex items-start justify-between gap-3 text-sm">
+                            <span className="min-w-0">
+                              <span className="block font-semibold text-slate-800">{p.insurer}</span>
+                              <span className="block text-slate-600">{p.plan} · {coverTypeLabel(p.cover_type)}</span>
+                              <span className="block text-xs text-slate-500">
+                                Valid until {fmtDate(p.valid_until)} · <span className="font-mono">{p.ref}</span>
+                              </span>
+                            </span>
+                            <ToneChip tone={POLICY_STATE_META[p.state].tone}>{POLICY_STATE_META[p.state].label}</ToneChip>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </Section>
+                )}
 
                 {/* Fees to the chairpersons */}
                 {fees && (

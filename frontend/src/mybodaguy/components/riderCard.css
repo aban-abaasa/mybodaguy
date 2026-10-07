@@ -120,6 +120,45 @@
   filter: drop-shadow(0 0.4cqw 0.5cqw rgba(0, 0, 0, 0.4));
 }
 
+/* Insurance cover, in the open space between the chip and the photo. */
+.rc-insure {
+  position: absolute;
+  left: 23cqw;
+  right: 26.5cqw;
+  top: 20.5cqw;
+  height: 10cqw;
+  display: flex;
+  align-items: center;
+  gap: 1.8cqw;
+  padding: 0 2.2cqw;
+  border-radius: 1.8cqw;
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 0 0.3cqw rgba(255, 255, 255, 0.16) inset;
+}
+.rc-insure svg { width: 5cqw; height: 5cqw; flex: none; }
+.rc-insure div { min-width: 0; }
+.rc-insure b {
+  display: block;
+  font-size: 2.4cqw;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.rc-insure span {
+  display: block;
+  margin-top: 0.4cqw;
+  font-size: 2.4cqw;
+  color: rgba(255, 255, 255, 0.78);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rc-insure.ok { color: #6ee7b7; }
+.rc-insure.warn { color: #fcd34d; }
+.rc-insure.bad { color: #fca5a5; }
+.rc-insure.muted { color: rgba(255, 255, 255, 0.72); }
+
 .rc-photo {
   position: absolute;
   right: 6cqw;
