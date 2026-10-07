@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Camera, CameraOff, ScanLine, X, Plus, Minus, Trash2,
   ShoppingCart, CheckCircle, Loader, AlertCircle, Coins,
-  ReceiptText, QrCode, Store,
+  ReceiptText, QrCode, Store, ChevronDown,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import QRCode from 'qrcode';
@@ -130,6 +130,8 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [supermarkets, setSupermarkets] = useState<SupermarketRow[]>([]);
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
   const [typeFilter, setTypeFilter] = useState<BusinessTypeFilter>('all');
+  // Store chooser stays collapsed once a store is picked, so products get the page
+  const [storePanelOpen, setStorePanelOpen] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -467,24 +469,12 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const icanNeeded = ugxToICAN(totals.total);
   const canPayICAN = (icanBalance?.ican ?? 0) >= icanNeeded;
 
+  const activeStore = supermarkets.find(sm => sm.id === selectedSupermarketId) || null;
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-4">
-
-      {/* ── ICAN Balance strip ─────────────────────────────────────────── */}
-      {icanBalance && (
-        <div className="flex items-center justify-between bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-xl px-5 py-3">
-          <div className="flex items-center gap-2">
-            <Coins size={18} />
-            <span className="font-semibold text-sm">ICAN Wallet</span>
-          </div>
-          <div className="text-right">
-            <p className="font-bold">₡ {formatICAN(icanBalance.ican)} ICAN</p>
-            <p className="text-xs opacity-80">{formatUGX(icanBalance.ugx)}</p>
-          </div>
-        </div>
-      )}
+    <div className="space-y-3">
 
       {/* ── Receipt ────────────────────────────────────────────────────── */}
       {state === 'complete' && receipt && (
@@ -555,11 +545,69 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       {/* ── Idle / Scan entry ──────────────────────────────────────────── */}
       {(state === 'idle' || state === 'product_found' || state === 'cart' || state === 'checkout') && (
         <>
-          {/* Store picker — required before scanning OR browsing, so lookups
-              and checkout are always scoped to a real, chosen supermarket */}
-          {state !== 'scanning' && (
-            <div className="bg-white rounded-2xl shadow-md p-4 space-y-3">
-              <div className="flex gap-1.5 overflow-x-auto pb-0.5">
+          {/* One slim toolbar instead of stacked cards: store switcher, Scan/Browse
+              toggle, wallet balance and cart. The store filters + picker stay
+              collapsed until needed so the products get the page. */}
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setStorePanelOpen(o => !o)}
+              aria-expanded={storePanelOpen}
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-slate-100 px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-200 transition-colors"
+            >
+              <Store size={15} className="flex-shrink-0 text-orange-500" />
+              <span className="min-w-0 flex-1 truncate">
+                {activeStore ? activeStore.name : 'Choose a store'}
+              </span>
+              <ChevronDown size={15} className={`flex-shrink-0 text-slate-400 transition-transform ${storePanelOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            <div className="flex flex-shrink-0 gap-0.5 rounded-full bg-slate-100 p-0.5" role="tablist" aria-label="Shop mode">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={shopMode === 'browse'}
+                aria-label="Browse store"
+                onClick={() => setShopMode('browse')}
+                className={`grid h-8 w-9 place-items-center rounded-full transition-colors ${shopMode === 'browse' ? 'bg-white text-orange-600 shadow' : 'text-slate-500'}`}
+              >
+                <Store size={15} />
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={shopMode === 'scan'}
+                aria-label="Scan barcode"
+                onClick={() => setShopMode('scan')}
+                className={`grid h-8 w-9 place-items-center rounded-full transition-colors ${shopMode === 'scan' ? 'bg-white text-orange-600 shadow' : 'text-slate-500'}`}
+              >
+                <ScanLine size={15} />
+              </button>
+            </div>
+
+            {icanBalance && (
+              <span className="hidden flex-shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1.5 text-xs font-bold text-amber-700 sm:flex" title={formatUGX(icanBalance.ugx)}>
+                <Coins size={13} /> ₡ {formatICAN(icanBalance.ican)}
+              </span>
+            )}
+
+            {cart.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setState('cart')}
+                aria-label={`Open cart, ${cart.length} items`}
+                className="relative grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-orange-500 text-white"
+              >
+                <ShoppingCart size={16} />
+                <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-slate-900 px-1 text-[10px] font-bold">{cart.length}</span>
+              </button>
+            )}
+          </div>
+
+          {/* Collapsible store chooser — opens itself until a store is picked */}
+          {storePanelOpen && (
+            <div className="space-y-2">
+              <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
                 {BUSINESS_TYPE_FILTERS.map(f => (
                   <button
                     key={f.value}
@@ -573,97 +621,42 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                   </button>
                 ))}
               </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 flex items-center gap-1.5">
-                  <Store size={13} /> Shopping at
-                </label>
-                <select
-                  value={selectedSupermarketId}
-                  onChange={e => setSelectedSupermarketId(e.target.value)}
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300"
-                >
-                  <option value="">Choose your store…</option>
-                  {filteredSupermarkets.map(sm => (
-                    <option key={sm.id} value={sm.id}>
-                      {typeEmoji(sm.business_type)} {sm.name}{sm.location ? ` — ${sm.location}` : ''}
-                    </option>
-                  ))}
-                </select>
-                {filteredSupermarkets.length === 0 && (
-                  <p className="text-xs text-slate-400 mt-1.5">No stores of this type yet.</p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Scan vs Browse mode toggle */}
-          {state !== 'scanning' && (
-            <div className="flex gap-1 bg-slate-100 rounded-xl p-1">
-              <button
-                onClick={() => setShopMode('scan')}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                  shopMode === 'scan' ? 'bg-white shadow text-slate-800' : 'text-slate-500'
-                }`}
+              <select
+                value={selectedSupermarketId}
+                onChange={e => { setSelectedSupermarketId(e.target.value); if (e.target.value) setStorePanelOpen(false); }}
+                aria-label="Store"
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300"
               >
-                <ScanLine size={15} /> Scan
-              </button>
-              <button
-                onClick={() => setShopMode('browse')}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-semibold transition-colors ${
-                  shopMode === 'browse' ? 'bg-white shadow text-slate-800' : 'text-slate-500'
-                }`}
-              >
-                <Store size={15} /> Browse Store
-              </button>
-            </div>
-          )}
-
-          {/* Browse-a-store panel — real inventory, no scanning needed */}
-          {shopMode === 'browse' && state !== 'scanning' && (
-            <div className="bg-white rounded-2xl shadow-md p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                  <Store className="text-orange-500" size={20} />
-                  Shop a Store
-                </h3>
-                {cart.length > 0 && (
-                  <button
-                    onClick={() => setState('cart')}
-                    className="flex items-center gap-1 text-sm text-orange-600 font-semibold"
-                  >
-                    <ShoppingCart size={16} />
-                    Cart ({cart.length})
-                  </button>
-                )}
-              </div>
-              {selectedSupermarketId ? (
-                <ProductPicker supermarketId={selectedSupermarketId} onCartChange={handleBrowseCartChange} />
-              ) : (
-                <p className="text-sm text-slate-400 text-center py-4">Choose a store above to see its products.</p>
+                <option value="">Choose your store…</option>
+                {filteredSupermarkets.map(sm => (
+                  <option key={sm.id} value={sm.id}>
+                    {typeEmoji(sm.business_type)} {sm.name}{sm.location ? ` — ${sm.location}` : ''}
+                  </option>
+                ))}
+              </select>
+              {filteredSupermarkets.length === 0 && (
+                <p className="text-xs text-slate-400">No stores of this type yet.</p>
               )}
             </div>
           )}
 
+          {/* Browse-a-store — real inventory, full-page, no scanning needed */}
+          {shopMode === 'browse' && state !== 'scanning' && (
+            selectedSupermarketId ? (
+              <ProductPicker
+                supermarketId={selectedSupermarketId}
+                onCartChange={handleBrowseCartChange}
+                onOpenCart={() => setState('cart')}
+                fullPage
+              />
+            ) : (
+              <p className="text-sm text-slate-400 text-center py-10">Choose a store above to see its products.</p>
+            )
+          )}
+
           {/* Camera scanning panel */}
           {shopMode === 'scan' && (state === 'scanning' || (
-            <div className="bg-white rounded-2xl shadow-md p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-slate-800 flex items-center gap-2">
-                  <ScanLine className="text-orange-500" size={20} />
-                  Scan a Product
-                </h3>
-                {cart.length > 0 && (
-                  <button
-                    onClick={() => setState('cart')}
-                    className="flex items-center gap-1 text-sm text-orange-600 font-semibold"
-                  >
-                    <ShoppingCart size={16} />
-                    Cart ({cart.length})
-                  </button>
-                )}
-              </div>
-
+            <div>
               {!selectedSupermarketId && (
                 <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
                   Choose a store above before scanning.
@@ -767,7 +760,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
 
       {/* ── Product found card ──────────────────────────────────────────── */}
       {state === 'product_found' && foundProduct && (
-        <div className="bg-white rounded-2xl shadow-xl p-5">
+        <div className="bg-white border-y border-slate-200 p-4">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-slate-800">Product Found</h3>
             <button
@@ -824,7 +817,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
 
       {/* ── Cart ───────────────────────────────────────────────────────── */}
       {(state === 'cart' || state === 'checkout') && cart.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="bg-white border-y border-slate-200 overflow-hidden">
           {/* Cart header */}
           <div className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -955,17 +948,9 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
         </div>
       )}
 
-      {/* ── Empty state (after idle with no products scanned) ──────────── */}
-      {state === 'idle' && cart.length === 0 && !foundProduct && !looking && (
-        <div className="text-center py-10 bg-white rounded-2xl shadow-md">
-          <div className="w-16 h-16 bg-orange-50 rounded-full flex items-center justify-center mx-auto mb-4">
-            <ShoppingCart className="text-orange-300" size={32} />
-          </div>
-          <h4 className="font-semibold text-slate-700 mb-1">Your cart is empty</h4>
-          <p className="text-sm text-slate-500">
-            {shopMode === 'browse' ? 'Tap a product above to add it' : 'Scan a barcode to add items'}
-          </p>
-        </div>
+      {/* ── Empty state — scan mode only; browse mode shows the products ── */}
+      {state === 'idle' && shopMode === 'scan' && cart.length === 0 && !foundProduct && !looking && (
+        <p className="text-center text-sm text-slate-400 py-6">Your cart is empty — scan a barcode to add items.</p>
       )}
     </div>
   );

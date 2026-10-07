@@ -635,7 +635,9 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
       {/* ── Tab Content ── */}
       {/* Generous bottom padding so the floating chat button never sits on
           top of the last card when scrolled to the end. */}
-      <div className="container mx-auto px-4 pt-5 pb-28">
+      {/* Shop runs edge-to-edge: no centred container or side gutters, so the
+          product grid gets the whole screen. Every other tab keeps the container. */}
+      <div className={activeTab === 'shop' ? 'w-full px-2 pt-2 pb-28' : 'container mx-auto px-4 pt-5 pb-28'}>
 
         {/* Overview */}
         {activeTab === 'overview' && (
@@ -828,11 +830,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         )}
 
         {/* Shop / Scan + POS */}
-        {activeTab === 'shop' && (
-          <div className="classic-card overflow-hidden">
-            <CustomerSelfCheckout user={user} />
-          </div>
-        )}
+        {activeTab === 'shop' && <CustomerSelfCheckout user={user} />}
 
         {/* Book — appointment-style service bookings against the same
             shared service_bookings tables digital-city-era's Book tab uses,
