@@ -121,6 +121,9 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [payment, setPayment] = useState<PaymentMethod>('cash');
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<CheckoutReceipt | null>(null);
+  // The store's business website, and whether it takes payments (its "Pay" tab is switched on).
+  // Cash / Card / Mobile Money are completed there, so this is known before the button is tapped.
+  const [storeSite, setStoreSite] = useState<{ url: string; payLive: boolean } | null>(null);
   const [receiptWebsiteUrl, setReceiptWebsiteUrl] = useState(typeof window !== 'undefined' ? window.location.origin : 'https://bodagoera.icanera.space');
   const [icanBalance, setIcanBalance] = useState<ICANBalance | null>(null);
   const [detectorSupported, setDetectorSupported] = useState(false);
@@ -445,20 +448,56 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     setState('idle');
   }
 
-  async function resolveReceiptWebsite() {
-    if (!selectedSupermarketId) return window.location.origin;
+  // Finds the store's public business website and whether its Pay tab is live.
+  async function lookupStoreSite(storeId: string): Promise<{ url: string; payLive: boolean; hasSite: boolean }> {
+    const fallback = { url: window.location.origin, payLive: false, hasSite: false };
+    if (!storeId) return fallback;
     try {
       const { data: store } = await supabase.from('supermarkets')
-        .select('pichin_business_profile_id').eq('id', selectedSupermarketId).maybeSingle();
+        .select('pichin_business_profile_id').eq('id', storeId).maybeSingle();
       if (store?.pichin_business_profile_id) {
         const { data: company } = await supabase.from('cmms_company_profiles')
           .select('id').eq('pichin_business_profile_id', store.pichin_business_profile_id).maybeSingle();
-        if (company?.id) return `${window.location.origin}/notices/${company.id}`;
+        if (company?.id) {
+          const { data: pay } = await supabase.rpc('public_tx_paycode_info_by_business', { p_business: store.pichin_business_profile_id });
+          return {
+            url: `${window.location.origin}/notices/${company.id}`,
+            payLive: Boolean(pay?.found && pay?.active),
+            hasSite: true,
+          };
+        }
       }
     } catch (error) {
-      console.warn('Could not resolve store public website for checkout receipt QR:', error);
+      console.warn('Could not resolve store public website:', error);
     }
-    return window.location.origin;
+    return fallback;
+  }
+
+  async function resolveReceiptWebsite() {
+    return (await lookupStoreSite(selectedSupermarketId)).url;
+  }
+
+  // Cash, Card/Bank and Mobile Money are done on the store's website (its Pay tab), with the cart
+  // already filled in: items, tax, the customer's name and phone. Opened straight from the tap
+  // (storeSite was looked up when the store was chosen) so mobile browsers don't block the tab.
+  function openSitePayment() {
+    if (!storeSite) return;
+    const params = new URLSearchParams({ pay: '1' });
+    const clean = (t: string) => t.replace(/[~|]/g, ' ').trim().slice(0, 70);
+    let listed = 0;
+    cart.forEach(i => {
+      const price = Math.round(i.product.selling_price * i.quantity);
+      listed += price;
+      params.append('i', `${clean(i.product.name)}${i.quantity > 1 ? ` x${i.quantity}` : ''}~${price}~1`);
+    });
+    const tax = totals.total - listed; // keeps the website's total identical to the Pay amount here
+    if (tax > 0) params.append('i', `Tax~${tax}~1`);
+    const name = user?.user_metadata?.full_name || user?.user_metadata?.name || '';
+    const phone = user?.phone || user?.user_metadata?.phone || '';
+    if (name) params.set('n', String(name));
+    if (phone) params.set('p', String(phone));
+    const target = `${storeSite.url}?${params.toString()}`;
+    if (!window.open(target, '_blank', 'noopener')) window.location.href = target;
   }
 
   // Instalments are set up and followed up on the store's business website
@@ -488,6 +527,16 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     printWindow.document.close();
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    setStoreSite(null);
+    if (!selectedSupermarketId) return;
+    lookupStoreSite(selectedSupermarketId).then(site => {
+      if (!cancelled) setStoreSite({ url: site.url, payLive: site.payLive });
+    });
+    return () => { cancelled = true; };
+  }, [selectedSupermarketId]);
+
   // ── Computed ──────────────────────────────────────────────────────────────
 
   const totals = cartTotals(cart);
@@ -495,6 +544,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const canPayICAN = (icanBalance?.ican ?? 0) >= icanNeeded;
 
   const activeStore = supermarkets.find(sm => sm.id === selectedSupermarketId) || null;
+  const paysOnWebsite = (payment === 'cash' || payment === 'card' || payment === 'mobile_money') && Boolean(storeSite?.payLive);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -925,7 +975,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                       : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                   }`}
                 >
-                  {m === 'mobile_money' ? 'Mobile Money' : m.charAt(0).toUpperCase() + m.slice(1)}
+                  {m === 'mobile_money' ? 'Mobile Money' : m === 'card' ? 'Card / Bank' : 'Cash'}
                 </button>
               ))}
               <button
@@ -960,7 +1010,17 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             </button>
             <p className="text-[11px] text-slate-400 mt-1 text-center">Opens {activeStore?.name || 'the store'}'s website to set up and follow your plan</p>
 
-            {payment !== 'ican' && (
+            {paysOnWebsite && (
+              <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-indigo-50 px-3 py-2 text-xs text-indigo-700">
+                <ExternalLink size={14} className="mt-0.5 shrink-0" />
+                <span>
+                  {payment === 'cash' ? 'Cash' : payment === 'card' ? 'Card and bank' : 'Mobile Money'} is completed on {activeStore?.name || 'the store'}'s
+                  website. Your cart, total and details go with you — pay there and keep your receipt.
+                </span>
+              </p>
+            )}
+
+            {payment !== 'ican' && !paysOnWebsite && (
               <p className="text-xs text-green-600 mt-2 text-center">
                 You'll earn ~₡{formatICAN(ugxToICAN(totals.total * 0.01))} ICAN cashback (1%)
               </p>
@@ -970,14 +1030,16 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           {/* Checkout button */}
           <div className="px-5 pb-5">
             <button
-              onClick={submitCheckout}
+              onClick={paysOnWebsite ? openSitePayment : submitCheckout}
               disabled={submitting}
               className="w-full py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
             >
               {submitting ? (
                 <><Loader size={20} className="animate-spin" /> Processing...</>
               ) : (
-                <><ReceiptText size={20} /> Pay {formatUGX(totals.total)}</>
+                paysOnWebsite
+                  ? <><ExternalLink size={20} /> Pay {formatUGX(totals.total)} on store website</>
+                  : <><ReceiptText size={20} /> Pay {formatUGX(totals.total)}</>
               )}
             </button>
           </div>
