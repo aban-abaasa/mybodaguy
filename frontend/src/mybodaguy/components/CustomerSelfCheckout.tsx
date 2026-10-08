@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Camera, CameraOff, ScanLine, X, Plus, Minus, Trash2,
   ShoppingCart, CheckCircle, Loader, AlertCircle, Coins,
-  ReceiptText, QrCode, Store, ChevronDown, ExternalLink,
+  ReceiptText, QrCode, Store, ChevronDown, CalendarClock, ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import QRCode from 'qrcode';
@@ -17,6 +17,8 @@ import {
 } from '../services/icanWalletService';
 import ProductPicker, { CartLine } from './ProductPicker';
 import ScanFrameOverlay from './ScanFrameOverlay';
+import SetPinPrompt from './SetPinPrompt';
+import { hasPinSet, verifyPin, validatePIN } from '../services/pinService';
 import { getStoreWebsiteUrl } from '../services/storeWebsite';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -123,11 +125,14 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<CheckoutReceipt | null>(null);
   const [receiptWebsiteUrl, setReceiptWebsiteUrl] = useState(typeof window !== 'undefined' ? window.location.origin : 'https://bodagoera.icanera.space');
-  // The selected store's public business website: where a customer pays with anything
-  // other than their IcanEra wallet. undefined = still looking it up, null = it has none.
-  const [storeSiteUrl, setStoreSiteUrl] = useState<string | null | undefined>(undefined);
   const [icanBalance, setIcanBalance] = useState<ICANBalance | null>(null);
   const [detectorSupported, setDetectorSupported] = useState(false);
+
+  // IcanEra wallet payments are authorised with the transaction PIN first
+  const [pinOpen, setPinOpen] = useState(false);
+  const [needsPin, setNeedsPin] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
 
   // Browse-a-store mode — real inventory picker as an alternative to scanning
   const [shopMode, setShopMode] = useState<ShopMode>('scan');
@@ -384,45 +389,10 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     );
   }
 
-  // Looked up as soon as a store is picked, so the Pay button can open the site straight
-  // away (a new tab opened after a network wait is blocked by most phone browsers).
-  useEffect(() => {
-    setStoreSiteUrl(undefined);
-    if (!selectedSupermarketId) return;
-    let cancelled = false;
-    getStoreWebsiteUrl({ supermarketId: selectedSupermarketId }).then(url => {
-      if (!cancelled) setStoreSiteUrl(url);
-    });
-    return () => { cancelled = true; };
-  }, [selectedSupermarketId]);
-
   // ── Checkout ──────────────────────────────────────────────────────────────
-
-  // Paying with anything but the IcanEra wallet (cash, card, Mobile Money) happens on the
-  // store's business website, so nothing is charged or recorded here: just open the site.
-  async function payOnBusinessWebsite() {
-    let url = storeSiteUrl;
-    if (url === undefined) {
-      setSubmitting(true);
-      url = await getStoreWebsiteUrl({ supermarketId: selectedSupermarketId });
-      setSubmitting(false);
-      setStoreSiteUrl(url);
-    }
-    if (!url) {
-      toast.error("This store doesn't have a business website yet. Pay with your IcanEra wallet instead.");
-      return;
-    }
-    // New tab so the cart is still here when they come back; same tab if the browser blocks it.
-    const opened = window.open(url, '_blank', 'noopener,noreferrer');
-    if (!opened) window.location.assign(url);
-  }
 
   async function submitCheckout() {
     if (cart.length === 0) return;
-    if (payment !== 'ican') {
-      await payOnBusinessWebsite();
-      return;
-    }
     setSubmitting(true);
 
     const cartPayload = cart.map(i => ({
@@ -487,6 +457,86 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   async function resolveReceiptWebsite() {
     if (!selectedSupermarketId) return window.location.origin;
     return (await getStoreWebsiteUrl({ supermarketId: selectedSupermarketId })) ?? window.location.origin;
+  }
+
+  // Instalments are set up and followed up on the store's business website
+  // (deposit, schedule, reminders, collect/deliver once paid), so this just
+  // opens that site. Opened synchronously-first so mobile browsers don't block it.
+  async function openInstalmentsOnWebsite() {
+    const win = window.open('', '_blank');
+    const website = await resolveReceiptWebsite();
+    if (website === window.location.origin) {
+      win?.close();
+      toast.error("This store doesn't have a website for instalments yet");
+      return;
+    }
+    if (win) { win.opener = null; win.location.href = website; }
+    else window.location.href = website;
+  }
+
+  // Every payment mode except the IcanEra wallet is settled on the store's own
+  // website (its Pay tab: cash, Mobile Money, card or bank), so this just opens
+  // that site. Opened synchronously-first so mobile browsers don't block it.
+  async function payOnStoreWebsite() {
+    const win = window.open('', '_blank');
+    const website = await resolveStorePayUrl();
+    if (!website) {
+      win?.close();
+      toast.error("This store doesn't have a website to pay on yet");
+      return;
+    }
+    if (win) { win.opener = null; win.location.href = website; }
+    else window.location.href = website;
+  }
+
+  async function resolveStorePayUrl(): Promise<string | null> {
+    if (!selectedSupermarketId) return null;
+    try {
+      // The store's page on the IcanEra site (customers can't read the company table
+      // directly, so this goes through get_store_public_website).
+      const storeSite = await getStoreWebsiteUrl({ supermarketId: selectedSupermarketId });
+      if (storeSite) return `${storeSite}?pay=1`;
+      const { data: store } = await supabase.from('supermarkets')
+        .select('pichin_business_profile_id').eq('id', selectedSupermarketId).maybeSingle();
+      const businessId = store?.pichin_business_profile_id;
+      if (!businessId) return null;
+      const { data: business } = await supabase.from('business_profiles')
+        .select('website').eq('id', businessId).maybeSingle();
+      const site = business?.website?.trim();
+      return site ? (/^https?:\/\//i.test(site) ? site : `https://${site}`) : null;
+    } catch (error) {
+      console.warn('Could not resolve store website for payment:', error);
+      return null;
+    }
+  }
+
+  // Pay button: wallet → PIN first, anything else → the store's website.
+  async function handlePay() {
+    if (payment !== 'ican') { await payOnStoreWebsite(); return; }
+    if (!user?.id) { toast.error('Sign in to pay with your IcanEra wallet'); return; }
+    try {
+      if (!(await hasPinSet(user.id))) { setNeedsPin(true); return; }
+      setPin('');
+      setPinOpen(true);
+    } catch {
+      toast.error("We couldn't check your PIN. Please try again.");
+    }
+  }
+
+  async function confirmPinAndPay() {
+    if (!validatePIN(pin) || pinBusy) return;
+    setPinBusy(true);
+    try {
+      const check = await verifyPin(user.id, pin);
+      if (!check.success) { toast.error(check.error || 'Incorrect PIN'); setPin(''); return; }
+      setPinOpen(false);
+      setPin('');
+      await submitCheckout();
+    } catch {
+      toast.error("We couldn't verify your PIN. Please try again.");
+    } finally {
+      setPinBusy(false);
+    }
   }
 
   async function printCheckoutReceipt() {
@@ -962,9 +1012,22 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
               </button>
             </div>
 
-            {payment !== 'ican' && (
+            <button
+              type="button"
+              onClick={openInstalmentsOnWebsite}
+              className="mt-2 w-full py-2.5 rounded-lg text-sm font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-all flex items-center justify-center gap-1.5"
+            >
+              <CalendarClock size={14} />
+              Pay in instalments
+              <ExternalLink size={12} className="opacity-60" />
+            </button>
+            <p className="text-[11px] text-slate-400 mt-1 text-center">Opens {activeStore?.name || 'the store'}'s website to set up and follow your plan</p>
+
+            {payment === 'ican' ? (
+              <p className="text-xs text-slate-500 mt-2 text-center">Your transaction PIN is needed to pay from your IcanEra wallet</p>
+            ) : (
               <p className="text-xs text-slate-500 mt-2 text-center">
-                Cash, card and Mobile Money are paid on the store's business website — tap Pay to open it.
+                You'll pay on {activeStore?.name || 'the store'}'s website, using its Pay page
               </p>
             )}
           </div>
@@ -972,19 +1035,75 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           {/* Checkout button */}
           <div className="px-5 pb-5">
             <button
-              onClick={submitCheckout}
-              disabled={submitting}
+              onClick={handlePay}
+              disabled={submitting || pinBusy}
               className="w-full py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
             >
               {submitting ? (
                 <><Loader size={20} className="animate-spin" /> Processing...</>
-              ) : payment !== 'ican' ? (
-                <><ExternalLink size={20} /> Pay on the business website</>
               ) : (
-                <><ReceiptText size={20} /> Pay {formatUGX(totals.total)}</>
+                payment === 'ican'
+                  ? <><ReceiptText size={20} /> Pay {formatUGX(totals.total)} with PIN</>
+                  : <><ExternalLink size={20} /> Pay {formatUGX(totals.total)} on website</>
               )}
             </button>
           </div>
+        </div>
+      )}
+
+      {needsPin && user?.id && (
+        <SetPinPrompt
+          userId={user.id}
+          onDone={async () => {
+            setNeedsPin(false);
+            try { if (await hasPinSet(user.id)) { setPin(''); setPinOpen(true); } } catch { /* they can tap Pay again */ }
+          }}
+        />
+      )}
+
+      {pinOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <form
+            onSubmit={(e) => { e.preventDefault(); confirmPinAndPay(); }}
+            className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl"
+          >
+            <div className="text-center mb-5">
+              <div className="text-4xl mb-2">🔐</div>
+              <h2 className="font-bold text-lg text-slate-800">Enter your PIN</h2>
+              <p className="text-slate-500 text-xs mt-1">
+                Confirm {formatUGX(totals.total)} from your IcanEra Wallet
+              </p>
+            </div>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              autoFocus
+              maxLength={6}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+              placeholder="4-6 digit PIN"
+              disabled={pinBusy}
+              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-center tracking-widest text-lg focus:outline-none focus:border-orange-400"
+            />
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => { setPinOpen(false); setPin(''); }}
+                disabled={pinBusy}
+                className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={pinBusy || !validatePIN(pin)}
+                className="flex-1 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm disabled:opacity-60"
+              >
+                {pinBusy ? 'Verifying…' : 'Confirm & Pay'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
