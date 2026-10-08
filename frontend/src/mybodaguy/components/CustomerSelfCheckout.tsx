@@ -193,29 +193,27 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     }
     setScanError('');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setState('scanning');
-
-      if (detectorSupported) {
-        detectorRef.current = new window.BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'data_matrix'],
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
         });
-        scanLoop();
+      } catch (err: any) {
+        if (err?.name === 'NotAllowedError') throw err;
+        // Some devices reject the facingMode/size constraints — retry with any camera
+        stream = await navigator.mediaDevices.getUserMedia({ video: true });
       }
+      streamRef.current = stream;
+      // The <video> element only mounts once state is 'scanning', so the stream
+      // is attached (and the detector started) by the effect below.
+      setState('scanning');
     } catch (err: any) {
       setScanError(err.name === 'NotAllowedError'
         ? 'Camera permission denied. Use manual entry below.'
         : 'Camera unavailable. Use manual barcode entry.');
       setState('idle');
     }
-  }, [detectorSupported, selectedSupermarketId]);
+  }, [selectedSupermarketId]);
 
   const stopCamera = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -253,6 +251,28 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     };
     rafRef.current = requestAnimationFrame(detect);
   }, [handleBarcode]);
+
+  // Attach the camera stream once the <video> element is mounted
+  useEffect(() => {
+    if (state !== 'scanning') return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+    video.srcObject = stream;
+    video.play().catch(() => {});
+
+    if (detectorSupported) {
+      try {
+        detectorRef.current = new window.BarcodeDetector({
+          formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'data_matrix'],
+        });
+        scanLoop();
+      } catch {
+        // Unsupported format list — fall back to manual entry
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   useEffect(() => {
     return () => {
