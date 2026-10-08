@@ -40,9 +40,13 @@ export interface CommitteeMemberDetails {
 export interface CommissionRecord {
   id: string;
   ride_id: string;
-  ride_fare: number;
-  commission_percentage: number;
+  // Null for wallet credits that are not a percentage of a ride fare
+  // (e.g. a chairperson's share of a rider ID card fee).
+  ride_fare: number | null;
+  commission_percentage: number | null;
   commission_amount: number;
+  // Human-readable source of the credit, e.g. "stage chairperson share of a rider ID card fee".
+  description?: string | null;
   status: 'pending' | 'paid' | 'failed';
   region_type: RegionType;
   region_id: string;
@@ -411,22 +415,57 @@ export const chairpersonService = {
     return data;
   },
 
-  // Get this chairperson's own paid/pending commission records (most recent first).
-  // Requires the mbg_commissions_read_own RLS policy (ADD_CHAIRPERSON_COMMISSION_READ_ACCESS.sql).
+  // Get this chairperson's own commission earnings (most recent first).
+  // The wallet ledger is the source of truth: every chairperson/committee-member payout
+  // is credited there, but only ride-fare commissions also get an mbg_commissions row —
+  // e.g. rider ID card fee shares are paid straight to the wallet — so reading
+  // mbg_commissions alone left those earnings invisible ("UGX 0"). A chairperson can
+  // already read their own wallet rows (tx_participant_read). Falls back to
+  // mbg_commissions (ADD_CHAIRPERSON_COMMISSION_READ_ACCESS.sql) if the wallet read fails.
   async getMyCommissions(userId: string): Promise<CommissionRecord[]> {
+    const ICAN_TO_UGX = 5000;
     const { data, error } = await supabase
+      .from('ican_coin_transactions')
+      .select('id, reference_id, ican_amount, local_amount, ugx_floor_value, note, created_at')
+      .eq('recipient_user_id', userId)
+      .eq('source_app', 'mybodaguy')
+      .eq('transaction_type', 'earn')
+      .or('note.ilike.%chairperson%,note.ilike.%committee member share%')
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (!error) {
+      return (data || []).map((tx: any) => ({
+        id: tx.id,
+        ride_id: tx.reference_id,
+        ride_fare: null,
+        commission_percentage: null,
+        commission_amount: parseFloat(
+          tx.local_amount ?? tx.ugx_floor_value ?? ((tx.ican_amount || 0) * ICAN_TO_UGX)
+        ) || 0,
+        description: tx.note,
+        status: 'paid' as const,
+        region_type: 'stage' as RegionType,
+        region_id: '',
+        paid_at: tx.created_at,
+        created_at: tx.created_at,
+      }));
+    }
+
+    console.error('[ChairpersonService] Error fetching wallet commissions, falling back:', error);
+    const fallback = await supabase
       .from('mbg_commissions')
       .select('id, ride_id, ride_fare, commission_percentage, commission_amount, status, region_type, region_id, paid_at, created_at')
       .eq('recipient_id', userId)
       .order('created_at', { ascending: false })
       .limit(200);
 
-    if (error) {
-      console.error('[ChairpersonService] Error fetching commissions:', error);
+    if (fallback.error) {
+      console.error('[ChairpersonService] Error fetching commissions:', fallback.error);
       return [];
     }
 
-    return data || [];
+    return fallback.data || [];
   },
 
   // Get committee hierarchy view

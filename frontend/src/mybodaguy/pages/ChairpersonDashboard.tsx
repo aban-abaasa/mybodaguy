@@ -821,8 +821,13 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                         <div className="min-w-0">
                           <p className="text-sm font-semibold text-slate-800">
                             {formatUGX(c.commission_amount)}
-                            <span className="text-xs font-normal text-slate-500"> ({c.commission_percentage}% of {formatUGX(c.ride_fare)})</span>
+                            {c.ride_fare != null && c.commission_percentage != null && (
+                              <span className="text-xs font-normal text-slate-500"> ({c.commission_percentage}% of {formatUGX(c.ride_fare)})</span>
+                            )}
                           </p>
+                          {c.description && (
+                            <p className="mt-0.5 truncate text-xs capitalize text-slate-600">{c.description}</p>
+                          )}
                           <p className="mt-0.5 text-xs text-slate-500">
                             {new Date(c.paid_at || c.created_at).toLocaleDateString('en-UG', { day: 'numeric', month: 'short', year: 'numeric' })}
                           </p>
