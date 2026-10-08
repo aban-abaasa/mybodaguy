@@ -17,6 +17,8 @@ import {
 } from '../services/icanWalletService';
 import ProductPicker, { CartLine } from './ProductPicker';
 import ScanFrameOverlay from './ScanFrameOverlay';
+import SetPinPrompt from './SetPinPrompt';
+import { hasPinSet, verifyPin, validatePIN } from '../services/pinService';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -124,6 +126,12 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [receiptWebsiteUrl, setReceiptWebsiteUrl] = useState(typeof window !== 'undefined' ? window.location.origin : 'https://bodagoera.icanera.space');
   const [icanBalance, setIcanBalance] = useState<ICANBalance | null>(null);
   const [detectorSupported, setDetectorSupported] = useState(false);
+
+  // IcanEra wallet payments are authorised with the transaction PIN first
+  const [pinOpen, setPinOpen] = useState(false);
+  const [needsPin, setNeedsPin] = useState(false);
+  const [pin, setPin] = useState('');
+  const [pinBusy, setPinBusy] = useState(false);
 
   // Browse-a-store mode — real inventory picker as an alternative to scanning
   const [shopMode, setShopMode] = useState<ShopMode>('scan');
@@ -474,6 +482,70 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     }
     if (win) { win.opener = null; win.location.href = website; }
     else window.location.href = website;
+  }
+
+  // Every payment mode except the IcanEra wallet is settled on the store's own
+  // website (its Pay tab: cash, Mobile Money, card or bank), so this just opens
+  // that site. Opened synchronously-first so mobile browsers don't block it.
+  async function payOnStoreWebsite() {
+    const win = window.open('', '_blank');
+    const website = await resolveStorePayUrl();
+    if (!website) {
+      win?.close();
+      toast.error("This store doesn't have a website to pay on yet");
+      return;
+    }
+    if (win) { win.opener = null; win.location.href = website; }
+    else window.location.href = website;
+  }
+
+  async function resolveStorePayUrl(): Promise<string | null> {
+    if (!selectedSupermarketId) return null;
+    try {
+      const { data: store } = await supabase.from('supermarkets')
+        .select('pichin_business_profile_id').eq('id', selectedSupermarketId).maybeSingle();
+      const businessId = store?.pichin_business_profile_id;
+      if (!businessId) return null;
+      const { data: company } = await supabase.from('cmms_company_profiles')
+        .select('id').eq('pichin_business_profile_id', businessId).maybeSingle();
+      if (company?.id) return `${window.location.origin}/notices/${company.id}?pay=1`;
+      const { data: business } = await supabase.from('business_profiles')
+        .select('website').eq('id', businessId).maybeSingle();
+      const site = business?.website?.trim();
+      return site ? (/^https?:\/\//i.test(site) ? site : `https://${site}`) : null;
+    } catch (error) {
+      console.warn('Could not resolve store website for payment:', error);
+      return null;
+    }
+  }
+
+  // Pay button: wallet → PIN first, anything else → the store's website.
+  async function handlePay() {
+    if (payment !== 'ican') { await payOnStoreWebsite(); return; }
+    if (!user?.id) { toast.error('Sign in to pay with your IcanEra wallet'); return; }
+    try {
+      if (!(await hasPinSet(user.id))) { setNeedsPin(true); return; }
+      setPin('');
+      setPinOpen(true);
+    } catch {
+      toast.error("We couldn't check your PIN. Please try again.");
+    }
+  }
+
+  async function confirmPinAndPay() {
+    if (!validatePIN(pin) || pinBusy) return;
+    setPinBusy(true);
+    try {
+      const check = await verifyPin(user.id, pin);
+      if (!check.success) { toast.error(check.error || 'Incorrect PIN'); setPin(''); return; }
+      setPinOpen(false);
+      setPin('');
+      await submitCheckout();
+    } catch {
+      toast.error("We couldn't verify your PIN. Please try again.");
+    } finally {
+      setPinBusy(false);
+    }
   }
 
   async function printCheckoutReceipt() {
@@ -960,9 +1032,11 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             </button>
             <p className="text-[11px] text-slate-400 mt-1 text-center">Opens {activeStore?.name || 'the store'}'s website to set up and follow your plan</p>
 
-            {payment !== 'ican' && (
-              <p className="text-xs text-green-600 mt-2 text-center">
-                You'll earn ~₡{formatICAN(ugxToICAN(totals.total * 0.01))} ICAN cashback (1%)
+            {payment === 'ican' ? (
+              <p className="text-xs text-slate-500 mt-2 text-center">Your transaction PIN is needed to pay from your IcanEra wallet</p>
+            ) : (
+              <p className="text-xs text-slate-500 mt-2 text-center">
+                You'll pay on {activeStore?.name || 'the store'}'s website, using its Pay page
               </p>
             )}
           </div>
@@ -970,17 +1044,75 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           {/* Checkout button */}
           <div className="px-5 pb-5">
             <button
-              onClick={submitCheckout}
-              disabled={submitting}
+              onClick={handlePay}
+              disabled={submitting || pinBusy}
               className="w-full py-4 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-bold rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all shadow-lg disabled:opacity-50 flex items-center justify-center gap-2 text-base"
             >
               {submitting ? (
                 <><Loader size={20} className="animate-spin" /> Processing...</>
               ) : (
-                <><ReceiptText size={20} /> Pay {formatUGX(totals.total)}</>
+                payment === 'ican'
+                  ? <><ReceiptText size={20} /> Pay {formatUGX(totals.total)} with PIN</>
+                  : <><ExternalLink size={20} /> Pay {formatUGX(totals.total)} on website</>
               )}
             </button>
           </div>
+        </div>
+      )}
+
+      {needsPin && user?.id && (
+        <SetPinPrompt
+          userId={user.id}
+          onDone={async () => {
+            setNeedsPin(false);
+            try { if (await hasPinSet(user.id)) { setPin(''); setPinOpen(true); } } catch { /* they can tap Pay again */ }
+          }}
+        />
+      )}
+
+      {pinOpen && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <form
+            onSubmit={(e) => { e.preventDefault(); confirmPinAndPay(); }}
+            className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl"
+          >
+            <div className="text-center mb-5">
+              <div className="text-4xl mb-2">🔐</div>
+              <h2 className="font-bold text-lg text-slate-800">Enter your PIN</h2>
+              <p className="text-slate-500 text-xs mt-1">
+                Confirm {formatUGX(totals.total)} from your IcanEra Wallet
+              </p>
+            </div>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              autoFocus
+              maxLength={6}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+              placeholder="4-6 digit PIN"
+              disabled={pinBusy}
+              className="w-full border border-slate-200 rounded-xl px-4 py-3 text-center tracking-widest text-lg focus:outline-none focus:border-orange-400"
+            />
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={() => { setPinOpen(false); setPin(''); }}
+                disabled={pinBusy}
+                className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={pinBusy || !validatePIN(pin)}
+                className="flex-1 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm disabled:opacity-60"
+              >
+                {pinBusy ? 'Verifying…' : 'Confirm & Pay'}
+              </button>
+            </div>
+          </form>
         </div>
       )}
 
