@@ -197,25 +197,16 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
         video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      // The <video> only exists while state === 'scanning', so the stream is attached
+      // by the effect below once it has mounted (videoRef is still null here).
       setState('scanning');
-
-      if (detectorSupported) {
-        detectorRef.current = new window.BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'data_matrix'],
-        });
-        scanLoop();
-      }
     } catch (err: any) {
       setScanError(err.name === 'NotAllowedError'
         ? 'Camera permission denied. Use manual entry below.'
         : 'Camera unavailable. Use manual barcode entry.');
       setState('idle');
     }
-  }, [detectorSupported, selectedSupermarketId]);
+  }, [selectedSupermarketId]);
 
   const stopCamera = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -253,6 +244,25 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     };
     rafRef.current = requestAnimationFrame(detect);
   }, [handleBarcode]);
+
+  // Once the live-view <video> has mounted, give it the camera stream and start detecting.
+  useEffect(() => {
+    if (state !== 'scanning') return;
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+    video.srcObject = stream;
+    video.play().catch(() => {});
+    if (detectorSupported) {
+      try {
+        detectorRef.current = new window.BarcodeDetector({
+          formats: ['ean_13', 'ean_8', 'code_128', 'code_39', 'upc_a', 'upc_e', 'qr_code', 'data_matrix'],
+        });
+        scanLoop();
+      } catch {}
+    }
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [state, detectorSupported, scanLoop]);
 
   useEffect(() => {
     return () => {
