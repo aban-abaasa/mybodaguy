@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CalendarClock, ChevronRight, Loader, ShoppingBag, Store } from 'lucide-react';
 import {
-  InstallmentPlan, STATUS_LABELS, formatUGX, getMyBusinessAccounts, getMyInstallmentPlans,
+  InstallmentPlan, STATUS_LABELS, formatMoney, getMyBusinessAccounts, getMyInstallmentPlans,
 } from '../../services/installmentService';
 import InstallmentPlanView from './InstallmentPlanView';
 import InstallmentShop from './InstallmentShop';
@@ -11,7 +11,7 @@ interface Props {
   customerPhone?: string | null;
 }
 
-const ORDER: Record<string, number> = { awaiting_deposit: 0, active: 1, ready: 2, pickup_ready: 3, dispatched: 4, completed: 5, cancelled: 6, lapsed: 6 };
+const ORDER: Record<string, number> = { awaiting_deposit: 0, active: 1, ready: 2, pickup_ready: 3, dispatched: 4, shipping_pending: 4, shipped: 4, disputed: 3, completed: 5, cancelled: 6, lapsed: 6 };
 type Accounts = Awaited<ReturnType<typeof getMyBusinessAccounts>>;
 
 /**
@@ -79,8 +79,12 @@ export default function InstallmentsHub({ customerName, customerPhone }: Props) 
                       <p className="text-[11px] text-slate-400">{a.open_plans} open plan{a.open_plans === 1 ? '' : 's'}</p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-sm font-semibold text-emerald-600">Paid {formatUGX(a.paid_ugx)}</p>
-                      {a.balance_ugx > 0 && <p className="text-[11px] text-slate-500">Owing {formatUGX(a.balance_ugx)}</p>}
+                      {a.totals.filter(t => t.paid_amount > 0 || t.balance_amount > 0).map(t => (
+                        <div key={t.currency}>
+                          <p className="text-sm font-semibold text-emerald-600">Paid {formatMoney(t.paid_amount, t.currency)}</p>
+                          {t.balance_amount > 0 && <p className="text-[11px] text-slate-500">Owing {formatMoney(t.balance_amount, t.currency)}</p>}
+                        </div>
+                      ))}
                     </div>
                   </div>
                 ))}
@@ -107,10 +111,10 @@ export default function InstallmentsHub({ customerName, customerPhone }: Props) 
                       </div>
                       <div className="mt-1 flex justify-between text-xs">
                         <span className="text-slate-500">{STATUS_LABELS[p.status] || p.status} · {p.code}</span>
-                        <span className="text-slate-600">{formatUGX(p.paid_ugx)} of {formatUGX(p.total_ugx)}</span>
+                        <span className="text-slate-600">{formatMoney(p.paid_amount, p.currency)} of {formatMoney(p.total_amount, p.currency)}</span>
                       </div>
                       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
-                        <div className="h-full bg-orange-500" style={{ width: `${Math.min(100, Math.round((p.paid_ugx / Math.max(p.total_ugx, 1)) * 100))}%` }} />
+                        <div className="h-full bg-orange-500" style={{ width: `${Math.min(100, Math.round((p.paid_amount / Math.max(p.total_amount, 1)) * 100))}%` }} />
                       </div>
                     </button>
                   ))}
