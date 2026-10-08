@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import {
   Bike, Clock, LogOut, Package, History, Gift, User, Wallet,
   X, CheckCircle, ChevronDown, ArrowRight, Home, ClipboardList, MapPin,
-  CalendarDays, Truck, Building2, LayoutGrid, ScanLine, Trash2, Shield,
+  CalendarDays, CalendarClock, Truck, Building2, LayoutGrid, ScanLine, Trash2, Shield,
   type LucideIcon,
 } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
@@ -22,6 +22,7 @@ import RideTrackingModal from '../components/RideTrackingModal';
 import ManageBusinessPanel from '../components/ManageBusinessPanel';
 import JourneyTracker from '../components/JourneyTracker';
 import RefundableDeliveries from '../components/RefundableDeliveries';
+import InstallmentsHub from '../components/installments/InstallmentsHub';
 import CancelReasonDialog from '../components/CancelReasonDialog';
 import {
   cancelRide, hideMyRides, isCancellableRideStatus, isFinishedRideStatus,
@@ -57,7 +58,7 @@ interface CustomerDashboardProps {
 // delivery toggle and vice versa. Book a Journey is inbuilt into Book a
 // Ride itself (a mode toggle inside EnhancedRideRequest, showJourneyOption)
 // rather than its own tab.
-type TabType = 'overview' | 'book-ride' | 'shop' | 'book-service' | 'delivery' | 'orders' | 'areas' | 'rewards' | 'cover' | 'become-operator' | 'manage-business' | 'profile';
+type TabType = 'overview' | 'book-ride' | 'shop' | 'book-service' | 'delivery' | 'orders' | 'payments' | 'areas' | 'rewards' | 'cover' | 'become-operator' | 'manage-business' | 'profile';
 
 // emoji drives the desktop tab strip; icon drives the phone header + menu
 // sheet, where crisp line icons read as more refined than mixed-font emoji.
@@ -68,6 +69,7 @@ const ALL_TABS: { id: TabType; label: string; emoji: string; icon: LucideIcon }[
   { id: 'book-service', label: 'Book', emoji: '📅', icon: CalendarDays },
   { id: 'delivery',  label: 'Delivery',  emoji: '📦', icon: Package },
   { id: 'orders',    label: 'Orders',    emoji: '📋', icon: ClipboardList },
+  { id: 'payments',  label: 'Payments',  emoji: '💳', icon: CalendarClock },
   { id: 'areas',     label: 'My Areas',  emoji: '📍', icon: MapPin },
   { id: 'rewards',   label: 'Rewards',   emoji: '🎁', icon: Gift },
   { id: 'cover',     label: 'Cover',     emoji: '🛡️', icon: Shield },
@@ -710,11 +712,12 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                 </div>
               </button>
 
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
                 {[
                   { label: 'Delivery',        desc: 'From a store or a normal pickup', icon: Package,       tile: 'bg-sky-50 text-sky-600',         tab: 'delivery' as TabType },
                   { label: 'Scan & Checkout', desc: 'POS · Pay with ICAN',             icon: ScanLine,      tile: 'bg-emerald-50 text-emerald-600', tab: 'shop' as TabType },
                   { label: 'My Orders',       desc: 'Track rides & deliveries',        icon: ClipboardList, tile: 'bg-orange-50 text-orange-600',   tab: 'orders' as TabType },
+                  { label: 'Pay in instalments', desc: 'Pay over time, then collect or deliver', icon: CalendarClock, tile: 'bg-violet-50 text-violet-600', tab: 'payments' as TabType },
                   { label: 'Rewards',         desc: 'Earn & redeem points',            icon: Gift,          tile: 'bg-amber-50 text-amber-600',     tab: 'rewards' as TabType },
                 ].map(c => (
                   <button key={c.tab} type="button" onClick={() => setActiveTab(c.tab)}
@@ -912,6 +915,11 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             )}
           </div>
           </div>
+        )}
+
+        {/* Payments — instalment plans: pay for products over time, then collect or have them delivered */}
+        {activeTab === 'payments' && user?.id && (
+          <InstallmentsHub customerName={customerName === 'You' ? null : customerName} customerPhone={(user as { phone?: string } | null)?.phone ?? null} />
         )}
 
         {/* Delivery — Shop-For-Me supermarket delivery orders (separate from ride Orders) */}
