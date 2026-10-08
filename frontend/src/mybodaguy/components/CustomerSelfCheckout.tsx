@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Camera, CameraOff, ScanLine, X, Plus, Minus, Trash2,
   ShoppingCart, CheckCircle, Loader, AlertCircle, Coins,
-  ReceiptText, QrCode, Store, ChevronDown,
+  ReceiptText, QrCode, Store, ChevronDown, ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import QRCode from 'qrcode';
@@ -17,6 +17,7 @@ import {
 } from '../services/icanWalletService';
 import ProductPicker, { CartLine } from './ProductPicker';
 import ScanFrameOverlay from './ScanFrameOverlay';
+import { getStoreWebsiteUrl } from '../services/storeWebsite';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -122,6 +123,9 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<CheckoutReceipt | null>(null);
   const [receiptWebsiteUrl, setReceiptWebsiteUrl] = useState(typeof window !== 'undefined' ? window.location.origin : 'https://bodagoera.icanera.space');
+  // The selected store's public business website: where a customer pays with anything
+  // other than their IcanEra wallet. undefined = still looking it up, null = it has none.
+  const [storeSiteUrl, setStoreSiteUrl] = useState<string | null | undefined>(undefined);
   const [icanBalance, setIcanBalance] = useState<ICANBalance | null>(null);
   const [detectorSupported, setDetectorSupported] = useState(false);
 
@@ -380,10 +384,45 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     );
   }
 
+  // Looked up as soon as a store is picked, so the Pay button can open the site straight
+  // away (a new tab opened after a network wait is blocked by most phone browsers).
+  useEffect(() => {
+    setStoreSiteUrl(undefined);
+    if (!selectedSupermarketId) return;
+    let cancelled = false;
+    getStoreWebsiteUrl({ supermarketId: selectedSupermarketId }).then(url => {
+      if (!cancelled) setStoreSiteUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [selectedSupermarketId]);
+
   // ── Checkout ──────────────────────────────────────────────────────────────
+
+  // Paying with anything but the IcanEra wallet (cash, card, Mobile Money) happens on the
+  // store's business website, so nothing is charged or recorded here: just open the site.
+  async function payOnBusinessWebsite() {
+    let url = storeSiteUrl;
+    if (url === undefined) {
+      setSubmitting(true);
+      url = await getStoreWebsiteUrl({ supermarketId: selectedSupermarketId });
+      setSubmitting(false);
+      setStoreSiteUrl(url);
+    }
+    if (!url) {
+      toast.error("This store doesn't have a business website yet. Pay with your IcanEra wallet instead.");
+      return;
+    }
+    // New tab so the cart is still here when they come back; same tab if the browser blocks it.
+    const opened = window.open(url, '_blank', 'noopener,noreferrer');
+    if (!opened) window.location.assign(url);
+  }
 
   async function submitCheckout() {
     if (cart.length === 0) return;
+    if (payment !== 'ican') {
+      await payOnBusinessWebsite();
+      return;
+    }
     setSubmitting(true);
 
     const cartPayload = cart.map(i => ({
@@ -447,18 +486,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
 
   async function resolveReceiptWebsite() {
     if (!selectedSupermarketId) return window.location.origin;
-    try {
-      const { data: store } = await supabase.from('supermarkets')
-        .select('pichin_business_profile_id').eq('id', selectedSupermarketId).maybeSingle();
-      if (store?.pichin_business_profile_id) {
-        const { data: company } = await supabase.from('cmms_company_profiles')
-          .select('id').eq('pichin_business_profile_id', store.pichin_business_profile_id).maybeSingle();
-        if (company?.id) return `${window.location.origin}/notices/${company.id}`;
-      }
-    } catch (error) {
-      console.warn('Could not resolve store public website for checkout receipt QR:', error);
-    }
-    return window.location.origin;
+    return (await getStoreWebsiteUrl({ supermarketId: selectedSupermarketId })) ?? window.location.origin;
   }
 
   async function printCheckoutReceipt() {
@@ -935,8 +963,8 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             </div>
 
             {payment !== 'ican' && (
-              <p className="text-xs text-green-600 mt-2 text-center">
-                You'll earn ~₡{formatICAN(ugxToICAN(totals.total * 0.01))} ICAN cashback (1%)
+              <p className="text-xs text-slate-500 mt-2 text-center">
+                Cash, card and Mobile Money are paid on the store's business website — tap Pay to open it.
               </p>
             )}
           </div>
@@ -950,6 +978,8 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             >
               {submitting ? (
                 <><Loader size={20} className="animate-spin" /> Processing...</>
+              ) : payment !== 'ican' ? (
+                <><ExternalLink size={20} /> Pay on the business website</>
               ) : (
                 <><ReceiptText size={20} /> Pay {formatUGX(totals.total)}</>
               )}

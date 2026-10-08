@@ -3,6 +3,7 @@ import { CheckCircle, X } from 'lucide-react';
 import { QRCodeCanvas as QRCode } from 'qrcode.react';
 import QRCodeImage from 'qrcode';
 import { supabase } from '../../services/supabaseClient';
+import { getStoreWebsiteUrl } from '../services/storeWebsite';
 
 interface DeliveryReceiptCardProps {
   verificationCode: string;
@@ -28,9 +29,8 @@ export default function DeliveryReceiptCard({ verificationCode, verifyUrl, store
         const { data: business } = await supabase.from('business_profiles')
           .select('id, website').ilike('business_name', storeName).limit(1).maybeSingle();
         if (!business?.id) return;
-        const { data: company } = await supabase.from('cmms_company_profiles')
-          .select('id').eq('pichin_business_profile_id', business.id).maybeSingle();
-        const website = company?.id ? `${window.location.origin}/notices/${company.id}` : business.website;
+        const businessSite = await getStoreWebsiteUrl({ businessProfileId: business.id });
+        const website = businessSite ?? business.website;
         if (website && !cancelled) setStoreWebsiteUrl(/^https?:\/\//i.test(website) ? website : `https://${website}`);
       } catch (error) {
         console.warn('Could not resolve public store website for delivery receipt:', error);
