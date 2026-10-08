@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Camera, CameraOff, ScanLine, X, Plus, Minus, Trash2,
   ShoppingCart, CheckCircle, Loader, AlertCircle, Coins,
-  ReceiptText, QrCode, Store, ChevronDown,
+  ReceiptText, QrCode, Store, ChevronDown, CalendarClock, ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import QRCode from 'qrcode';
@@ -459,6 +459,21 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       console.warn('Could not resolve store public website for checkout receipt QR:', error);
     }
     return window.location.origin;
+  }
+
+  // Instalments are set up and followed up on the store's business website
+  // (deposit, schedule, reminders, collect/deliver once paid), so this just
+  // opens that site. Opened synchronously-first so mobile browsers don't block it.
+  async function openInstalmentsOnWebsite() {
+    const win = window.open('', '_blank');
+    const website = await resolveReceiptWebsite();
+    if (website === window.location.origin) {
+      win?.close();
+      toast.error("This store doesn't have a website for instalments yet");
+      return;
+    }
+    if (win) { win.opener = null; win.location.href = website; }
+    else window.location.href = website;
   }
 
   async function printCheckoutReceipt() {
@@ -933,6 +948,17 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                 )}
               </button>
             </div>
+
+            <button
+              type="button"
+              onClick={openInstalmentsOnWebsite}
+              className="mt-2 w-full py-2.5 rounded-lg text-sm font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-all flex items-center justify-center gap-1.5"
+            >
+              <CalendarClock size={14} />
+              Pay in instalments
+              <ExternalLink size={12} className="opacity-60" />
+            </button>
+            <p className="text-[11px] text-slate-400 mt-1 text-center">Opens {activeStore?.name || 'the store'}'s website to set up and follow your plan</p>
 
             {payment !== 'ican' && (
               <p className="text-xs text-green-600 mt-2 text-center">
