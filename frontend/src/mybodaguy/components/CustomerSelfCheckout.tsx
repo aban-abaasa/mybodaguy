@@ -19,6 +19,7 @@ import ProductPicker, { CartLine } from './ProductPicker';
 import ScanFrameOverlay from './ScanFrameOverlay';
 import SetPinPrompt from './SetPinPrompt';
 import { hasPinSet, verifyPin, validatePIN } from '../services/pinService';
+import { getStoreWebsiteUrl } from '../services/storeWebsite';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -455,18 +456,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
 
   async function resolveReceiptWebsite() {
     if (!selectedSupermarketId) return window.location.origin;
-    try {
-      const { data: store } = await supabase.from('supermarkets')
-        .select('pichin_business_profile_id').eq('id', selectedSupermarketId).maybeSingle();
-      if (store?.pichin_business_profile_id) {
-        const { data: company } = await supabase.from('cmms_company_profiles')
-          .select('id').eq('pichin_business_profile_id', store.pichin_business_profile_id).maybeSingle();
-        if (company?.id) return `${window.location.origin}/notices/${company.id}`;
-      }
-    } catch (error) {
-      console.warn('Could not resolve store public website for checkout receipt QR:', error);
-    }
-    return window.location.origin;
+    return (await getStoreWebsiteUrl({ supermarketId: selectedSupermarketId })) ?? window.location.origin;
   }
 
   // Instalments are set up and followed up on the store's business website
@@ -502,13 +492,14 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   async function resolveStorePayUrl(): Promise<string | null> {
     if (!selectedSupermarketId) return null;
     try {
+      // The store's page on the IcanEra site (customers can't read the company table
+      // directly, so this goes through get_store_public_website).
+      const storeSite = await getStoreWebsiteUrl({ supermarketId: selectedSupermarketId });
+      if (storeSite) return `${storeSite}?pay=1`;
       const { data: store } = await supabase.from('supermarkets')
         .select('pichin_business_profile_id').eq('id', selectedSupermarketId).maybeSingle();
       const businessId = store?.pichin_business_profile_id;
       if (!businessId) return null;
-      const { data: company } = await supabase.from('cmms_company_profiles')
-        .select('id').eq('pichin_business_profile_id', businessId).maybeSingle();
-      if (company?.id) return `${window.location.origin}/notices/${company.id}?pay=1`;
       const { data: business } = await supabase.from('business_profiles')
         .select('website').eq('id', businessId).maybeSingle();
       const site = business?.website?.trim();

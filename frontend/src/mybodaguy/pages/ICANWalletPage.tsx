@@ -36,6 +36,7 @@ import {
 } from '../components/WalletClassic';
 import { hasPinSet, verifyPin } from '../services/pinService';
 import { parseIcanPayCode, payIcanRequest } from '../services/icanPaymentRequestService';
+import { getStoreWebsiteUrl } from '../services/storeWebsite';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -522,9 +523,8 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
       const { data: business } = await supabase.from('business_profiles')
         .select('id, website').eq('user_id', paymentReceipt.recipientUserId).limit(1).maybeSingle();
       if (!business?.id) return window.location.origin;
-      const { data: company } = await supabase.from('cmms_company_profiles')
-        .select('id').eq('pichin_business_profile_id', business.id).maybeSingle();
-      const website = company?.id ? `${window.location.origin}/notices/${company.id}` : business.website;
+      const businessSite = await getStoreWebsiteUrl({ businessProfileId: business.id });
+      const website = businessSite ?? business.website;
       return website ? (/^https?:\/\//i.test(website) ? website : `https://${website}`) : window.location.origin;
     } catch (error) {
       console.warn('Could not resolve public payment recipient website:', error);
