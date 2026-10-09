@@ -18,6 +18,7 @@ import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type C
 import { verifyPin } from '../services/pinService';
 import { productService, type Product } from '../services/productService';
 import type { ImportStore } from '../services/journeyService';
+import { useVehicleClassQuotes, describeRates, formatUgxShort, type VehicleClassQuote } from '../services/vehicleRateService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
@@ -159,6 +160,87 @@ function useWalletSurchargePct(): number {
 }
 function payableFare(fare: number, paymentMethod: 'wallet' | 'cash' | 'company', surchargePct: number): number {
   return paymentMethod === 'wallet' ? Math.round(fare * (1 + surchargePct / 100)) : fare;
+}
+
+const VEHICLE_OPTIONS: { id: VehicleTypeFilter; label: string; icon: typeof Car }[] = [
+  { id: 'any', label: 'Any', icon: Sparkles },
+  { id: 'motorcycle', label: 'Boda', icon: Bike },
+  { id: 'car', label: 'Car', icon: Car },
+  { id: 'van', label: 'Van', icon: Truck },
+  { id: 'truck', label: 'Truck', icon: Truck },
+];
+
+// Boda / Car / Van / Truck each have their own fare rates, so once there is a
+// route the same trip is priced for every class side by side — the customer
+// sees what each vehicle costs (and how many are online) before choosing.
+// Without a route, or if the quote can't be loaded, it is just the chooser.
+function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod }: {
+  value: VehicleTypeFilter;
+  onChange: (v: VehicleTypeFilter) => void;
+  pickup: Location | null;
+  dropoff: Location | null;
+  paymentMethod: 'wallet' | 'cash' | 'company';
+}) {
+  const walletSurchargePct = useWalletSurchargePct();
+  const { quotes } = useVehicleClassQuotes(pickup?.coordinates ?? null, dropoff?.coordinates ?? null);
+  const quoteFor = (id: VehicleTypeFilter) => quotes?.find(q => q.vehicle_type === id) ?? null;
+  const priceOf = (q: VehicleClassQuote) => payableFare(q.fare, paymentMethod, walletSurchargePct);
+
+  const classPrices = (['motorcycle', 'car', 'van', 'truck'] as const)
+    .map(id => quoteFor(id))
+    .filter((q): q is VehicleClassQuote => !!q)
+    .map(priceOf);
+  const cheapest = classPrices.length ? Math.min(...classPrices) : null;
+  const selected = value === 'any' ? null : quoteFor(value);
+
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-5 gap-2">
+        {VEHICLE_OPTIONS.map(opt => {
+          const isSelected = value === opt.id;
+          const quote = quoteFor(opt.id);
+          const price = opt.id === 'any'
+            ? (cheapest != null ? `from ${formatUgxShort(cheapest)}` : null)
+            : (quote ? formatUgxShort(priceOf(quote)) : null);
+          return (
+            <button
+              key={opt.id}
+              type="button"
+              aria-pressed={isSelected}
+              onClick={() => onChange(opt.id)}
+              className={`flex flex-col items-center gap-1.5 rounded-2xl border-2 px-1 py-2.5 transition-all active:scale-[0.97] ${
+                isSelected ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200/70' : 'border-slate-200 hover:border-orange-300'
+              }`}
+            >
+              <span className={`grid h-10 w-10 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${
+                isSelected ? 'bg-gradient-to-br from-orange-500 to-amber-400 text-white' : 'bg-orange-50 text-orange-600'
+              }`}>
+                <opt.icon size={20} />
+              </span>
+              <span className={`text-[11px] font-semibold ${isSelected ? 'text-orange-700' : 'text-slate-600'}`}>{opt.label}</span>
+              {price && <span className="text-[10px] font-semibold leading-none text-slate-500">{price}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {quotes && (
+        <p className="text-[11px] text-slate-400 text-center">
+          Estimated price for this {quotes[0].distance_km.toFixed(1)} km trip, in UGX. Each driver's final price is shown before you book.
+        </p>
+      )}
+
+      {selected && (
+        <div className="rounded-xl border border-orange-100 bg-orange-50/60 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+          <span className="font-semibold text-orange-700">{selected.label} rates:</span>{' '}
+          {describeRates(selected).join(' · ')}.{' '}
+          <span className="font-semibold text-slate-700">
+            {selected.available_riders > 0 ? `${selected.available_riders} online now.` : 'None online right now.'}
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function EnhancedRideRequest({ customerId, fixedServiceType, showJourneyOption, openJourneyId, onJourneyClosed }: EnhancedRideRequestProps) {
@@ -2270,35 +2352,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             {/* Vehicle — matched against mbg_find_available_riders'
                 p_vehicle_types filter so a request only reaches drivers of
                 the chosen type. */}
-            <div className="grid grid-cols-5 gap-2">
-              {([
-                { id: 'any' as VehicleTypeFilter, label: 'Any', icon: Sparkles },
-                { id: 'motorcycle' as VehicleTypeFilter, label: 'Boda', icon: Bike },
-                { id: 'car' as VehicleTypeFilter, label: 'Car', icon: Car },
-                { id: 'van' as VehicleTypeFilter, label: 'Van', icon: Truck },
-                { id: 'truck' as VehicleTypeFilter, label: 'Truck', icon: Truck },
-              ]).map(opt => {
-                const selected = vehicleTypeFilter === opt.id;
-                return (
-                  <button
-                    key={opt.id}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => setVehicleTypeFilter(opt.id)}
-                    className={`flex flex-col items-center gap-1.5 rounded-2xl border-2 px-1 py-2.5 transition-all active:scale-[0.97] ${
-                      selected ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200/70' : 'border-slate-200 hover:border-orange-300'
-                    }`}
-                  >
-                    <span className={`grid h-10 w-10 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${
-                      selected ? 'bg-gradient-to-br from-orange-500 to-amber-400 text-white' : 'bg-orange-50 text-orange-600'
-                    }`}>
-                      <opt.icon size={20} />
-                    </span>
-                    <span className={`text-[11px] font-semibold ${selected ? 'text-orange-700' : 'text-slate-600'}`}>{opt.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <VehicleClassPicker
+              value={vehicleTypeFilter}
+              onChange={setVehicleTypeFilter}
+              pickup={selectedPickup}
+              dropoff={selectedDropoff}
+              paymentMethod={paymentMethod}
+            />
 
             {/* Power / rain cover — only mean anything for a boda
                 (motorcycle/bicycle/tuktuk); a car/van/truck has neither
@@ -2598,6 +2658,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         )}
         <p className="text-[11px] text-slate-400 text-center">
           We'll offer it to the nearest rider first — if they don't respond in 10s, it moves to the next one automatically.
+          {!needsCrossBorderPath && vehicleTypeFilter === 'any' && ' Boda, car, van and truck are priced differently, so the fare follows whichever vehicle accepts — pick a vehicle type above to fix the price.'}
         </p>
       </div>
 
