@@ -36,6 +36,9 @@ interface RideRow {
   power_type_requested: string | null;
   umbrella_requested: boolean;
   order_notes: string | null;
+  // A van / truck booking's declared load.
+  cargo_weight_kg?: number | null;
+  cargo_class?: string | null;
   // A "Send a parcel" journey's courier ride: what is being carried, and for whom.
   is_parcel?: boolean;
   parcel_description?: string | null;
@@ -690,7 +693,7 @@ function RideSummary({ ride, live, hidePrice = false }: { ride: RideRow; live?: 
       </ol>
 
       {/* Trip facts */}
-      {(ride.distance_km != null || ride.duration_minutes != null || ride.power_type_requested || ride.umbrella_requested) && (
+      {(ride.distance_km != null || ride.duration_minutes != null || ride.power_type_requested || ride.umbrella_requested || ride.cargo_weight_kg != null) && (
         <div className="flex flex-wrap items-center gap-2">
           {ride.distance_km != null && (
             <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
@@ -700,6 +703,17 @@ function RideSummary({ ride, live, hidePrice = false }: { ride: RideRow; live?: 
           {ride.duration_minutes != null && (
             <span className="rounded-full bg-purple-100 px-2.5 py-1 text-xs font-semibold text-purple-700">
               ~{ride.duration_minutes} min
+            </span>
+          )}
+          {ride.cargo_weight_kg != null && (
+            <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+              <Package size={12} />
+              {Number(ride.cargo_weight_kg) >= 1000
+                ? `${Number((Number(ride.cargo_weight_kg) / 1000).toFixed(2))} t`
+                : `${Number(ride.cargo_weight_kg)} kg`}
+              {ride.cargo_class && ride.cargo_class !== 'standard' && (
+                <span className="capitalize"> · {ride.cargo_class === 'refrigerated' ? 'chilled' : ride.cargo_class}</span>
+              )}
             </span>
           )}
           {ride.power_type_requested && (
