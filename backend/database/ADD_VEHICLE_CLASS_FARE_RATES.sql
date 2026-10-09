@@ -47,7 +47,7 @@
 -- deliberately.
 --
 -- Run after ADD_ICANERA_UNIFIED_PLATFORM_FEE.sql (mbg_compute_ride_split),
--- ADD_ADMIN_VERIFIED_STORE_DRIVERS.sql (latest mbg_find_available_riders),
+-- FIX_MBG_FIND_AVAILABLE_RIDERS_VARCHAR_MISMATCH.sql (latest mbg_find_available_riders),
 -- ADD_JOURNEY_PREPAID_LEG_FARES.sql (is_journey_prepaid + latest pricing
 -- trigger) and ADD_AUTO_DISPATCH_CASCADE.sql. Safe to re-run.
 -- ============================================================================
@@ -318,7 +318,7 @@ GRANT EXECUTE ON FUNCTION public.mbg_dev_set_vehicle_fare_rate(TEXT, NUMERIC, NU
 
 
 -- ----------------------------------------------------------------------------
--- 6. mbg_find_available_riders — same as ADD_ADMIN_VERIFIED_STORE_DRIVERS.sql
+-- 6. mbg_find_available_riders — same as FIX_MBG_FIND_AVAILABLE_RIDERS_VARCHAR_MISMATCH.sql
 --    (same signature and columns) except each card's fare is now priced for
 --    that rider's own vehicle class.
 -- ----------------------------------------------------------------------------
@@ -391,7 +391,7 @@ BEGIN
     public.mbg_price_ride_for_rider(r, v_distance_km, v_multiplier),
     v_distance_km,
     v_multiplier,
-    CASE WHEN r.admin_verified_at IS NOT NULL THEN bp.business_name ELSE NULL END,
+    CASE WHEN r.admin_verified_at IS NOT NULL THEN bp.business_name::TEXT ELSE NULL END,
     r.admin_verified_at IS NOT NULL
   FROM public.mbg_riders r
   JOIN public.mbg_users u ON u.id = r.user_id
@@ -412,9 +412,9 @@ BEGIN
     AND (p_vehicle_types IS NULL OR r.vehicle_type::TEXT = ANY(p_vehicle_types))
     AND (p_business_profile_id IS NULL OR r.business_profile_id = p_business_profile_id)
   -- Nearest rider first (real GPS/home distance); "knows this destination"
-  -- and admin-verified store driver only break ties among comparably-close
-  -- riders, then rating.
-  ORDER BY dist.km ASC NULLS LAST, 13 DESC, 18 DESC, r.rating DESC
+  -- (column 14) and admin-verified store driver (column 19) only break ties
+  -- among comparably-close riders, then rating.
+  ORDER BY dist.km ASC NULLS LAST, 14 DESC, 19 DESC, r.rating DESC
   LIMIT p_limit;
 END;
 $$;
