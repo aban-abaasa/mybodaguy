@@ -14,19 +14,26 @@
 --     a 200 km truck run is not priced like 200 one-km hops. Trucks and vans
 --     earn more per trip but the long-distance customer gets a fair price.
 --
--- A class left blank (NULL) falls back to the old global ride.* settings, so
--- boda / bicycle / tuktuk price EXACTLY as before until a developer decides
--- otherwise. car / van / truck are seeded with sensible UGX defaults that a
--- developer edits from the Developer Dashboard (Commissions tab -> "Fare rates
--- by vehicle").
+-- Each class's rates are, by default, a MULTIPLE of the boda rate: a class
+-- left blank (NULL) uses the global ride.* settings times its rate_multiplier.
+-- Seeded multiples: car 2.5x, van 5x, truck 10x (boda / bicycle / tuktuk 1x, so
+-- they price EXACTLY as before). Because it is a multiple of the live boda rate,
+-- changing ride.base_fare / ride.per_km_rate moves every class with it. A
+-- developer can instead type an explicit UGX amount for any field, or change
+-- the multiple, from the Developer Dashboard (Commissions tab -> "Fare rates by
+-- vehicle").
 --
 -- Who sees what:
 --   · customers  — mbg_quote_vehicle_classes() prices the SAME trip for every
 --                  class side by side (with how many are online), and each
 --                  rider card shows the fare for that rider's own vehicle;
---   · riders     — the rate card for their class is readable (public table) and
---                  is shown on their dashboard, so they know what a trip pays
---                  before they accept;
+--   · riders     — the rates for their class are shown on their dashboard
+--                  (through mbg_quote_vehicle_classes), so they know what a trip
+--                  pays before they accept;
+--   · the multiples (car 2.5x, van 5x, truck 10x) are an internal pricing knob:
+--                  customers and riders see the resulting prices and rates, never
+--                  the multiple. The table is locked to developers; everyone else
+--                  reads only the resolved numbers through the quote function;
 --   · companies  — a transport company's own base / per-km / minimum
 --                  (mbg_business_pricing_settings) still win, field by field;
 --                  anything it left blank falls back to the rider's CLASS
@@ -58,7 +65,10 @@
 CREATE TABLE IF NOT EXISTS public.mbg_vehicle_fare_rates (
   vehicle_type TEXT PRIMARY KEY,
   label TEXT NOT NULL,
-  -- NULL = use the platform-wide ride.* setting.
+  -- How many times the boda rate this class charges. Applies to every base /
+  -- per-km / minimum field left blank below (blank = ride.* setting x this).
+  rate_multiplier NUMERIC(6,2) NOT NULL DEFAULT 1 CHECK (rate_multiplier > 0),
+  -- NULL = the platform-wide ride.* setting times rate_multiplier.
   base_fare NUMERIC(12,2) CHECK (base_fare IS NULL OR base_fare >= 0),
   per_km_rate NUMERIC(12,2) CHECK (per_km_rate IS NULL OR per_km_rate >= 0),
   min_fare NUMERIC(12,2) CHECK (min_fare IS NULL OR min_fare >= 0),
@@ -74,32 +84,54 @@ CREATE TABLE IF NOT EXISTS public.mbg_vehicle_fare_rates (
     CHECK ((long_haul_after_km IS NULL) = (long_haul_per_km_rate IS NULL))
 );
 
+-- The table may already exist from the first version of this migration.
+ALTER TABLE public.mbg_vehicle_fare_rates
+  ADD COLUMN IF NOT EXISTS rate_multiplier NUMERIC(6,2) NOT NULL DEFAULT 1 CHECK (rate_multiplier > 0);
+
 ALTER TABLE public.mbg_vehicle_fare_rates ENABLE ROW LEVEL SECURITY;
 
--- The rate card is public information (customers compare it, riders read their
--- own class's). Writes go only through mbg_dev_set_vehicle_fare_rate.
+-- Locked: no client reads or writes the table directly (the first version of this
+-- migration let everyone SELECT it, so that is withdrawn here). Developers read
+-- it through mbg_dev_get_vehicle_fare_rates and write it through
+-- mbg_dev_set_vehicle_fare_rate; customers and riders get the resolved prices
+-- and rates from mbg_quote_vehicle_classes. All three are SECURITY DEFINER.
 DROP POLICY IF EXISTS mbg_vehicle_fare_rates_read ON public.mbg_vehicle_fare_rates;
-CREATE POLICY mbg_vehicle_fare_rates_read ON public.mbg_vehicle_fare_rates
-  FOR SELECT TO anon, authenticated USING (true);
-GRANT SELECT ON public.mbg_vehicle_fare_rates TO anon, authenticated;
+REVOKE ALL ON public.mbg_vehicle_fare_rates FROM PUBLIC, anon, authenticated;
 
 -- ----------------------------------------------------------------------------
 -- 2. Seed. ON CONFLICT DO NOTHING: re-running never overwrites a developer's edits.
 --    Boda classes stay NULL = the existing global ride.* rates, unchanged.
 -- ----------------------------------------------------------------------------
 INSERT INTO public.mbg_vehicle_fare_rates
-  (vehicle_type, label, base_fare, per_km_rate, min_fare, loading_fee, long_haul_after_km, long_haul_per_km_rate, sort_order)
+  (vehicle_type, label, rate_multiplier, base_fare, per_km_rate, min_fare, loading_fee, long_haul_after_km, long_haul_per_km_rate, sort_order)
 VALUES
-  ('motorcycle', 'Boda',    NULL,  NULL, NULL,     0, NULL, NULL, 1),
-  ('bicycle',    'Bicycle', NULL,  NULL, NULL,     0, NULL, NULL, 2),
-  ('tuktuk',     'Tuktuk',  NULL,  NULL, NULL,     0, NULL, NULL, 3),
-  ('car',        'Car',     3000,  1500, 5000,     0,   60, 1200, 4),
-  ('van',        'Van',     8000,  2500, 15000, 5000,   50, 1800, 5),
-  ('truck',      'Truck',  15000,  4000, 30000, 10000,  80, 3000, 6)
+  ('motorcycle', 'Boda',     1, NULL, NULL, NULL,     0, NULL, NULL, 1),
+  ('bicycle',    'Bicycle',  1, NULL, NULL, NULL,     0, NULL, NULL, 2),
+  ('tuktuk',     'Tuktuk',   1, NULL, NULL, NULL,     0, NULL, NULL, 3),
+  ('car',        'Car',    2.5, NULL, NULL, NULL,     0,   60, 2000, 4),
+  ('van',        'Van',      5, NULL, NULL, NULL,  5000,   50, 3500, 5),
+  ('truck',      'Truck',   10, NULL, NULL, NULL, 10000,   80, 7000, 6)
 ON CONFLICT (vehicle_type) DO NOTHING;
 
+-- The first version of this migration seeded car / van / truck with fixed UGX
+-- amounts. Where a row is still EXACTLY that untouched seed, move it to the
+-- multiple-of-boda model; a row a developer has since edited is left alone.
+UPDATE public.mbg_vehicle_fare_rates SET rate_multiplier = 2.5, base_fare = NULL, per_km_rate = NULL, min_fare = NULL,
+       loading_fee = 0, long_haul_after_km = 60, long_haul_per_km_rate = 2000, updated_at = now()
+ WHERE vehicle_type = 'car' AND rate_multiplier = 1 AND base_fare = 3000 AND per_km_rate = 1500 AND min_fare = 5000
+   AND loading_fee = 0 AND long_haul_after_km = 60 AND long_haul_per_km_rate = 1200;
+UPDATE public.mbg_vehicle_fare_rates SET rate_multiplier = 5, base_fare = NULL, per_km_rate = NULL, min_fare = NULL,
+       loading_fee = 5000, long_haul_after_km = 50, long_haul_per_km_rate = 3500, updated_at = now()
+ WHERE vehicle_type = 'van' AND rate_multiplier = 1 AND base_fare = 8000 AND per_km_rate = 2500 AND min_fare = 15000
+   AND loading_fee = 5000 AND long_haul_after_km = 50 AND long_haul_per_km_rate = 1800;
+UPDATE public.mbg_vehicle_fare_rates SET rate_multiplier = 10, base_fare = NULL, per_km_rate = NULL, min_fare = NULL,
+       loading_fee = 10000, long_haul_after_km = 80, long_haul_per_km_rate = 7000, updated_at = now()
+ WHERE vehicle_type = 'truck' AND rate_multiplier = 1 AND base_fare = 15000 AND per_km_rate = 4000 AND min_fare = 30000
+   AND loading_fee = 10000 AND long_haul_after_km = 80 AND long_haul_per_km_rate = 3000;
+
 -- ----------------------------------------------------------------------------
--- 3. Resolve a class's effective rates (blank -> the global ride.* setting).
+-- 3. Resolve a class's effective rates (blank -> the global ride.* setting x the
+--    class's rate_multiplier, i.e. a multiple of the boda rate).
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.mbg_resolve_vehicle_rates(p_vehicle_type TEXT)
 RETURNS TABLE (
@@ -108,9 +140,9 @@ RETURNS TABLE (
 )
 LANGUAGE sql STABLE SET search_path = public AS $$
   SELECT
-    COALESCE(v.base_fare,   public.mbg_get_setting_numeric('ride.base_fare', 1000)),
-    COALESCE(v.per_km_rate, public.mbg_get_setting_numeric('ride.per_km_rate', 1000)),
-    COALESCE(v.min_fare,    public.mbg_get_setting_numeric('ride.minimum_fare', 2000)),
+    COALESCE(v.base_fare,   public.mbg_get_setting_numeric('ride.base_fare', 1000)    * COALESCE(v.rate_multiplier, 1)),
+    COALESCE(v.per_km_rate, public.mbg_get_setting_numeric('ride.per_km_rate', 1000)  * COALESCE(v.rate_multiplier, 1)),
+    COALESCE(v.min_fare,    public.mbg_get_setting_numeric('ride.minimum_fare', 2000) * COALESCE(v.rate_multiplier, 1)),
     COALESCE(v.loading_fee, 0),
     v.long_haul_after_km,
     v.long_haul_per_km_rate
@@ -220,6 +252,9 @@ REVOKE ALL ON FUNCTION public.mbg_price_ride_for_rider(public.mbg_riders, NUMERI
 -- no company rates (those apply to a specific rider, shown on that rider's
 -- card). Callable without signing in, like mbg_estimate_fare.
 -- ----------------------------------------------------------------------------
+-- (Return columns changed since the first version, so it is dropped first.)
+DROP FUNCTION IF EXISTS public.mbg_quote_vehicle_classes(NUMERIC, NUMERIC, NUMERIC, NUMERIC);
+
 CREATE OR REPLACE FUNCTION public.mbg_quote_vehicle_classes(
   p_pickup_lat NUMERIC, p_pickup_lng NUMERIC,
   p_dropoff_lat NUMERIC, p_dropoff_lng NUMERIC
@@ -261,11 +296,32 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
 $$;
 GRANT EXECUTE ON FUNCTION public.mbg_quote_vehicle_classes(NUMERIC, NUMERIC, NUMERIC, NUMERIC) TO anon, authenticated;
 
+-- mbg_dev_get_vehicle_fare_rates — developer reads the raw rate cards (including
+-- the multiples and any blank fields), which the locked table no longer allows directly.
+CREATE OR REPLACE FUNCTION public.mbg_dev_get_vehicle_fare_rates()
+RETURNS SETOF public.mbg_vehicle_fare_rates
+LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM public.mbg_users
+    WHERE id = auth.uid() AND role_type = 'developer' AND is_active = true
+  ) THEN
+    RAISE EXCEPTION 'unauthorized';
+  END IF;
+
+  RETURN QUERY SELECT * FROM public.mbg_vehicle_fare_rates ORDER BY sort_order;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.mbg_dev_get_vehicle_fare_rates() TO authenticated;
+
 -- mbg_dev_set_vehicle_fare_rate — developer edits one class's rate card.
--- A blank (NULL) base / per-km / minimum goes back to the global ride.* setting;
--- a blank long-haul pair turns the long-haul tier off.
+-- A blank (NULL) base / per-km / minimum is the global ride.* setting times the
+-- class's multiple; a blank long-haul pair turns the long-haul tier off.
+DROP FUNCTION IF EXISTS public.mbg_dev_set_vehicle_fare_rate(TEXT, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC);
+
 CREATE OR REPLACE FUNCTION public.mbg_dev_set_vehicle_fare_rate(
   p_vehicle_type TEXT,
+  p_rate_multiplier NUMERIC DEFAULT 1,
   p_base_fare NUMERIC DEFAULT NULL,
   p_per_km_rate NUMERIC DEFAULT NULL,
   p_min_fare NUMERIC DEFAULT NULL,
@@ -285,6 +341,9 @@ BEGIN
     RAISE EXCEPTION 'unauthorized';
   END IF;
 
+  IF p_rate_multiplier IS NULL OR p_rate_multiplier <= 0 THEN
+    RAISE EXCEPTION 'the rate multiple must be more than 0';
+  END IF;
   IF COALESCE(p_base_fare, 0) < 0 OR COALESCE(p_per_km_rate, 0) < 0 OR COALESCE(p_min_fare, 0) < 0
      OR COALESCE(p_loading_fee, 0) < 0 OR COALESCE(p_long_haul_per_km_rate, 0) < 0 THEN
     RAISE EXCEPTION 'fare amounts cannot be negative';
@@ -297,7 +356,8 @@ BEGIN
   END IF;
 
   UPDATE public.mbg_vehicle_fare_rates
-  SET base_fare = p_base_fare,
+  SET rate_multiplier = p_rate_multiplier,
+      base_fare = p_base_fare,
       per_km_rate = p_per_km_rate,
       min_fare = p_min_fare,
       loading_fee = COALESCE(p_loading_fee, 0),
@@ -314,7 +374,7 @@ BEGIN
   RETURN v_row;
 END;
 $$;
-GRANT EXECUTE ON FUNCTION public.mbg_dev_set_vehicle_fare_rate(TEXT, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.mbg_dev_set_vehicle_fare_rate(TEXT, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC) TO authenticated;
 
 
 -- ----------------------------------------------------------------------------

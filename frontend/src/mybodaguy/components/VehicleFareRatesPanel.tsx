@@ -7,6 +7,7 @@ import { quoteVehicleClasses, type VehicleClassQuote } from '../services/vehicle
 type RateRow = {
   vehicle_type: string;
   label: string;
+  rate_multiplier: number;
   base_fare: number | null;
   per_km_rate: number | null;
   min_fare: number | null;
@@ -16,13 +17,14 @@ type RateRow = {
   sort_order: number;
 };
 
-type Field = 'base_fare' | 'per_km_rate' | 'min_fare' | 'loading_fee' | 'long_haul_after_km' | 'long_haul_per_km_rate';
+type Field = 'rate_multiplier' | 'base_fare' | 'per_km_rate' | 'min_fare' | 'loading_fee' | 'long_haul_after_km' | 'long_haul_per_km_rate';
 type Draft = Record<Field, string>;
 
 const FIELDS: { key: Field; label: string; hint: string }[] = [
-  { key: 'base_fare', label: 'Base fare (UGX)', hint: 'default' },
-  { key: 'per_km_rate', label: 'Per km (UGX)', hint: 'default' },
-  { key: 'min_fare', label: 'Minimum fare (UGX)', hint: 'default' },
+  { key: 'rate_multiplier', label: 'Multiple of boda rate (×)', hint: '1' },
+  { key: 'base_fare', label: 'Base fare (UGX)', hint: 'boda × multiple' },
+  { key: 'per_km_rate', label: 'Per km (UGX)', hint: 'boda × multiple' },
+  { key: 'min_fare', label: 'Minimum fare (UGX)', hint: 'boda × multiple' },
   { key: 'loading_fee', label: 'Loading fee (UGX)', hint: '0' },
   { key: 'long_haul_after_km', label: 'Long haul after (km)', hint: 'off' },
   { key: 'long_haul_per_km_rate', label: 'Long haul per km (UGX)', hint: 'off' },
@@ -35,6 +37,7 @@ const REF_SHORT = { lat: 0.4376, lng: 32.5825 };
 const REF_LONG = { lat: 1.2469, lng: 32.5825 };
 
 const toDraft = (row: RateRow): Draft => ({
+  rate_multiplier: String(row.rate_multiplier ?? 1),
   base_fare: row.base_fare == null ? '' : String(row.base_fare),
   per_km_rate: row.per_km_rate == null ? '' : String(row.per_km_rate),
   min_fare: row.min_fare == null ? '' : String(row.min_fare),
@@ -69,7 +72,7 @@ export default function VehicleFareRatesPanel() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('mbg_vehicle_fare_rates').select('*').order('sort_order');
+      const { data, error } = await supabase.rpc('mbg_dev_get_vehicle_fare_rates');
       if (error) throw error;
       const list = (data || []) as RateRow[];
       setRows(list);
@@ -92,6 +95,10 @@ export default function VehicleFareRatesPanel() {
       toast.error('Enter numbers of 0 or more, or leave a field blank');
       return;
     }
+    if (values.rate_multiplier == null || values.rate_multiplier <= 0) {
+      toast.error('The multiple of the boda rate must be more than 0');
+      return;
+    }
     if ((values.long_haul_after_km == null) !== (values.long_haul_per_km_rate == null)) {
       toast.error('Set both long-haul fields, or leave both blank');
       return;
@@ -104,6 +111,7 @@ export default function VehicleFareRatesPanel() {
     try {
       const { data, error } = await supabase.rpc('mbg_dev_set_vehicle_fare_rate', {
         p_vehicle_type: row.vehicle_type,
+        p_rate_multiplier: values.rate_multiplier,
         p_base_fare: values.base_fare,
         p_per_km_rate: values.per_km_rate,
         p_min_fare: values.min_fare,
@@ -133,8 +141,9 @@ export default function VehicleFareRatesPanel() {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Fare rates by vehicle</h2>
           <p className="text-sm text-slate-600 mt-1">
-            Boda, car, van and truck each price from their own rate card. Leave base / per-km / minimum blank to use the platform default
-            (the <span className="font-mono">ride.*</span> settings). A loading fee is a flat handling charge added to every trip; long haul drops the
+            Boda, car, van and truck each price from their own rate card. By default a class charges a multiple of the boda rate
+            (the <span className="font-mono">ride.*</span> settings × the multiple, e.g. car 2.5×, van 5×, truck 10×), so changing the boda rate moves every class.
+            Type an amount in base / per-km / minimum to override it with a fixed UGX figure. A loading fee is a flat handling charge added to every trip; long haul drops the
             per-km rate past a distance, so a 200 km run isn't priced like 200 short hops. A transport company's own rates still win over these.
           </p>
         </div>
