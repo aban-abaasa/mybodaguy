@@ -8,6 +8,7 @@ import { trackRideCall, trackUIInteraction } from '../../services/featureAnalyti
 import RideCommsBar from './RideCommsBar';
 import ProductPicker, { CartLine } from './ProductPicker';
 import LocationPickerMap from './LocationPickerMap';
+import { locateDevice } from '../utils/geolocation';
 import LiveTrackingMap from './LiveTrackingMap';
 import JourneyBookingFlow from './JourneyBookingFlow';
 import JourneyTracker from './JourneyTracker';
@@ -510,12 +511,14 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // close. Silent on denial/failure: it's an enhancement, not a
   // requirement — the store list just stays in its existing name order.
   useEffect(() => {
-    if (serviceType !== 'delivery' || customerGpsLocation || !navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setCustomerGpsLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => {},
-      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
-    );
+    if (serviceType !== 'delivery' || customerGpsLocation) return;
+    let cancelled = false;
+    locateDevice().then((result) => {
+      if (!cancelled && result.ok) setCustomerGpsLocation({ lat: result.fix.lat, lng: result.fix.lng });
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [serviceType, customerGpsLocation]);
 
   // Bounds for the delivery-window picker — public settings, safe to read

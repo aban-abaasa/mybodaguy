@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarClock, ChevronRight, Loader, ShoppingBag, Store } from 'lucide-react';
+import { CalendarClock, ChevronRight, ExternalLink, Loader, ShoppingBag, Store } from 'lucide-react';
 import {
-  InstallmentPlan, STATUS_LABELS, formatMoney, getMyBusinessAccounts, getMyInstallmentPlans,
+  InstallmentPlan, STATUS_LABELS, businessSiteUrl, formatMoney, getMyBusinessAccounts, getMyInstallmentPlans,
 } from '../../services/installmentService';
 import InstallmentPlanView from './InstallmentPlanView';
 import InstallmentShop from './InstallmentShop';
@@ -72,11 +72,11 @@ export default function InstallmentsHub({ customerName, customerPhone }: Props) 
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">My accounts</p>
               <div className="space-y-2">
                 {accounts.map(a => (
-                  <div key={a.business_profile_id} className="classic-card flex items-center gap-3 p-3">
+                  <a key={a.business_profile_id} href={businessSiteUrl(a.business_profile_id)} target="_blank" rel="noopener noreferrer" className="classic-card flex items-center gap-3 p-3">
                     <Store size={20} className="shrink-0 text-orange-500" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium text-slate-800">{a.business_name}</p>
-                      <p className="text-[11px] text-slate-400">{a.open_plans} open plan{a.open_plans === 1 ? '' : 's'}</p>
+                      <p className="flex items-center gap-1 truncate text-sm font-medium text-slate-800">{a.business_name} <ExternalLink size={12} className="shrink-0 text-slate-400" /></p>
+                      <p className="text-[11px] text-slate-400">{a.open_plans} open plan{a.open_plans === 1 ? '' : 's'} · opens on icanera.space</p>
                     </div>
                     <div className="shrink-0 text-right">
                       {a.totals.filter(t => t.paid_amount > 0 || t.balance_amount > 0).map(t => (
@@ -86,7 +86,7 @@ export default function InstallmentsHub({ customerName, customerPhone }: Props) 
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </a>
                 ))}
               </div>
             </div>
