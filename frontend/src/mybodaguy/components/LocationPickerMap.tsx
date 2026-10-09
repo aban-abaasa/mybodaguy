@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
-import { Locate, Navigation, Search, Loader2 } from 'lucide-react';
+import { Locate, MapPin, Navigation, Search, Loader2 } from 'lucide-react';
 import type { Location } from '../data/mockLocations';
-import { geocodeAddress, reverseGeocode } from '../services/geocodeService';
+import { geocodeAddress, reverseGeocode, searchAddressSuggestions, type AddressSuggestion } from '../services/geocodeService';
 import { getRoute } from '../services/routingService';
+import { describeGeoFailure, getRememberedLocation, locateDevice } from '../utils/geolocation';
 
 // Kampala city center — used only as a fallback when GPS is denied/unavailable.
 const DEFAULT_CENTER: [number, number] = [0.3157, 32.5756];
 const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+// A network (Wi-Fi / cell) fix can be kilometres out. Past this the pin is a
+// starting point the customer should nudge, not their exact spot.
+const APPROXIMATE_FIX_METERS = 1000;
 const TILE_ATTRIBUTION = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
 
 // Self-contained colored pin (no external icon assets to fetch/bundle).
@@ -19,8 +23,9 @@ function pinIcon(color: string): L.DivIcon {
   return L.divIcon({ html: svg, className: '', iconSize: [30, 42], iconAnchor: [15, 42] });
 }
 
-async function toLocation(idPrefix: string, name: string, lat: number, lng: number): Promise<Location> {
-  const address = (await reverseGeocode(lat, lng)) || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+// knownAddress skips the reverse lookup when a search result already names the place.
+async function toLocation(idPrefix: string, name: string, lat: number, lng: number, knownAddress?: string): Promise<Location> {
+  const address = knownAddress || (await reverseGeocode(lat, lng)) || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   return { id: `${idPrefix}_${lat.toFixed(5)}_${lng.toFixed(5)}`, name, area: name, fullAddress: address, coordinates: { lat, lng } };
 }
 
@@ -76,7 +81,11 @@ export default function LocationPickerMap({
   const [routeSummary, setRouteSummary] = useState<{ distanceKm: number; durationMin: number } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [locationError, setLocationError] = useState<string | null>(null);
+  // Not an error: GPS being unavailable on its own is normal (desktop, indoors,
+  // permission not granted yet) and the map is still fully usable by search/tap.
+  const [locationNotice, setLocationNotice] = useState<string | null>(null);
 
   // Init the map once.
   useEffect(() => {
@@ -114,22 +123,52 @@ export default function LocationPickerMap({
   // auto-fill or a typed suggestion).
   useEffect(() => {
     const already = gpsTarget === 'dropoff' ? dropoff : pickup;
-    if (already || !autoLocateGPS || !navigator.geolocation) return;
+    if (already || !autoLocateGPS || !mapReady) return;
+    let cancelled = false;
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const loc = await toLocation('gps', 'My Location', pos.coords.latitude, pos.coords.longitude);
+    locateDevice().then(async (result) => {
+      if (cancelled) return;
+      if (result.ok) {
+        const { fix } = result;
+        const loc = await toLocation('gps', 'My Location', fix.lat, fix.lng);
+        if (cancelled) return;
         (gpsTarget === 'dropoff' ? onDropoffChange : onPickupChange)(loc);
+        if (fix.accuracy > APPROXIMATE_FIX_METERS) {
+          setLocationNotice('This is an approximate location — drag the pin to your exact spot.');
+        }
         setLocating(false);
-      },
-      () => {
-        setLocating(false);
-        setLocationError('Location access was denied or unavailable. Search for your area or tap the map instead.');
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+        return;
+      }
+      setLocating(false);
+      setLocationNotice(describeGeoFailure(result.failure));
+      await centerOnBestGuess();
+    });
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady]);
+
+  // With no GPS the map would sit on Kampala for everyone. Open on the last
+  // place this device was located, else the country the page is searching in.
+  const centerOnBestGuess = async () => {
+    const map = mapRef.current;
+    if (!map || pickupMarkerRef.current || dropoffMarkerRef.current) return;
+    const remembered = getRememberedLocation();
+    if (remembered) {
+      map.setView([remembered.lat, remembered.lng], 14);
+      return;
+    }
+    if (!searchCountry) return;
+    try {
+      const country = await geocodeAddress(searchCountry);
+      if (country && mapRef.current === map && !pickupMarkerRef.current && !dropoffMarkerRef.current) {
+        map.setView([country.lat, country.lng], 6);
+      }
+    } catch {
+      // Stay on the default center — search and tap still work.
+    }
+  };
 
   // Keep the pickup marker in sync with whatever the parent currently has
   // selected — from GPS, a typed suggestion, a supermarket auto-fill, or a
@@ -191,32 +230,37 @@ export default function LocationPickerMap({
     };
   }, [mapReady, pickup?.coordinates.lat, pickup?.coordinates.lng, dropoff?.coordinates.lat, dropoff?.coordinates.lng, onRouteInfo]);
 
-  const useMyLocation = () => {
-    if (!navigator.geolocation || (gpsTarget === 'pickup' && pickupLocked)) {
-      setLocationError('GPS is unavailable. Search for your area or tap the map instead.');
+  const useMyLocation = async () => {
+    if (gpsTarget === 'pickup' && pickupLocked) {
+      setLocationError('This pickup is the store\'s own location and can\'t be moved. Choose the drop-off on the map instead.');
       return;
     }
     setLocating(true);
     setLocationError(null);
-    navigator.geolocation.getCurrentPosition(
-      async (pos) => {
-        const loc = await toLocation('gps', 'My Location', pos.coords.latitude, pos.coords.longitude);
-        (gpsTarget === 'dropoff' ? onDropoffChange : onPickupChange)(loc);
-        setLocating(false);
-      },
-      () => {
-        setLocating(false);
-        setLocationError('Could not access your location. On a phone, allow location permission and use HTTPS, or search/tap the map.');
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    setLocationNotice(null);
+    const result = await locateDevice();
+    if (!result.ok) {
+      setLocating(false);
+      setLocationError(describeGeoFailure(result.failure));
+      return;
+    }
+    const { fix } = result;
+    const loc = await toLocation('gps', 'My Location', fix.lat, fix.lng);
+    (gpsTarget === 'dropoff' ? onDropoffChange : onPickupChange)(loc);
+    mapRef.current?.setView([fix.lat, fix.lng], fix.accuracy > APPROXIMATE_FIX_METERS ? 14 : 16);
+    if (fix.accuracy > APPROXIMATE_FIX_METERS) {
+      setLocationNotice('This is an approximate location — drag the pin to your exact spot.');
+    }
+    setLocating(false);
   };
 
   const searchLocation = async () => {
     if (!searchQuery.trim()) return;
     setSearching(true);
     setLocationError(null);
+    setLocationNotice(null);
     try {
+      setSuggestions([]);
       const result = await geocodeAddress(searchQuery, searchCountry);
       if (!result) {
         setLocationError('No location found. Try a full address, landmark, neighborhood, or city.');
@@ -232,8 +276,38 @@ export default function LocationPickerMap({
     }
   };
 
+  // Real places while typing, not only after Enter: lets the person pick the
+  // exact shop / street / landmark instead of trusting the first match.
+  useEffect(() => {
+    let active = true;
+    const text = searchQuery.trim();
+    if (text.length < 3) {
+      setSuggestions([]);
+      return undefined;
+    }
+    const timer = window.setTimeout(async () => {
+      const found = await searchAddressSuggestions(text, searchCountry);
+      if (active) setSuggestions(found);
+    }, 450);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [searchQuery, searchCountry]);
+
+  const chooseSuggestion = async (place: AddressSuggestion) => {
+    setSuggestions([]);
+    setSearchQuery(place.displayName);
+    setLocationError(null);
+    setLocationNotice(null);
+    const loc = await toLocation(selectionMode, place.name, place.lat, place.lng, place.displayName);
+    (selectionMode === 'pickup' ? onPickupChange : onDropoffChange)(loc);
+    mapRef.current?.setView([place.lat, place.lng], 17);
+  };
+
   return (
     <div className="space-y-2">
+      <div className="relative">
       <div className="flex gap-2">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
@@ -248,6 +322,22 @@ export default function LocationPickerMap({
         <button type="button" onClick={searchLocation} disabled={searching || !searchQuery.trim()} className="rounded-lg bg-orange-500 px-4 text-white disabled:bg-slate-300">
           {searching ? <Loader2 className="animate-spin" size={18} /> : <Search size={18} />}
         </button>
+      </div>
+      {suggestions.length > 0 && (
+        <ul className="absolute left-0 right-12 top-full z-[1000] mt-1 max-h-64 overflow-y-auto rounded-lg border-2 border-slate-200 bg-white shadow-xl">
+          {suggestions.map((place) => (
+            <li key={`${place.lat}_${place.lng}_${place.displayName}`}>
+              <button type="button" onClick={() => chooseSuggestion(place)} className="flex w-full items-start gap-3 border-b border-slate-100 px-4 py-3 text-left last:border-b-0 hover:bg-orange-50">
+                <MapPin className="mt-0.5 flex-shrink-0 text-orange-500" size={17} />
+                <span className="min-w-0">
+                  <span className="block truncate font-semibold text-slate-800">{place.name}</span>
+                  <span className="block text-xs text-slate-600">{place.displayName}</span>
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       </div>
       <div className="relative rounded-lg border-2 border-slate-200" style={{ height, width: '100%' }}>
         <div ref={containerRef} className="h-full w-full rounded-lg" />
@@ -277,6 +367,7 @@ export default function LocationPickerMap({
         )}
       </div>
       {locationError && <p className="rounded-lg bg-red-50 p-2 text-xs text-red-700">{locationError}</p>}
+      {!locationError && locationNotice && <p className="rounded-lg bg-amber-50 p-2 text-xs text-amber-800">{locationNotice}</p>}
       <p className="text-xs text-slate-500">Search precisely, use your current location, or tap the map to set your {selectionMode}. Drag the pin to fine-tune it.</p>
     </div>
   );
