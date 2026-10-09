@@ -6,8 +6,8 @@
  * said no, the page is on plain HTTP, a laptop has no GPS chip, or a phone
  * indoors just couldn't get a satellite fix in 10s. Only the first one is
  * final. Everything else can usually still be answered by the network
- * (Wi-Fi / cell) position, so this tries that before giving up, remembers
- * the last good fix, and tells the caller *why* it failed so the UI can say
+ * (Wi-Fi / cell) position, so this asks for both at once, falls back to the
+ * last good fix, and tells the caller *why* it failed so the UI can say
  * something useful instead of one generic sentence.
  */
 
@@ -18,7 +18,7 @@ export interface GeoFix {
   lng: number;
   /** Metres. Network fixes are often hundreds of metres to kilometres off. */
   accuracy: number;
-  source: 'gps' | 'network';
+  source: 'gps' | 'network' | 'cached';
 }
 
 export type GeoResult = { ok: true; fix: GeoFix } | { ok: false; failure: GeoFailure };
@@ -82,29 +82,63 @@ function failureFromCode(code: number): GeoFailure {
   return 'unavailable';
 }
 
+/** How long the GPS lookup gets to improve on a network fix that has already arrived. */
+const GPS_GRACE_MS = 3000;
+/** Accuracy reported for a remembered location, so callers show the "approximate" hint. */
+const CACHED_ACCURACY_M = 5000;
+
+function toFix(position: GeolocationPosition, source: 'gps' | 'network'): GeoFix {
+  return { lat: position.coords.latitude, lng: position.coords.longitude, accuracy: position.coords.accuracy, source };
+}
+
 export async function locateDevice(): Promise<GeoResult> {
   if (typeof navigator === 'undefined' || !navigator.geolocation) return { ok: false, failure: 'unsupported' };
   // Browsers refuse geolocation outside HTTPS (localhost excepted) with the same
   // error code as a user's "Block" — surface the real reason.
   if (typeof window !== 'undefined' && window.isSecureContext === false) return { ok: false, failure: 'insecure' };
 
-  const accurate = await getPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 });
-  if (isPosition(accurate)) {
-    const fix: GeoFix = { lat: accurate.coords.latitude, lng: accurate.coords.longitude, accuracy: accurate.coords.accuracy, source: 'gps' };
+  // Ask for the satellite and the Wi-Fi / cell position at the same time instead of
+  // one after the other: indoors the GPS lookup can burn its whole timeout, and the
+  // network answer is usually back in a second or two.
+  const gpsRequest = getPosition({ enableHighAccuracy: true, timeout: 20_000, maximumAge: 60_000 });
+  const networkRequest = getPosition({ enableHighAccuracy: false, timeout: 20_000, maximumAge: 10 * 60_000 });
+
+  const gps = gpsRequest.then((r) => (isPosition(r) ? toFix(r, 'gps') : r));
+  const network = networkRequest.then((r) => (isPosition(r) ? toFix(r, 'network') : r));
+
+  // First answer wins; a network fix gets a short wait for a better GPS one.
+  const first = await Promise.race([gps, network]);
+  let fix: GeoFix | null = null;
+  let error: GeolocationPositionError | null = null;
+  if ('lat' in first) {
+    fix = first;
+    if (first.source === 'network') {
+      const better = await Promise.race([gps, new Promise<null>((resolve) => setTimeout(() => resolve(null), GPS_GRACE_MS))]);
+      if (better && 'lat' in better && better.accuracy < first.accuracy) fix = better;
+    }
+  } else {
+    // The faster request failed — the other one may still succeed.
+    const [g, n] = await Promise.all([gps, network]);
+    if ('lat' in g) fix = g;
+    else if ('lat' in n) fix = n;
+    else error = g.code === 1 || n.code === 1 ? (g.code === 1 ? g : n) : n;
+  }
+
+  if (fix) {
     rememberLocation(fix.lat, fix.lng);
     return { ok: true, fix };
   }
   // A "no" from the user is final — asking again only re-triggers the same denial.
-  if (accurate.code === 1) return { ok: false, failure: 'denied' };
+  if (error && error.code === 1) return { ok: false, failure: 'denied' };
 
-  // No GPS fix (indoors, laptop, desktop) — the network position is far better than nothing.
-  const coarse = await getPosition({ enableHighAccuracy: false, timeout: 15_000, maximumAge: 5 * 60_000 });
-  if (isPosition(coarse)) {
-    const fix: GeoFix = { lat: coarse.coords.latitude, lng: coarse.coords.longitude, accuracy: coarse.coords.accuracy, source: 'network' };
-    rememberLocation(fix.lat, fix.lng);
-    return { ok: true, fix };
+  // Nothing live (deep indoors, weak signal) — the last place this device was
+  // located is still a far better starting pin than an error; the caller shows
+  // the "approximate, drag the pin" hint because of the large accuracy.
+  const remembered = getRememberedLocation();
+  if (remembered) {
+    return { ok: true, fix: { lat: remembered.lat, lng: remembered.lng, accuracy: CACHED_ACCURACY_M, source: 'cached' } };
   }
-  return { ok: false, failure: failureFromCode(coarse.code) };
+  return { ok: false, failure: failureFromCode(error?.code ?? 2) };
 }
 
 /** What to tell the person, and what they can do instead — one line each, no jargon. */
