@@ -20,6 +20,7 @@ import RiderCover from '../components/cover/RiderCover';
 import LeadershipVote, { useLeadershipAttention } from '../components/LeadershipVote';
 import SupermarketDeliveryPool from '../components/SupermarketDeliveryPool';
 import RiderRideRequests from '../components/RiderRideRequests';
+import VehicleRateCard from '../components/VehicleRateCard';
 import RiderEscortRequests from '../components/RiderEscortRequests';
 import { supabase } from '../services/supabaseClient';
 import { computeOrderInsights, shortenLocation, type OrderInsights } from '../utils/orderInsights';
@@ -912,7 +913,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
         )}
 
         {activeTab === 'mode' && (
-          <RiderModeSelector riderId={user.id} vehicleType={activeVehicleType} />
+          <div className="space-y-4">
+            <VehicleRateCard vehicleType={activeVehicleType} />
+            <RiderModeSelector riderId={user.id} vehicleType={activeVehicleType} />
+          </div>
         )}
 
         {activeTab === 'locations' && (

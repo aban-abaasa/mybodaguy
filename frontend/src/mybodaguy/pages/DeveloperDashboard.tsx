@@ -15,6 +15,7 @@ import SupermarketProductManager from '../components/SupermarketProductManager';
 import { supabase } from '../services/supabaseClient';
 import { Linkify } from '../utils/linkify';
 import EraApiDevTab from '../components/EraApiDevTab';
+import VehicleFareRatesPanel from '../components/VehicleFareRatesPanel';
 import {
   devListAllLandingMessages,
   devDeleteLandingMessage,
@@ -3120,6 +3121,8 @@ function CommissionsTab() {
           })}
         </div>
       )}
+
+      <VehicleFareRatesPanel />
     </div>
   );
 }

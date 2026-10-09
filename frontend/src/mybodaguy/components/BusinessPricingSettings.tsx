@@ -76,7 +76,7 @@ export default function BusinessPricingSettings({ businessProfileId, category }:
     <div className="space-y-4">
       <h4 className="font-semibold text-slate-800">Pricing</h4>
       <p className="text-xs text-slate-400">
-        Leave a field blank to fall back to the platform's default rate. Applies to rides fulfilled by your own {isEscort ? 'escort team' : 'drivers'}.
+        Leave a field blank to fall back to the platform's rate for that vehicle type (boda, car, van or truck). Applies to rides fulfilled by your own {isEscort ? 'escort team' : 'drivers'}.
       </p>
 
       {!isEscort && (
