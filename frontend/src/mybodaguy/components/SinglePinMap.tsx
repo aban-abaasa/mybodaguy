@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import L from 'leaflet';
 import { Loader2, Locate, Search } from 'lucide-react';
 import { geocodeAddress } from '../services/geocodeService';
+import { describeGeoFailure, locateDevice } from '../utils/geolocation';
 
 const DEFAULT_CENTER: [number, number] = [0.3157, 32.5756];
 const TILE_URL = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
@@ -101,17 +102,17 @@ export default function SinglePinMap({ lat, lng, onChange, height = 260, searchC
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, lat, lng]);
 
-  const useMyLocation = () => {
-    if (!navigator.geolocation) return;
+  const useMyLocation = async () => {
     setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        onChangeRef.current(pos.coords.latitude, pos.coords.longitude);
-        setLocating(false);
-      },
-      () => setLocating(false),
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    setSearchError(null);
+    const result = await locateDevice();
+    if (result.ok) {
+      onChangeRef.current(result.fix.lat, result.fix.lng);
+      mapRef.current?.setView([result.fix.lat, result.fix.lng], result.fix.accuracy > 1000 ? 14 : 16);
+    } else {
+      setSearchError(describeGeoFailure(result.failure));
+    }
+    setLocating(false);
   };
 
   const searchLocation = async () => {

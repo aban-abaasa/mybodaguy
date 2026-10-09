@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import { reverseGeocode } from '../services/geocodeService';
 import LocationPickerMap from './LocationPickerMap';
+import { describeGeoFailure, locateDevice } from '../utils/geolocation';
 import type { Location } from '../data/mockLocations';
 
 interface Area {
@@ -56,32 +57,26 @@ export default function CustomerAreaManager({ customerId }: CustomerAreaManagerP
     }
   };
 
-  const captureCurrentPosition = () => {
-    if (!navigator.geolocation) {
-      toast.error('Your browser does not support GPS location');
-      return;
-    }
+  const captureCurrentPosition = async () => {
     setLocating(true);
-    const savePosition = async (pos: GeolocationPosition) => {
-      const address = await reverseGeocode(pos.coords.latitude, pos.coords.longitude);
+    try {
+      const result = await locateDevice();
+      if (!result.ok) {
+        toast.error(describeGeoFailure(result.failure));
+        return;
+      }
+      const { lat, lng, accuracy } = result.fix;
+      const address = await reverseGeocode(lat, lng);
       setNewArea((prev) => ({
         ...prev,
-        address: address || `${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`,
-        latitude: pos.coords.latitude,
-        longitude: pos.coords.longitude,
+        address: address || `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+        latitude: lat,
+        longitude: lng,
       }));
-      toast.success('GPS location captured');
+      toast.success(accuracy > 1000 ? 'Approximate location captured — tap the map to fine-tune it' : 'GPS location captured');
+    } finally {
       setLocating(false);
-    };
-    const showLocationHelp = () => {
-      toast.error('GPS needs permission and HTTPS. Use the secure site, or search/tap the map on local HTTP.');
-      setLocating(false);
-    };
-    navigator.geolocation.getCurrentPosition(
-      savePosition,
-      () => navigator.geolocation.getCurrentPosition(savePosition, showLocationHelp, { enableHighAccuracy: false, timeout: 20000, maximumAge: 300000 }),
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    }
   };
 
   const handleAddArea = async () => {
