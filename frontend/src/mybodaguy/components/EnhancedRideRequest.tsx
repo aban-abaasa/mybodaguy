@@ -18,7 +18,7 @@ import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type C
 import { verifyPin } from '../services/pinService';
 import { productService, type Product } from '../services/productService';
 import type { ImportStore } from '../services/journeyService';
-import { useVehicleClassQuotes, describeRates, formatUgxShort, type VehicleClassQuote } from '../services/vehicleRateService';
+import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
@@ -174,15 +174,26 @@ const VEHICLE_OPTIONS: { id: VehicleTypeFilter; label: string; icon: typeof Car 
 // route the same trip is priced for every class side by side — the customer
 // sees what each vehicle costs (and how many are online) before choosing.
 // Without a route, or if the quote can't be loaded, it is just the chooser.
-function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod }: {
+function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod, cargoWeight, onCargoWeight, cargoClass, onCargoClass }: {
   value: VehicleTypeFilter;
   onChange: (v: VehicleTypeFilter) => void;
   pickup: Location | null;
   dropoff: Location | null;
   paymentMethod: 'wallet' | 'cash' | 'company';
+  cargoWeight: string;
+  onCargoWeight: (v: string) => void;
+  cargoClass: CargoClass;
+  onCargoClass: (v: CargoClass) => void;
 }) {
   const walletSurchargePct = useWalletSurchargePct();
-  const { quotes } = useVehicleClassQuotes(pickup?.coordinates ?? null, dropoff?.coordinates ?? null);
+  // Van and truck are freight: what is being moved (weight + handling) is part of the price.
+  const isFreight = value === 'van' || value === 'truck';
+  const weightKg = isFreight && Number(cargoWeight) > 0 ? Number(cargoWeight) : null;
+  const { quotes } = useVehicleClassQuotes(
+    pickup?.coordinates ?? null,
+    dropoff?.coordinates ?? null,
+    isFreight ? { weightKg, cargoClass } : null,
+  );
   const quoteFor = (id: VehicleTypeFilter) => quotes?.find(q => q.vehicle_type === id) ?? null;
   const priceOf = (q: VehicleClassQuote) => payableFare(q.fare, paymentMethod, walletSurchargePct);
 
@@ -199,6 +210,7 @@ function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod }:
         {VEHICLE_OPTIONS.map(opt => {
           const isSelected = value === opt.id;
           const quote = quoteFor(opt.id);
+          const cannotCarry = !!quote && !quote.can_carry;
           const price = opt.id === 'any'
             ? (cheapest != null ? `from ${formatUgxShort(cheapest)}` : null)
             : (quote ? formatUgxShort(priceOf(quote)) : null);
@@ -210,7 +222,7 @@ function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod }:
               onClick={() => onChange(opt.id)}
               className={`flex flex-col items-center gap-1.5 rounded-2xl border-2 px-1 py-2.5 transition-all active:scale-[0.97] ${
                 isSelected ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200/70' : 'border-slate-200 hover:border-orange-300'
-              }`}
+              } ${cannotCarry ? 'opacity-40' : ''}`}
             >
               <span className={`grid h-10 w-10 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${
                 isSelected ? 'bg-gradient-to-br from-orange-500 to-amber-400 text-white' : 'bg-orange-50 text-orange-600'
@@ -230,10 +242,73 @@ function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod }:
         </p>
       )}
 
+      {isFreight && (
+        <div className="space-y-3 rounded-2xl border-2 border-slate-200 p-3">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">How heavy is the load?</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="any"
+                value={cargoWeight}
+                onChange={e => onCargoWeight(e.target.value)}
+                placeholder={value === 'truck' ? 'e.g. 5000' : 'e.g. 300'}
+                className="w-full rounded-xl border-2 border-slate-200 px-3 py-2.5 text-sm text-slate-800 placeholder-slate-400 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500"
+              />
+              <span className="text-sm font-semibold text-slate-500">kg</span>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {(value === 'truck' ? [1000, 5000, 10000] : [100, 500, 1000]).map(kg => (
+                <button
+                  key={kg}
+                  type="button"
+                  onClick={() => onCargoWeight(String(kg))}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                    Number(cargoWeight) === kg ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-200 text-slate-500'
+                  }`}
+                >
+                  {kg >= 1000 ? `${kg / 1000} t` : `${kg} kg`}
+                </button>
+              ))}
+              {weightKg != null && weightKg >= 1000 && (
+                <span className="self-center text-[11px] text-slate-400">= {Number((weightKg / 1000).toFixed(2))} tonnes</span>
+              )}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-600">What are you moving?</label>
+            <div className="grid grid-cols-2 gap-2">
+              {CARGO_CLASSES.map(c => (
+                <button
+                  key={c.id}
+                  type="button"
+                  aria-pressed={cargoClass === c.id}
+                  onClick={() => onCargoClass(c.id)}
+                  className={`rounded-xl border-2 px-2.5 py-2 text-left transition-all ${
+                    cargoClass === c.id ? 'border-orange-500 bg-orange-50' : 'border-slate-200 hover:border-orange-300'
+                  }`}
+                >
+                  <span className={`block text-xs font-semibold ${cargoClass === c.id ? 'text-orange-700' : 'text-slate-700'}`}>{c.label}</span>
+                  <span className="block text-[10px] leading-tight text-slate-400">{c.hint}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          {weightKg != null && selected && !selected.can_carry && (
+            <p className="rounded-xl bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-600">
+              No {selected.label.toLowerCase()} can carry {weightKg.toLocaleString()} kg — choose a larger vehicle.
+            </p>
+          )}
+        </div>
+      )}
+
       {selected && (
         <div className="rounded-xl border border-orange-100 bg-orange-50/60 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
           <span className="font-semibold text-orange-700">{selected.label} rates:</span>{' '}
-          {describeRates(selected).join(' · ')}.{' '}
+          {describeRates(selected).join(' · ')}.
+          {selected.freight_priced && ' Priced at the live icaneracoin value.'}{' '}
           <span className="font-semibold text-slate-700">
             {selected.available_riders > 0 ? `${selected.available_riders} online now.` : 'None online right now.'}
           </span>
@@ -334,6 +409,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [selectedBusinessId, setSelectedBusinessId] = useState('');
   const [powerFilter, setPowerFilter] = useState<PowerFilter>('any');
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<VehicleTypeFilter>('any');
+  // What a van / truck is carrying: part of the price, and only vehicles that can carry it are offered.
+  const [cargoWeight, setCargoWeight] = useState('');
+  const [cargoClass, setCargoClass] = useState<CargoClass>('standard');
+  const isFreightRide = vehicleTypeFilter === 'van' || vehicleTypeFilter === 'truck';
+  const cargoArgs = isFreightRide
+    ? { p_cargo_class: cargoClass, ...(Number(cargoWeight) > 0 ? { p_cargo_weight_kg: Number(cargoWeight) } : {}) }
+    : {};
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
   // "Any Rider" (open marketplace, the previous-only behaviour) vs "From a
   // Company" — scopes matching to one transport_company's own driver
@@ -1162,6 +1244,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           p_limit: 10,
           p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
           p_business_profile_id: riderProviderFilter === 'company' ? (selectedRideCompanyId || null) : null,
+          ...cargoArgs,
         });
         if (error) throw error;
         riders = (data || []) as MatchedRider[];
@@ -1175,7 +1258,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       });
 
       if (riders.length === 0) {
-        toast.error('No available riders match your filters right now');
+        toast.error(isFreightRide && Number(cargoWeight) > 0
+          ? `No available ${vehicleTypeFilter} can carry ${Number(cargoWeight).toLocaleString()} kg right now`
+          : 'No available riders match your filters right now');
       } else {
         toast.success(`Found ${riders.length} available riders near you!`);
       }
@@ -1219,6 +1304,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         p_limit: 5,
         p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
         p_business_profile_id: riderProviderFilter === 'company' ? (selectedRideCompanyId || null) : null,
+        ...cargoArgs,
       });
       if (error) throw error;
       const riders = (data || []) as MatchedRider[];
@@ -1309,6 +1395,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         p_power_type_requested: powerFilter === 'any' ? null : powerFilter,
         p_umbrella_requested: umbrellaRequired,
         p_order_notes: orderNotes,
+        ...cargoArgs,
       };
       const { data, error } = needsCrossBorderPath
         ? await supabase.rpc('mbg_request_cross_border_delivery', {
@@ -2358,6 +2445,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               pickup={selectedPickup}
               dropoff={selectedDropoff}
               paymentMethod={paymentMethod}
+              cargoWeight={cargoWeight}
+              onCargoWeight={setCargoWeight}
+              cargoClass={cargoClass}
+              onCargoClass={setCargoClass}
             />
 
             {/* Power / rain cover — only mean anything for a boda
