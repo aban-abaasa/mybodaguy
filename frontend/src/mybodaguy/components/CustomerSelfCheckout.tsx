@@ -19,7 +19,7 @@ import ProductPicker, { CartLine } from './ProductPicker';
 import ScanFrameOverlay from './ScanFrameOverlay';
 import SetPinPrompt from './SetPinPrompt';
 import { hasPinSet, verifyPin, validatePIN } from '../services/pinService';
-import { getStoreWebsiteUrl } from '../services/storeWebsite';
+import { getStoreSiteForCustomer, getStoreWebsiteUrl } from '../services/storeWebsite';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -464,14 +464,16 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   // opens that site. Opened synchronously-first so mobile browsers don't block it.
   async function openInstalmentsOnWebsite() {
     const win = window.open('', '_blank');
-    const website = await resolveReceiptWebsite();
-    if (website === window.location.origin) {
+    const site = selectedSupermarketId ? await getStoreSiteForCustomer({ supermarketId: selectedSupermarketId }) : null;
+    if (!site) {
       win?.close();
-      toast.error("This store doesn't have a website for instalments yet");
+      toast.error("We couldn't find this store's website. Try again in a moment.");
       return;
     }
-    if (win) { win.opener = null; win.location.href = website; }
-    else window.location.href = website;
+    // Instalments are started from the cart in the website's Market tab.
+    const target = site.viaStorefront ? site.url : `${site.url}?tab=market`;
+    if (win) { win.opener = null; win.location.href = target; }
+    else window.location.href = target;
   }
 
   // Every payment mode except the IcanEra wallet is settled on the store's own
@@ -482,7 +484,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     const website = await resolveStorePayUrl();
     if (!website) {
       win?.close();
-      toast.error("This store doesn't have a website to pay on yet");
+      toast.error("We couldn't find this store's website. Try again in a moment.");
       return;
     }
     if (win) { win.opener = null; win.location.href = website; }
@@ -499,11 +501,14 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       const { data: store } = await supabase.from('supermarkets')
         .select('pichin_business_profile_id').eq('id', selectedSupermarketId).maybeSingle();
       const businessId = store?.pichin_business_profile_id;
-      if (!businessId) return null;
-      const { data: business } = await supabase.from('business_profiles')
-        .select('website').eq('id', businessId).maybeSingle();
-      const site = business?.website?.trim();
-      return site ? (/^https?:\/\//i.test(site) ? site : `https://${site}`) : null;
+      if (businessId) {
+        const { data: business } = await supabase.from('business_profiles')
+          .select('website').eq('id', businessId).maybeSingle();
+        const site = business?.website?.trim();
+        if (site) return /^https?:\/\//i.test(site) ? site : `https://${site}`;
+      }
+      // Every store has a website: with no company site yet, its storefront on icanera.space.
+      return (await getStoreSiteForCustomer({ supermarketId: selectedSupermarketId }))?.url ?? null;
     } catch (error) {
       console.warn('Could not resolve store website for payment:', error);
       return null;
