@@ -506,7 +506,7 @@ function JourneyLegRow({ leg, customerId }: { leg: JourneyLeg; customerId: strin
           <div className="font-medium text-sm text-slate-800">{legLabel[leg.leg_type] || leg.leg_type}</div>
           {leg.flight_booking?.pnr && <div className="text-xs text-slate-500">PNR: {leg.flight_booking.pnr}</div>}
         </div>
-        <span className="text-xs font-semibold uppercase text-slate-500">{leg.status.replace(/_/g, ' ')}</span>
+        <span className={`text-xs font-semibold uppercase ${leg.no_driver_at ? 'text-emerald-600' : 'text-slate-500'}`}>{leg.no_driver_at ? 'not charged' : leg.status.replace(/_/g, ' ')}</span>
       </div>
 
       {isInTransitCrossing && (
