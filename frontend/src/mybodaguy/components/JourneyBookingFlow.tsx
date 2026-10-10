@@ -1963,6 +1963,11 @@ export default function JourneyBookingFlow({
               {quote.local && ` At today's live value: 1 ICAN = ${formatMoney(quote.local.pricePerIcan, quote.local.currency)}.`}
               {quote.groundPricedInIcan && ' Because this journey crosses a border, the airport rides are priced in ICAN too, so their price keeps its value.'}
             </p>
+            {(quote.pickupRide !== false || quote.dropoffRide !== false) && (
+              <p className="relative mt-2 text-[12.5px] leading-relaxed text-[#e6c980]">
+                No driver, no charge: if no driver can be found for {quote.serviceMode === 'parcel' ? 'a courier' : 'an airport ride'}, you don't pay for it — its price goes straight back to {payWithCompany ? "your company's wallet" : 'your wallet'}.
+              </p>
+            )}
           </div>
 
           {payerPicker}
@@ -2176,8 +2181,8 @@ export default function JourneyBookingFlow({
                               <p className="mt-0.5 text-xs text-slate-500">Booking reference <span className="font-semibold tracking-wider text-slate-700">{leg.flight_booking.pnr}</span></p>
                             )}
                           </div>
-                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${legStatusClass(leg.status)}`}>
-                            {leg.status.replace(/_/g, ' ')}
+                          <span className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${leg.no_driver_at ? 'bg-emerald-100 text-emerald-700' : legStatusClass(leg.status)}`}>
+                            {leg.no_driver_at ? 'not charged' : leg.status.replace(/_/g, ' ')}
                           </span>
                         </div>
                         {rider && (

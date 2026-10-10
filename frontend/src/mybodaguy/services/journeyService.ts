@@ -275,6 +275,11 @@ export interface JourneyLeg {
   origin_city?: string | null;
   ride_id: string | null;
   dispatch_after: string | null;
+  /** What the leg cost, in ICAN (null on legs booked before it was recorded). */
+  fare_ican?: number | null;
+  /** Set when no driver could be found for the ride, so it was closed and its price returned. */
+  no_driver_at?: string | null;
+  refunded_at?: string | null;
   flight_booking?: {
     pnr: string;
     status: string;

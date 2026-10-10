@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Navigation, Loader2, Clock, Search } from 'lucide-react';
+import { Navigation, Loader2, Clock, Search, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../../services/supabaseClient';
 import type { JourneyLeg } from '../services/journeyService';
@@ -17,6 +17,21 @@ export default function JourneyLegRideActions({ leg, customerId }: { leg: Journe
   const isGroundLeg = leg.leg_type === 'local_pickup' || leg.leg_type === 'local_dropoff';
   if (!isGroundLeg) return null;
 
+  // No driver could be found in time: the leg was closed and its price handed back
+  // (ADD_JOURNEY_NO_DRIVER_NO_CHARGE.sql), so the customer is not paying for it.
+  if (leg.no_driver_at) {
+    const fare = Number(leg.fare_ican);
+    return (
+      <div role="status" className="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+        <ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-600" />
+        <span>
+          No driver was available for this part of your journey, so you were not charged for it
+          {leg.refunded_at ? ` — ${fare > 0 ? `${fare.toFixed(4)} ICAN` : 'its price'} was returned to the wallet that paid.` : '.'}
+        </span>
+      </div>
+    );
+  }
+
   const awaitingDispatch = !leg.ride && ['pending', 'ready_to_dispatch', 'awaiting_flight_update'].includes(leg.status);
   if (awaitingDispatch) {
     const due = leg.dispatch_after ? new Date(leg.dispatch_after) : null;
@@ -29,7 +44,7 @@ export default function JourneyLegRideActions({ leg, customerId }: { leg: Journe
             ? leg.leg_type === 'local_pickup'
               ? `Your driver will be assigned around ${due!.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })} — timed so you reach the airport in good time.`
               : `Your driver will be assigned around ${due!.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}, after your flight lands.`
-            : 'Finding the nearest available driver for you…'}
+            : "Finding the nearest available driver for you… If no one is available, you won't be charged for this ride."}
         </span>
       </div>
     );
