@@ -3,6 +3,9 @@
 -- UnifiedDashboard's role switcher reads user_roles via get_user_roles(),
 -- so newly-assigned riders never saw a role choice after being assigned.
 --
+-- (ON CONFLICT now targets the (user_id, vehicle_type) constraint — see
+-- FIX_ASSIGN_RIDER_ON_CONFLICT_MULTI_VEHICLE.sql for why.)
+--
 -- This redefines mbg_assign_rider with the SAME signature the frontend
 -- actually calls (see frontend/src/mybodaguy/services/riderService.ts)
 -- and adds a call to add_user_role() so the rider role is appended to
@@ -111,7 +114,10 @@ BEGIN
     license_expiry, vehicle_model, vehicle_year, vehicle_color,
     'active', auth.uid(), NOW()
   )
-  ON CONFLICT (user_id)
+  -- Name the constraint instead of listing columns: `vehicle_type` is also a
+  -- parameter of this function, so `ON CONFLICT (user_id, vehicle_type)` fails
+  -- with 'column reference "vehicle_type" is ambiguous'.
+  ON CONFLICT ON CONSTRAINT mbg_riders_user_id_vehicle_type_key
   DO UPDATE SET
     stage_id = EXCLUDED.stage_id,
     vehicle_type = EXCLUDED.vehicle_type,
