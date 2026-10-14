@@ -20,10 +20,11 @@ interface MobileBottomTabsProps<Id extends string> {
 // reach of the thumb. Deliberately capped at 4 — everything else stays in the
 // header's Menu sheet.
 //
-// No bar chrome: every tab is its own independent, transparent glass tile (icon
-// over a small label) with its own colour line along its edge — orbiting on the
-// active one (see mobileBottomTabs.css). Hidden from `sm` (or `md`) up, where
-// each dashboard already has its full top tab strip.
+// Truly transparent: no bar fill and no tile fill — each tab is just its icon
+// (over a small label) with its own colour line along its edge, orbiting on the
+// active one, spaced apart in a row that scrolls sideways (see
+// mobileBottomTabs.css). Hidden from `sm` (or `md`) up, where each dashboard
+// already has its full top tab strip.
 //
 // Pages that render this need ~5rem of bottom padding so their last card isn't
 // hidden under it (the dashboards already carry pb-28).
@@ -39,7 +40,7 @@ export default function MobileBottomTabs<Id extends string>({
   return (
     <nav
       aria-label="Primary"
-      className={`mbg-nav fixed inset-x-0 bottom-0 z-[60] mx-auto flex max-w-md items-stretch gap-1.5 px-2 pt-1.5 ${hideFrom === 'md' ? 'md:hidden' : 'sm:hidden'}`}
+      className={`mbg-nav fixed inset-x-0 bottom-0 z-[60] mx-auto flex max-w-md ${hideFrom === 'md' ? 'md:hidden' : 'sm:hidden'}`}
     >
       {visible.map((tab) => {
         const active = activeTab === tab.id;
@@ -50,10 +51,10 @@ export default function MobileBottomTabs<Id extends string>({
             type="button"
             onClick={() => onSelect(tab.id)}
             aria-current={active ? 'page' : undefined}
-            className={`mbg-nav-tab ${active ? 'mbg-nav-tab-active' : ''} flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-1.5 text-[10px] font-semibold whitespace-nowrap`}
+            className={`mbg-nav-tab ${active ? 'mbg-nav-tab-active' : ''} flex flex-col items-center justify-center gap-0.5 px-1 py-1 text-[9.5px] font-semibold whitespace-nowrap`}
           >
             <span className="relative flex">
-              <Icon size={20} className="flex-shrink-0" />
+              <Icon size={18} className="flex-shrink-0" />
               {!!tab.badge && tab.badge > 0 && (
                 <span className="absolute -right-2.5 -top-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white">
                   {tab.badge > 99 ? '99+' : tab.badge}
