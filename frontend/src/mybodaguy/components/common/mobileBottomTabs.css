@@ -1,11 +1,19 @@
-/* Phone bottom navigation (MobileBottomTabs): independent, transparent tiles,
-   each with a living colour line around its edge.
+/* Phone bottom navigation (MobileBottomTabs): independent, truly transparent
+   tiles, each with a living colour line around its edge, in a spaced row that
+   scrolls sideways.
 
-   The bar has no chrome at all -- no shared fill, border or blur; it only lays
-   the tabs out. Every tab is its own glass tile (its own faint tint and
-   backdrop blur, its own edge line, its own glow), so nothing is shared
-   between icons: pressing, hovering or animating one never touches another.
-   Each tile is icon over a small semibold label.
+   Nothing is painted behind an icon: no bar fill, no tile fill, no blur, no
+   inner wash. A tile is only its edge line, its icon and its label, so the page
+   shows straight through. (The active tile's glow is an outer shadow, which the
+   browser never paints inside the tile's own box.) Labels keep a soft halo of
+   the page colour so they stay legible over busy content.
+
+   Tiles are spaced apart and the row scrolls sideways, snapping to centre, so
+   every icon keeps comfortable room. When all of them fit they simply spread
+   out and centre. Where the browser supports scroll-driven animations, tiles
+   near the screen edge shrink and dim as they scroll away -- a "dock" hint that
+   more icons are off-screen. Each tile is icon over a small semibold label, and
+   nothing is shared between tiles.
 
    An idle tile carries a faint static gradient hairline. The active tile gets
    a bright multi-colour comet orbiting its edge (a conic gradient whose angle
@@ -13,12 +21,12 @@
 
    Same pattern as the ICAN app and business websites, in My Boda Guy's own
    palette: a sunset of orange, amber and rose. prefers-reduced-motion parks
-   the comet as a still arc; browsers without @property support simply show
-   the still ring.
+   the comet as a still arc and drops the dock effect; browsers without
+   @property support simply show the still ring.
 
-   Only colour and the edge line live here -- layout (fixed, flex, gap,
-   md/sm:hidden) stays in the component's Tailwind classes so the breakpoint
-   can never lose a cascade fight with this file. */
+   Display and breakpoint (flex, md/sm:hidden), position, width and z-index stay
+   in the component's Tailwind classes so the breakpoint can never lose a
+   cascade fight with this file; spacing, padding and scrolling live here. */
 
 @property --mn-angle {
   syntax: '<angle>';
@@ -30,7 +38,15 @@
   to { --mn-angle: 360deg; }
 }
 
-/* ── The bar: palette + layout host only ──────────────────────────────── */
+/* Tiles at the edge of the row shrink and dim as they scroll out of view. */
+@keyframes mn-dock {
+  0%   { scale: 0.78; opacity: 0.3; }
+  14%  { scale: 1;    opacity: 1; }
+  86%  { scale: 1;    opacity: 1; }
+  100% { scale: 0.78; opacity: 0.3; }
+}
+
+/* ── The bar: palette + the spaced, scrolling row ─────────────────────── */
 .mbg-nav {
   --mn-surface: #ffffff;
   --mn-text: #475569;
@@ -40,11 +56,23 @@
   --mn-c3: #f43f5e;
   background: none;
   border: 0;
-  /* Breathing room under the tiles, plus the iOS home indicator / gesture bar. */
-  padding-bottom: calc(0.375rem + env(safe-area-inset-bottom, 0px));
-  /* Gaps between tiles stay tappable on the page beneath. */
-  pointer-events: none;
+  gap: 0.625rem;
+  /* Sits right on the bottom edge: just a hair of padding under the tiles (plus
+     the iOS home indicator / gesture-bar inset), and room above for the active
+     tile's glow (the row clips overflow). */
+  padding: 0.5rem 0.75rem calc(0.125rem + env(safe-area-inset-bottom, 0px));
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: 0.75rem;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
 }
+.mbg-nav::-webkit-scrollbar { display: none; }
+/* Centre the tiles when they all fit, yet let the row scroll from its very
+   start when they don't (justify-content: center would clip the left side). */
+.mbg-nav > :first-child { margin-left: auto; }
+.mbg-nav > :last-child { margin-right: auto; }
 
 html[data-theme="dark"] .mbg-nav {
   --mn-surface: #0f172a;
@@ -55,34 +83,48 @@ html[data-theme="dark"] .mbg-nav {
   --mn-c3: #fb7185;
 }
 
-/* ── One tile (a whole, independent tab) ──────────────────────────────── */
+/* ── One tile (a whole, independent tab): no background at all ────────── */
 .mbg-nav-tab {
   position: relative;
-  pointer-events: auto;
-  border-radius: 1rem;
+  /* Compact tiles (smaller than the ICAN apps'): still scrolls sideways, and
+     centres, when there are more of them than fit. */
+  flex: 1 0 3.5rem;
+  max-width: 4.5rem;
+  scroll-snap-align: center;
+  border-radius: 0.875rem;
   color: var(--mn-text);
-  background: transparent;
-  background: color-mix(in srgb, var(--mn-surface) 10%, transparent);
-  -webkit-backdrop-filter: blur(14px) saturate(1.5);
-  backdrop-filter: blur(14px) saturate(1.5);
-  transition: color 0.25s ease, transform 0.18s ease, background-color 0.3s ease, box-shadow 0.3s ease;
+  background: none;
+  transition: color 0.25s ease, transform 0.18s ease, box-shadow 0.3s ease;
   -webkit-tap-highlight-color: transparent;
   /* A soft halo of the page colour keeps the label legible over busy content. */
-  text-shadow: 0 0 6px color-mix(in srgb, var(--mn-surface) 85%, transparent), 0 1px 2px color-mix(in srgb, var(--mn-surface) 85%, transparent);
+  text-shadow:
+    0 0 8px color-mix(in srgb, var(--mn-surface) 90%, transparent),
+    0 0 3px color-mix(in srgb, var(--mn-surface) 90%, transparent),
+    0 1px 2px color-mix(in srgb, var(--mn-surface) 90%, transparent);
 }
 .mbg-nav-tab:hover { color: color-mix(in srgb, var(--mn-active) 70%, var(--mn-text)); }
 .mbg-nav-tab:active { transform: scale(0.94); }
-.mbg-nav-tab svg { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--mn-surface) 85%, transparent)); }
+.mbg-nav-tab svg {
+  filter:
+    drop-shadow(0 0 4px color-mix(in srgb, var(--mn-surface) 90%, transparent))
+    drop-shadow(0 0 1px color-mix(in srgb, var(--mn-surface) 90%, transparent));
+}
 
 .mbg-nav-tab-active,
 .mbg-nav-tab-active:hover { color: var(--mn-active); }
-/* The active tile washes a little more of the page colour into its glass so
-   its label keeps contrast over any backdrop, then glows in the accent. */
+/* An outer glow only: a box-shadow is never painted inside its own box, so the
+   tile's interior stays fully transparent. */
 .mbg-nav-tab-active {
-  background-color: color-mix(in srgb, var(--mn-surface) 34%, transparent);
-  box-shadow:
-    0 0 16px -4px color-mix(in srgb, var(--mn-c2) 55%, transparent),
-    inset 0 0 14px -6px color-mix(in srgb, var(--mn-c2) 45%, transparent);
+  box-shadow: 0 0 12px -4px color-mix(in srgb, var(--mn-c2) 65%, transparent);
+}
+
+/* Dock effect: only where scroll-driven animations exist. `scale` (not
+   `transform`) so the press feedback above still composes with it. */
+@supports (animation-timeline: view()) {
+  .mbg-nav-tab {
+    animation: mn-dock linear both;
+    animation-timeline: view(inline);
+  }
 }
 
 /* ── The edge line ────────────────────────────────────────────────────── */
@@ -132,5 +174,5 @@ html[data-theme="dark"] .mbg-nav {
     animation: none;
     --mn-angle: 215deg;
   }
-  .mbg-nav-tab { transition: none; }
+  .mbg-nav-tab { transition: none; animation: none; }
 }
