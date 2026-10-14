@@ -35,6 +35,10 @@ import CallDock from './calls/CallDock';
 import CallStage from './calls/CallStage';
 import IncomingCallOverlay from './calls/IncomingCallOverlay';
 import CommunityLiveStage from './community/CommunityLiveStage';
+import NavGlowDefs from './common/NavGlowDefs';
+
+// The colours that travel along the floating chat button's own outline (see NavGlowDefs).
+const CHAT_RAINBOW = ['#f43f5e', '#f59e0b', '#facc15', '#22c55e', '#06b6d4', '#6366f1', '#d946ef'];
 
 type Identity = (ChatIdentity & { isGuest: false }) | ({ name: string; email: string; isGuest: true });
 
@@ -767,18 +771,15 @@ export default function ChatWidget() {
         title="Chat with us"
       >
         <style>{`
-          @keyframes ican-chat-ring-spin { to { transform: rotate(360deg); } }
-          @keyframes ican-chat-ring-hue { to { filter: hue-rotate(360deg); } }
-          .ican-chat-ring {
-            background: conic-gradient(from 0deg, #f43f5e, #f59e0b, #facc15, #22c55e, #06b6d4, #6366f1, #d946ef, #f43f5e);
-            -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-            mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2px));
-            animation: ican-chat-ring-spin 3s linear infinite, ican-chat-ring-hue 6s linear infinite;
+          /* No ring and no badge: the chat bubble itself carries a rainbow that travels along its real outline
+             (the gradient is the NavGlowDefs below). The plain colour after url() is the fallback. */
+          .ican-fab > svg.ican-chat-icon {
+            stroke: url(#ican-chat-line) #b8892b;
+            stroke-width: 2.25;
           }
-          @media (prefers-reduced-motion: reduce) { .ican-chat-ring { animation: none; } }
         `}</style>
-        <span aria-hidden="true" className="ican-chat-ring pointer-events-none absolute -inset-[4px] rounded-full" />
-        {open ? <X className="h-6 w-6" /> : <MessageCircle className="h-6 w-6" />}
+        <NavGlowDefs id="ican-chat-line" colors={CHAT_RAINBOW} />
+        {open ? <X className="h-7 w-7 ican-chat-icon" /> : <MessageCircle className="h-7 w-7 ican-chat-icon" />}
         {!open && supportUnread && (
           <span className="absolute -top-1 -right-1 h-4 w-4 animate-pulse rounded-full border-2 border-white bg-red-500" />
         )}

@@ -1,44 +1,31 @@
-/* Phone bottom navigation (MobileBottomTabs): independent, truly transparent
-   tiles, each with a living colour line around its edge, in a spaced row that
-   scrolls sideways.
+/* Phone bottom navigation (MobileBottomTabs): bare icons -- like TikTok's --
+   where the current one is drawn in colours that travel around its OWN shape,
+   compact and sitting on the bottom edge of the screen.
 
-   Nothing is painted behind an icon: no bar fill, no tile fill, no blur, no
-   inner wash. A tile is only its edge line, its icon and its label, so the page
-   shows straight through. (The active tile's glow is an outer shadow, which the
-   browser never paints inside the tile's own box.) Labels keep a soft halo of
-   the page colour so they stay legible over busy content.
+   Nothing is painted behind or around an icon: no bar fill, no tile or box, no
+   outline, no ring, no blur, no tint. An idle icon is just its glyph and a small
+   label, so the page shows straight through. The active icon's strokes are
+   painted with a gradient (NavGlowDefs) that keeps rotating, so a line of colour
+   runs along the glyph's real outline -- whatever that outline is. No glow, nothing but the
+   shape itself. Labels and glyphs keep a soft halo of the page colour so they stay
+   legible over busy content.
 
-   Tiles are spaced apart and the row scrolls sideways, snapping to centre, so
-   every icon keeps comfortable room. When all of them fit they simply spread
-   out and centre. Where the browser supports scroll-driven animations, tiles
-   near the screen edge shrink and dim as they scroll away -- a "dock" hint that
-   more icons are off-screen. Each tile is icon over a small semibold label, and
-   nothing is shared between tiles.
-
-   An idle tile carries a faint static gradient hairline. The active tile gets
-   a bright multi-colour comet orbiting its edge (a conic gradient whose angle
-   is animated through a registered custom property) and a soft glow.
+   Tabs are spaced apart and the row scrolls sideways (snapping to centre) if
+   there are ever more than fit; when they all fit they spread out and centre.
+   Where the browser supports scroll-driven animations, tabs near the screen edge
+   shrink and dim as they scroll away -- a "dock" hint that more icons are
+   off-screen. Each tab is icon over a small semibold label, and nothing is
+   shared between tabs.
 
    Same pattern as the ICAN app and business websites, in My Boda Guy's own
-   palette: a sunset of orange, amber and rose. prefers-reduced-motion parks
-   the comet as a still arc and drops the dock effect; browsers without
-   @property support simply show the still ring.
+   palette: a sunset of orange, amber and rose. prefers-reduced-motion keeps the
+   colours but stops them turning, and drops the dock effect.
 
    Display and breakpoint (flex, md/sm:hidden), position, width and z-index stay
    in the component's Tailwind classes so the breakpoint can never lose a
    cascade fight with this file; spacing, padding and scrolling live here. */
 
-@property --mn-angle {
-  syntax: '<angle>';
-  inherits: false;
-  initial-value: 0deg;
-}
-
-@keyframes mn-orbit {
-  to { --mn-angle: 360deg; }
-}
-
-/* Tiles at the edge of the row shrink and dim as they scroll out of view. */
+/* Tabs at the edge of the row shrink and dim as they scroll out of view. */
 @keyframes mn-dock {
   0%   { scale: 0.78; opacity: 0.3; }
   14%  { scale: 1;    opacity: 1; }
@@ -51,16 +38,16 @@
   --mn-surface: #ffffff;
   --mn-text: #475569;
   --mn-active: #c2410c;
+  /* The three colours that travel along the active icon (see NavGlowDefs). */
   --mn-c1: #f97316;
   --mn-c2: #f59e0b;
   --mn-c3: #f43f5e;
   background: none;
   border: 0;
-  gap: 0.625rem;
-  /* Sits right on the bottom edge: just a hair of padding under the tiles (plus
-     the iOS home indicator / gesture-bar inset), and room above for the active
-     tile's glow (the row clips overflow). */
-  padding: 0.5rem 0.75rem calc(0.125rem + env(safe-area-inset-bottom, 0px));
+  gap: 0.5rem;
+  /* Sits right on the bottom edge: just a hair of padding under the tabs (plus
+     the iOS home indicator / gesture-bar inset). */
+  padding: 0.25rem 0.75rem calc(0.125rem + env(safe-area-inset-bottom, 0px));
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scroll-snap-type: x proximity;
@@ -69,10 +56,17 @@
   -webkit-overflow-scrolling: touch;
 }
 .mbg-nav::-webkit-scrollbar { display: none; }
-/* Centre the tiles when they all fit, yet let the row scroll from its very
-   start when they don't (justify-content: center would clip the left side). */
-.mbg-nav > :first-child { margin-left: auto; }
-.mbg-nav > :last-child { margin-right: auto; }
+/* Centre the tabs when they all fit, yet let the row scroll from its very
+   start when they don't: auto-margined spacers swallow the free space only
+   while there is some (justify-content: center would clip the left side). The
+   negative margin cancels the flex gap next to each spacer. */
+.mbg-nav::before,
+.mbg-nav::after {
+  content: '';
+  flex: none;
+}
+.mbg-nav::before { margin-left: auto; margin-right: -0.5rem; }
+.mbg-nav::after { margin-right: auto; margin-left: -0.5rem; }
 
 html[data-theme="dark"] .mbg-nav {
   --mn-surface: #0f172a;
@@ -83,10 +77,10 @@ html[data-theme="dark"] .mbg-nav {
   --mn-c3: #fb7185;
 }
 
-/* ── One tile (a whole, independent tab): no background at all ────────── */
+/* ── One tab: icon over label, no box, no background ──────────────────── */
 .mbg-nav-tab {
   position: relative;
-  /* Compact tiles (smaller than the ICAN apps'): still scrolls sideways, and
+  /* Compact (smaller than the ICAN apps'): still scrolls sideways, and
      centres, when there are more of them than fit. */
   flex: 1 0 3.5rem;
   max-width: 4.5rem;
@@ -94,7 +88,7 @@ html[data-theme="dark"] .mbg-nav {
   border-radius: 0.875rem;
   color: var(--mn-text);
   background: none;
-  transition: color 0.25s ease, transform 0.18s ease, box-shadow 0.3s ease;
+  transition: color 0.25s ease, transform 0.18s ease;
   -webkit-tap-highlight-color: transparent;
   /* A soft halo of the page colour keeps the label legible over busy content. */
   text-shadow:
@@ -103,7 +97,7 @@ html[data-theme="dark"] .mbg-nav {
     0 1px 2px color-mix(in srgb, var(--mn-surface) 90%, transparent);
 }
 .mbg-nav-tab:hover { color: color-mix(in srgb, var(--mn-active) 70%, var(--mn-text)); }
-.mbg-nav-tab:active { transform: scale(0.94); }
+.mbg-nav-tab:active { transform: scale(0.92); }
 .mbg-nav-tab svg {
   filter:
     drop-shadow(0 0 4px color-mix(in srgb, var(--mn-surface) 90%, transparent))
@@ -112,10 +106,14 @@ html[data-theme="dark"] .mbg-nav {
 
 .mbg-nav-tab-active,
 .mbg-nav-tab-active:hover { color: var(--mn-active); }
-/* An outer glow only: a box-shadow is never painted inside its own box, so the
-   tile's interior stays fully transparent. */
-.mbg-nav-tab-active {
-  box-shadow: 0 0 12px -4px color-mix(in srgb, var(--mn-c2) 65%, transparent);
+
+/* The active icon: its own strokes take the travelling gradient, so the colour
+   follows the glyph's real outline. (The plain colour after the url() is the
+   fallback if the gradient is ever missing.) No coloured glow: nothing but the
+   shape itself, plus the same neutral halo every icon has. */
+.mbg-nav-tab-active svg {
+  stroke: url(#mbg-line) var(--mn-active);
+  stroke-width: 2.25;
 }
 
 /* Dock effect: only where scroll-driven animations exist. `scale` (not
@@ -127,52 +125,6 @@ html[data-theme="dark"] .mbg-nav {
   }
 }
 
-/* ── The edge line ────────────────────────────────────────────────────── */
-.mbg-nav-tab::before,
-.mbg-nav-tab::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  padding: 1.5px;                 /* line thickness */
-  border-radius: inherit;
-  pointer-events: none;
-  /* Keep only the 1.5px rim: full box minus the content box. */
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
-  mask-composite: exclude;
-}
-
-/* Idle: a faint full-circle gradient hairline. */
-.mbg-nav-tab::before {
-  background: conic-gradient(from 0deg, var(--mn-c1), var(--mn-c2), var(--mn-c3), var(--mn-c1));
-  opacity: 0.26;
-  transition: opacity 0.3s ease;
-}
-
-/* Active: a comet with a fading tail and a bright head, orbiting the rim. */
-.mbg-nav-tab::after {
-  background: conic-gradient(
-    from var(--mn-angle),
-    transparent 0deg 190deg,
-    var(--mn-c1) 250deg,
-    var(--mn-c2) 312deg,
-    var(--mn-c3) 350deg,
-    transparent 360deg
-  );
-  opacity: 0;
-  transition: opacity 0.35s ease;
-}
-.mbg-nav-tab-active::before { opacity: 0.5; }
-.mbg-nav-tab-active::after {
-  opacity: 1;
-  animation: mn-orbit 2.6s linear infinite;
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .mbg-nav-tab-active::after {
-    animation: none;
-    --mn-angle: 215deg;
-  }
   .mbg-nav-tab { transition: none; animation: none; }
 }
