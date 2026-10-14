@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import NavGlowDefs from './NavGlowDefs';
 import './mobileBottomTabs.css';
 
 export interface BottomTab<Id extends string = string> {
@@ -20,11 +21,11 @@ interface MobileBottomTabsProps<Id extends string> {
 // reach of the thumb. Deliberately capped at 4 — everything else stays in the
 // header's Menu sheet.
 //
-// Truly transparent: no bar fill and no tile fill — each tab is just its icon
-// (over a small label) with its own colour line along its edge, orbiting on the
-// active one, spaced apart in a row that scrolls sideways (see
-// mobileBottomTabs.css). Hidden from `sm` (or `md`) up, where each dashboard
-// already has its full top tab strip.
+// Bare icons, like TikTok's: nothing painted behind or around them. The current
+// tab's icon is drawn in colours that travel along its own shape; the row is
+// compact, sits on the bottom edge, and scrolls sideways if there are ever more
+// tabs than fit (see mobileBottomTabs.css). Hidden from `sm` (or `md`) up, where
+// each dashboard already has its full top tab strip.
 //
 // Pages that render this need ~5rem of bottom padding so their last card isn't
 // hidden under it (the dashboards already carry pb-28).
@@ -42,6 +43,7 @@ export default function MobileBottomTabs<Id extends string>({
       aria-label="Primary"
       className={`mbg-nav fixed inset-x-0 bottom-0 z-[60] mx-auto flex max-w-md ${hideFrom === 'md' ? 'md:hidden' : 'sm:hidden'}`}
     >
+      <NavGlowDefs />
       {visible.map((tab) => {
         const active = activeTab === tab.id;
         const Icon = tab.icon;
