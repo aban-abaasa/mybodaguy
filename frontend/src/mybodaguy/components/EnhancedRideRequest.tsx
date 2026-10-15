@@ -356,10 +356,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
   // Service options — real vehicle/weather filters matched against riders' actual registered attributes
   const [serviceType, setServiceType] = useState<ServiceType>(fixedServiceType || 'ride');
-  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('normal');
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('supermarket');
   const [supermarkets, setSupermarkets] = useState<Supermarket[]>([]);
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
-  const [storeTypeFilter, setStoreTypeFilter] = useState<BusinessTypeFilter>('all');
+  const [storeListOpen, setStoreListOpen] = useState(false);
   // Lets the customer search the store list by name/area instead of only
   // scrolling it, and — paired with customerGpsLocation below — ranks
   // stores by real distance so "nearest available" is an actual answer,
@@ -379,6 +379,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [nearbyStoreProducts, setNearbyStoreProducts] = useState<Record<string, Product[]>>({});
   const [loadingNearbyProducts, setLoadingNearbyProducts] = useState(false);
   const [deliveryCart, setDeliveryCart] = useState<CartLine[]>([]);
+  // Bumped on reset so the product picker remounts with an empty cart
+  const [pickerKey, setPickerKey] = useState(0);
+  // Products from every store are always shown. A delivery picks up from ONE
+  // store: the one the cart items come from, else the one chosen in the list.
+  const cartStoreIds = Array.from(new Set(deliveryCart.map(l => l.product.supermarket_id)));
+  const cartSpansStores = cartStoreIds.length > 1;
+  const activeStoreId = cartStoreIds.length === 0 ? selectedSupermarketId : cartStoreIds.length === 1 ? cartStoreIds[0] : '';
   // How long the customer is willing to wait for a store order before the
   // rider is warned and, after a grace period, the customer can pull a
   // refund (mbg_request_ride requires this for delivery_mode='supermarket'
@@ -472,11 +479,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     });
   }, [customerId, serviceType, deliveryExpenseType, myBusinesses.length, loadingMyBusinesses]);
 
-  // Clear any selected products once the customer leaves the supermarket
-  // delivery flow or switches stores, so a stale cart never gets submitted.
+  // Clear any selected products once the customer leaves the store delivery
+  // flow, so a stale cart never gets submitted.
   useEffect(() => {
-    if (deliveryMode !== 'supermarket' || !selectedSupermarketId) setDeliveryCart([]);
-  }, [serviceType, deliveryMode, selectedSupermarketId]);
+    if (serviceType !== 'delivery' || deliveryMode !== 'supermarket') setDeliveryCart([]);
+  }, [serviceType, deliveryMode]);
 
   // Power-type/rain-cover filters are hidden outside the Boda filter — reset
   // them too, so switching to Car/Van/Truck can't leave a stale boda-only
@@ -723,18 +730,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const selectedStore = supermarkets.find(sm => sm.id === selectedSupermarketId) ?? null;
   const selectedStoreAbroad = !!selectedStore && isAbroad(selectedStore);
 
-  // Store list filtered by the chosen business type, then ranked nearest
+  // Every store, ranked nearest
   // first (once the customer's GPS position is known) so "recommend the
   // nearest available store" is an actual sort, not just a label. Stores
   // with no coordinates on file yet (see SupermarketProductManager.tsx's
   // location editor) sort to the end rather than being hidden — still
   // choosable, just not rankable.
-  const filteredStores = (storeTypeFilter === 'all'
-    ? supermarkets
-    : storeTypeFilter === 'abroad'
-      ? abroadStores
-      : supermarkets.filter(sm => sm.business_type === storeTypeFilter)
-  )
+  const filteredStores = supermarkets
     .map(sm => ({
       ...sm,
       distanceKm: (customerGpsLocation && sm.latitude != null && sm.longitude != null)
@@ -841,6 +843,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setImportLaunch(null);
     setSelectedSupermarketId('');
     setDeliveryCart([]);
+    setPickerKey(k => k + 1);
   };
   // In "From a Store" mode: the moment a product from a store abroad is chosen, the journey takes over.
   useEffect(() => {
@@ -851,7 +854,6 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
   const jumpToStoreProduct = (supermarketId: string) => {
     setDeliveryMode('supermarket');
-    setStoreTypeFilter('all');
     setSelectedSupermarketId(supermarketId);
   };
 
@@ -863,27 +865,6 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         return sm.name.toLowerCase().includes(q) || (sm.location || '').toLowerCase().includes(q);
       })
     : filteredStores;
-
-  useEffect(() => {
-    if (!selectedSupermarketId) return;
-    if (!filteredStores.some(sm => sm.id === selectedSupermarketId)) {
-      setSelectedSupermarketId('');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storeTypeFilter]);
-
-  // "Be smart" default: as soon as a store type is being browsed and none
-  // is chosen yet, auto-pick the nearest available one (falling back to the
-  // first in the list if GPS/coordinates aren't available) instead of
-  // leaving the customer staring at an empty picker — they can still
-  // search/switch to a different store afterwards.
-  useEffect(() => {
-    if (serviceType !== 'delivery' || deliveryMode !== 'supermarket') return;
-    if (selectedSupermarketId) return;
-    // Never auto-pick a store abroad: it would drop the customer into a shipping order they didn't ask for.
-    const fallback = nearestStoreId ?? filteredStores.find(sm => !isAbroad(sm))?.id ?? null;
-    if (fallback) setSelectedSupermarketId(fallback);
-  }, [serviceType, deliveryMode, selectedSupermarketId, nearestStoreId, filteredStores]);
 
   useEffect(() => {
     if (!customerId) return;
@@ -923,12 +904,12 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // that fails (no address on file, geocoding down) does the customer see
   // anything to fill in themselves.
   useEffect(() => {
-    if (serviceType !== 'delivery' || deliveryMode !== 'supermarket' || !selectedSupermarketId) {
+    if (serviceType !== 'delivery' || deliveryMode !== 'supermarket' || !activeStoreId) {
       setPickupIsAutoFromSupermarket(false);
       setPickupGeocodingStore(false);
       return;
     }
-    const sm = supermarkets.find(s => s.id === selectedSupermarketId);
+    const sm = supermarkets.find(s => s.id === activeStoreId);
     if (!sm || isAbroad(sm)) {
       setPickupIsAutoFromSupermarket(false);
       return;
@@ -966,7 +947,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       }
     });
     return () => { cancelled = true; };
-  }, [serviceType, deliveryMode, selectedSupermarketId, supermarkets, homeCountry]);
+  }, [serviceType, deliveryMode, activeStoreId, supermarkets, homeCountry]);
 
   // Smart default drop-off: pre-fill (but keep editable) from the
   // customer's saved default area when starting a fresh request.
@@ -1178,8 +1159,12 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       toast.error('Please select both pickup and drop-off locations from suggestions');
       return;
     }
-    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && !selectedSupermarketId) {
-      toast.error('Please choose a supermarket for this delivery');
+    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && cartSpansStores) {
+      toast.error('A delivery picks up from one store — remove items from the other stores');
+      return;
+    }
+    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && !activeStoreId) {
+      toast.error('Add an item from a store (or pick a store) for this delivery');
       return;
     }
 
@@ -1281,8 +1266,12 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       toast.error('Please select both pickup and drop-off locations from suggestions');
       return;
     }
-    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && !selectedSupermarketId) {
-      toast.error('Please choose a supermarket for this delivery');
+    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && cartSpansStores) {
+      toast.error('A delivery picks up from one store — remove items from the other stores');
+      return;
+    }
+    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && !activeStoreId) {
+      toast.error('Add an item from a store (or pick a store) for this delivery');
       return;
     }
     if (needsCrossBorderPath) {
@@ -1324,6 +1313,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   };
 
   const handleRequestRide = async (rider: MatchedRider, opts?: { auto?: boolean }) => {
+    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && cartSpansStores) {
+      toast.error('A delivery picks up from one store — remove items from the other stores');
+      return;
+    }
     if (serviceType === 'delivery' && deliveryMode === 'supermarket' && deliveryCart.length === 0) {
       toast.error('Add at least one item from the store before requesting a delivery');
       return;
@@ -1384,7 +1377,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       const requestArgs = {
         p_service_type: serviceType,
         p_delivery_mode: serviceType === 'delivery' ? deliveryMode : null,
-        p_supermarket_id: serviceType === 'delivery' && deliveryMode === 'supermarket' ? selectedSupermarketId : null,
+        p_supermarket_id: serviceType === 'delivery' && deliveryMode === 'supermarket' ? activeStoreId : null,
         p_rider_id: rider.rider_id,
         p_pickup_location: selectedPickup!.fullAddress,
         p_pickup_lat: selectedPickup!.coordinates.lat,
@@ -1608,6 +1601,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
+    setDeliveryCart([]);
+    setPickerKey(k => k + 1);
     setPickupIsAutoFromSupermarket(false);
     setRouteInfo(null);
   };
@@ -1643,6 +1638,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
+    setDeliveryCart([]);
+    setPickerKey(k => k + 1);
     setPickupIsAutoFromSupermarket(false);
     setRouteInfo(null);
   };
@@ -2057,7 +2054,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                     <div className="space-y-3">
                       {abroadPreview.map(sm => (
                         <div key={sm.id} className="border border-violet-200 rounded-lg p-2.5 bg-violet-50/40">
-                          <button type="button" onClick={() => { setDeliveryMode('supermarket'); setStoreTypeFilter('abroad'); setSelectedSupermarketId(sm.id); }} className="w-full flex items-center justify-between gap-2 mb-2 text-left">
+                          <button type="button" onClick={() => { setDeliveryMode('supermarket'); setSelectedSupermarketId(sm.id); }} className="w-full flex items-center justify-between gap-2 mb-2 text-left">
                             <span className="min-w-0 truncate text-xs font-semibold text-slate-700">
                               {typeEmoji(sm.business_type)} {sm.name}
                               <span className="ml-1.5 text-[10px] font-normal text-violet-600">🌍 {sm.country} · {sm.price_currency || 'UGX'}</span>
@@ -2087,71 +2084,74 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
               {deliveryMode === 'supermarket' && (
                 <>
-                  <div className="flex gap-1.5 overflow-x-auto pb-0.5">
-                    {BUSINESS_TYPE_FILTERS.map(f => (
-                      <button
-                        key={f.value}
-                        onClick={() => setStoreTypeFilter(f.value)}
-                        className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
-                          storeTypeFilter === f.value ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'
-                        }`}
-                      >
-                        <span>{f.emoji}</span> {f.label}
-                      </button>
-                    ))}
-                  </div>
+                  {/* Products from every store load automatically; the store list just narrows them.
+                      Ranked nearest-first once the customer's GPS position resolves. */}
+                  <button
+                    type="button"
+                    onClick={() => setStoreListOpen(o => !o)}
+                    aria-expanded={storeListOpen}
+                    className="flex w-full items-center justify-between gap-2 py-1 text-left text-sm font-semibold text-slate-700"
+                  >
+                    <span className="min-w-0 truncate">🏬 {selectedStore?.name || 'All stores'}</span>
+                    <span className="text-xs font-normal text-slate-400">{storeListOpen ? 'Hide stores' : 'Stores'}</span>
+                  </button>
 
-                  {/* Always searchable, and ranked nearest-first once the
-                      customer's GPS position resolves — see the
-                      customerGpsLocation effect and filteredStores sort
-                      above. */}
-                  <div className="relative">
-                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                    <input
-                      value={storeSearchQuery}
-                      onChange={(e) => setStoreSearchQuery(e.target.value)}
-                      placeholder="Search stores by name or area…"
-                      className="w-full pl-8 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-                    />
-                  </div>
-                  {!customerGpsLocation && (
-                    <p className="text-[11px] text-slate-400 -mt-1">
-                      📍 Turn on location to see which store is nearest.
-                    </p>
+                  {storeListOpen && (
+                    <>
+                      <div className="relative">
+                        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                        <input
+                          value={storeSearchQuery}
+                          onChange={(e) => setStoreSearchQuery(e.target.value)}
+                          placeholder="Search stores by name or area…"
+                          className="w-full pl-8 pr-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
+                        />
+                      </div>
+                      {!customerGpsLocation && (
+                        <p className="text-[11px] text-slate-400 -mt-1">📍 Turn on location to see which store is nearest.</p>
+                      )}
+                      <ul className="max-h-56 overflow-y-auto divide-y divide-slate-100 text-sm" aria-label="Stores">
+                        <li>
+                          <button
+                            type="button"
+                            onClick={() => { setSelectedSupermarketId(''); setStoreListOpen(false); }}
+                            className={`w-full py-2 text-left ${!selectedSupermarketId ? 'font-bold text-blue-600' : 'text-slate-700'}`}
+                          >
+                            All stores
+                          </button>
+                        </li>
+                        {visibleStores.map(sm => (
+                          <li key={sm.id}>
+                            <button
+                              type="button"
+                              onClick={() => { setSelectedSupermarketId(sm.id === selectedSupermarketId ? '' : sm.id); setStoreListOpen(false); }}
+                              className={`flex w-full items-baseline justify-between gap-3 py-2 text-left ${sm.id === selectedSupermarketId ? 'font-bold text-blue-600' : 'text-slate-700'}`}
+                            >
+                              <span className="min-w-0 truncate">
+                                {sm.name}
+                                {sm.id === nearestStoreId && <span className="ml-1.5 text-[10px] font-semibold text-green-600">Nearest</span>}
+                                {isAbroad(sm) && <span className="ml-1.5 text-[10px] font-semibold text-violet-600">🌍 {sm.country}</span>}
+                              </span>
+                              <span className="flex-shrink-0 text-xs font-normal text-slate-400">
+                                {sm.distanceKm != null && !isAbroad(sm)
+                                  ? (sm.distanceKm < 1 ? `${Math.round(sm.distanceKm * 1000)}m` : `${sm.distanceKm.toFixed(1)}km`)
+                                  : sm.location}
+                              </span>
+                            </button>
+                          </li>
+                        ))}
+                        {visibleStores.length === 0 && (
+                          <li className="py-2 text-xs text-slate-400">{storeSearchQuery ? 'No stores match your search.' : 'No stores yet.'}</li>
+                        )}
+                      </ul>
+                    </>
                   )}
 
-                  <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-lg divide-y divide-slate-100">
-                    {visibleStores.map(sm => (
-                      <button
-                        key={sm.id}
-                        type="button"
-                        onClick={() => setSelectedSupermarketId(sm.id)}
-                        className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left text-sm transition-colors ${
-                          selectedSupermarketId === sm.id ? 'bg-orange-50 text-orange-700' : 'hover:bg-slate-50 text-slate-700'
-                        }`}
-                      >
-                        <span className="min-w-0 truncate flex items-center gap-1.5">
-                          {typeEmoji(sm.business_type)} {sm.name} — {sm.location}
-                          {sm.id === nearestStoreId && (
-                            <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-green-100 text-green-700 rounded-full font-semibold">Nearest</span>
-                          )}
-                          {isAbroad(sm) && (
-                            <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 bg-violet-100 text-violet-700 rounded-full font-semibold">🌍 {sm.country}</span>
-                          )}
-                        </span>
-                        {sm.distanceKm != null && !isAbroad(sm) && (
-                          <span className="flex-shrink-0 text-xs text-slate-400">
-                            {sm.distanceKm < 1 ? `${Math.round(sm.distanceKm * 1000)}m` : `${sm.distanceKm.toFixed(1)}km`}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                    {visibleStores.length === 0 && (
-                      <p className="px-3 py-3 text-xs text-slate-400 text-center">
-                        {storeSearchQuery ? 'No stores match your search.' : 'No stores of this type yet.'}
-                      </p>
-                    )}
-                  </div>
+                  {cartSpansStores && (
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                      A delivery picks up from one store. Remove items so they all come from the same store.
+                    </p>
+                  )}
 
                   {selectedSupermarketId && selectedStoreAbroad && selectedStore && (
                     <div className="p-3 rounded-lg border border-violet-200 bg-violet-50 text-xs text-violet-800 flex items-start gap-2">
@@ -2161,15 +2161,17 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                       </span>
                     </div>
                   )}
-                  {selectedSupermarketId && (
-                    <ProductPicker
-                      supermarketId={selectedSupermarketId}
-                      currency={selectedStoreAbroad ? selectedStore?.price_currency || 'UGX' : undefined}
-                      onCartChange={setDeliveryCart}
-                    />
-                  )}
+                  <ProductPicker
+                    key={pickerKey}
+                    allStores
+                    supermarketId={selectedSupermarketId || null}
+                    stores={supermarkets.filter(sm => !isAbroad(sm))}
+                    currency={selectedStoreAbroad ? selectedStore?.price_currency || 'UGX' : undefined}
+                    onCartChange={setDeliveryCart}
+                    fullPage
+                  />
 
-                  {selectedSupermarketId && deliveryCart.length > 0 && (
+                  {deliveryCart.length > 0 && (
                     <div className="p-3 rounded-lg border-2 border-slate-200 bg-slate-50">
                       <label className="block text-sm font-medium text-slate-700 mb-1">
                         Deliver within
@@ -2282,7 +2284,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               <CheckCircle size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-green-500" />
             )}
           </div>
-          {serviceType === 'delivery' && deliveryMode === 'supermarket' && selectedSupermarketId && !selectedStoreAbroad && !pickupIsAutoFromSupermarket && !pickupGeocodingStore && (
+          {serviceType === 'delivery' && deliveryMode === 'supermarket' && activeStoreId && !selectedStoreAbroad && !pickupIsAutoFromSupermarket && !pickupGeocodingStore && (
             <p className="text-xs text-amber-600 mt-1">
               Couldn't automatically locate this store — please confirm the pickup point manually.
             </p>

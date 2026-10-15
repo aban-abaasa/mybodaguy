@@ -35,6 +35,8 @@ interface Product {
   images: { url: string }[] | null;
   available_stock: number;
   in_stock: boolean;
+  /** Store this line belongs to — checkout records each store's sale separately. */
+  supermarket_id?: string;
 }
 
 interface CartItem {
@@ -74,21 +76,6 @@ interface SupermarketRow {
   location: string | null;
   business_type: string;
 }
-
-// Store type filter — supermarkets, hotels, boutiques, and restaurants/cafés
-// all live in the same `supermarkets` table (business_type column), so this
-// is purely a client-side filter over the one list already loaded.
-type BusinessTypeFilter = 'all' | 'supermarket' | 'hotel' | 'boutique' | 'restaurant_cafe';
-
-const BUSINESS_TYPE_FILTERS: { value: BusinessTypeFilter; label: string; emoji: string }[] = [
-  { value: 'all', label: 'All', emoji: '🏬' },
-  { value: 'supermarket', label: 'Supermarkets', emoji: '🏪' },
-  { value: 'hotel', label: 'Hotels', emoji: '🏨' },
-  { value: 'boutique', label: 'Boutiques', emoji: '👗' },
-  { value: 'restaurant_cafe', label: 'Restaurants', emoji: '🍽️' },
-];
-
-const typeEmoji = (t: string) => BUSINESS_TYPE_FILTERS.find(f => f.value === t)?.emoji || '🏪';
 
 // Extend Window for BarcodeDetector (not in standard TS lib yet)
 declare global {
@@ -134,13 +121,14 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [pin, setPin] = useState('');
   const [pinBusy, setPinBusy] = useState(false);
 
-  // Browse-a-store mode — real inventory picker as an alternative to scanning
-  const [shopMode, setShopMode] = useState<ShopMode>('scan');
+  // Products load right away (browse); scanning is one tap away
+  const [shopMode, setShopMode] = useState<ShopMode>('browse');
   const [supermarkets, setSupermarkets] = useState<SupermarketRow[]>([]);
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
-  const [typeFilter, setTypeFilter] = useState<BusinessTypeFilter>('all');
-  // Store chooser stays collapsed once a store is picked, so products get the page
-  const [storePanelOpen, setStorePanelOpen] = useState(true);
+  // Simple store list — collapsed by default; products from every store always show
+  const [storePanelOpen, setStorePanelOpen] = useState(false);
+  // Store of the last completed checkout, for the receipt's website/QR after the cart is cleared
+  const [receiptStoreId, setReceiptStoreId] = useState('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -178,20 +166,6 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       .order('name')
       .then(({ data }) => setSupermarkets(data || []));
   }, []);
-
-  // Store list filtered by the chosen business type — reset the current
-  // selection if it no longer belongs to the active filter.
-  const filteredSupermarkets = typeFilter === 'all'
-    ? supermarkets
-    : supermarkets.filter(sm => sm.business_type === typeFilter);
-
-  useEffect(() => {
-    if (!selectedSupermarketId) return;
-    if (!filteredSupermarkets.some(sm => sm.id === selectedSupermarketId)) {
-      setSelectedSupermarketId('');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [typeFilter]);
 
   // ── Camera start / stop ───────────────────────────────────────────────────
 
@@ -305,7 +279,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       return;
     }
 
-    const product = data[0] as Product;
+    const product = { ...(data[0] as Product), supermarket_id: selectedSupermarketId };
 
     if (!product.in_stock) {
       setScanError(`${product.name} is out of stock`);
@@ -362,6 +336,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           images: l.product.image_url ? [{ url: l.product.image_url }] : null,
           available_stock: l.product.stock_qty,
           in_stock: l.product.stock_qty > 0,
+          supermarket_id: l.product.supermarket_id,
         },
         quantity: l.qty,
         line_total: Number(l.product.price_ugx) * l.qty,
@@ -395,33 +370,59 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     if (cart.length === 0) return;
     setSubmitting(true);
 
-    const cartPayload = cart.map(i => ({
-      product_id: i.product.product_id,
-      quantity: i.quantity,
-      unit_price: i.product.selling_price,
-      tax_rate: i.product.tax_rate,
-    }));
-
-    const { data, error } = await supabase.rpc('customer_self_checkout', {
-      p_cart: cartPayload,
-      p_payment_method: payment,
-      p_pay_with_ican: payment === 'ican',
+    // Browsing shows every store, so one cart can span several stores. Each
+    // store's sale is recorded separately; the receipts are merged below.
+    const groups = new Map<string, CartItem[]>();
+    cart.forEach(item => {
+      const storeId = item.product.supermarket_id || selectedSupermarketId;
+      groups.set(storeId, [...(groups.get(storeId) || []), item]);
     });
+
+    const paid: Array<{ data: any; items: CartItem[] }> = [];
+    let failure = '';
+
+    for (const [, items] of groups) {
+      const cartPayload = items.map(i => ({
+        product_id: i.product.product_id,
+        quantity: i.quantity,
+        unit_price: i.product.selling_price,
+        tax_rate: i.product.tax_rate,
+      }));
+
+      const { data, error } = await supabase.rpc('customer_self_checkout', {
+        p_cart: cartPayload,
+        p_payment_method: payment,
+        p_pay_with_ican: payment === 'ican',
+      });
+
+      if (error || !data?.success) {
+        failure = error?.message ?? data?.error ?? 'Checkout failed';
+        break;
+      }
+      paid.push({ data, items });
+    }
 
     setSubmitting(false);
 
-    if (error || !data?.success) {
-      toast.error(error?.message ?? data?.error ?? 'Checkout failed');
+    // Stores already paid stay paid: drop their lines so a retry can't charge them twice.
+    if (paid.length > 0 && failure) {
+      const paidIds = new Set(paid.flatMap(r => r.items.map(i => i.product.product_id)));
+      setCart(prev => prev.filter(i => !paidIds.has(i.product.product_id)));
+      if (user?.id) getBalance(user.id).then(setIcanBalance).catch(() => {});
+    }
+    if (failure) {
+      toast.error(paid.length > 0 ? `${failure} Items from other stores in your cart were already paid for.` : failure);
       return;
     }
 
+    const cashback = paid.reduce((sum, r) => sum + (r.data.ican_cashback?.success ? Number(r.data.ican_cashback.net_credited || 0) : 0), 0);
     setReceipt({
-      transaction_id: data.transaction_id,
-      receipt_number: data.receipt_number,
-      total_ugx: data.total_ugx,
-      tax_ugx: data.tax_ugx,
-      items_count: data.items_count,
-      items: data.items?.length ? data.items : cart.map(i => ({
+      transaction_id: paid[0].data.transaction_id,
+      receipt_number: paid.map(r => r.data.receipt_number).filter(Boolean).join(', '),
+      total_ugx: paid.reduce((sum, r) => sum + Number(r.data.total_ugx || 0), 0),
+      tax_ugx: paid.reduce((sum, r) => sum + Number(r.data.tax_ugx || 0), 0),
+      items_count: paid.reduce((sum, r) => sum + Number(r.data.items_count || 0), 0),
+      items: paid.flatMap(r => r.data.items?.length ? r.data.items : r.items.map(i => ({
         product_id: i.product.product_id,
         product_name: i.product.name,
         product_sku: i.product.sku,
@@ -429,14 +430,16 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
         unit_price: i.product.selling_price,
         tax_rate: i.product.tax_rate,
         line_total: i.line_total,
-      })),
-      ican_cashback: data.ican_cashback,
+      }))),
+      ican_cashback: cashback > 0 ? { success: true, net_credited: cashback } : paid[0].data.ican_cashback,
     });
 
     // Refresh ICAN balance
     if (user?.id) getBalance(user.id).then(setIcanBalance).catch(() => {});
 
-    setReceiptWebsiteUrl(await resolveReceiptWebsite());
+    const firstStoreId = groups.keys().next().value as string;
+    setReceiptStoreId(firstStoreId);
+    setReceiptWebsiteUrl(await resolveReceiptWebsite(firstStoreId));
     setCart([]);
     setState('complete');
   }
@@ -454,9 +457,9 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     setState('idle');
   }
 
-  async function resolveReceiptWebsite() {
-    if (!selectedSupermarketId) return window.location.origin;
-    return (await getStoreWebsiteUrl({ supermarketId: selectedSupermarketId })) ?? window.location.origin;
+  async function resolveReceiptWebsite(storeId: string = siteStoreId) {
+    if (!storeId) return window.location.origin;
+    return (await getStoreWebsiteUrl({ supermarketId: storeId })) ?? window.location.origin;
   }
 
   // Instalments are set up and followed up on the store's business website
@@ -464,7 +467,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   // opens that site. Opened synchronously-first so mobile browsers don't block it.
   async function openInstalmentsOnWebsite() {
     const win = window.open('', '_blank');
-    const site = selectedSupermarketId ? await getStoreSiteForCustomer({ supermarketId: selectedSupermarketId }) : null;
+    const site = siteStoreId ? await getStoreSiteForCustomer({ supermarketId: siteStoreId }) : null;
     if (!site) {
       win?.close();
       toast.error("We couldn't find this store's website. Try again in a moment.");
@@ -492,14 +495,14 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   }
 
   async function resolveStorePayUrl(): Promise<string | null> {
-    if (!selectedSupermarketId) return null;
+    if (!siteStoreId) return null;
     try {
       // The store's page on the IcanEra site (customers can't read the company table
       // directly, so this goes through get_store_public_website).
-      const storeSite = await getStoreWebsiteUrl({ supermarketId: selectedSupermarketId });
+      const storeSite = await getStoreWebsiteUrl({ supermarketId: siteStoreId });
       if (storeSite) return `${storeSite}?pay=1`;
       const { data: store } = await supabase.from('supermarkets')
-        .select('pichin_business_profile_id').eq('id', selectedSupermarketId).maybeSingle();
+        .select('pichin_business_profile_id').eq('id', siteStoreId).maybeSingle();
       const businessId = store?.pichin_business_profile_id;
       if (businessId) {
         const { data: business } = await supabase.from('business_profiles')
@@ -508,7 +511,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
         if (site) return /^https?:\/\//i.test(site) ? site : `https://${site}`;
       }
       // Every store has a website: with no company site yet, its storefront on icanera.space.
-      return (await getStoreSiteForCustomer({ supermarketId: selectedSupermarketId }))?.url ?? null;
+      return (await getStoreSiteForCustomer({ supermarketId: siteStoreId }))?.url ?? null;
     } catch (error) {
       console.warn('Could not resolve store website for payment:', error);
       return null;
@@ -517,7 +520,11 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
 
   // Pay button: wallet → PIN first, anything else → the store's website.
   async function handlePay() {
-    if (payment !== 'ican') { await payOnStoreWebsite(); return; }
+    if (payment !== 'ican') {
+      if (cartStoreIds.length > 1) { toast.error('Website payment is per store — remove items so they all come from one store, or pay with your wallet.'); return; }
+      await payOnStoreWebsite();
+      return;
+    }
     if (!user?.id) { toast.error('Sign in to pay with your IcanEra wallet'); return; }
     try {
       if (!(await hasPinSet(user.id))) { setNeedsPin(true); return; }
@@ -552,7 +559,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     const printWindow = window.open('', '_blank', 'width=720,height=800');
     if (!printWindow) return;
     const rows = receipt.items.map((item) => `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td>${formatUGX(item.line_total)}</td></tr>`).join('');
-    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${receipt.receipt_number}</title><style>body{font:15px Georgia,serif;background:#f5f2e9;color:#25253f;padding:32px}.receipt{max-width:560px;margin:auto;background:#fffdf8;border:1px solid #c4a052;border-radius:16px;padding:28px}.head{margin:-28px -28px 22px;padding:22px;background:#312e81;color:#fff;border-bottom:4px solid #c4a052;border-radius:16px 16px 0 0}table{width:100%;border-collapse:collapse}td{padding:9px;border-bottom:1px solid #e8e1d0}td:last-child{text-align:right}.total{margin-top:18px;padding:14px;background:#312e81;color:white;border-radius:8px;font-size:20px;font-weight:bold;text-align:right}.qr{text-align:center;margin-top:20px;padding:16px;background:#faf8f1;border:1px solid #c4a052}.qr img{width:145px;height:145px}.qr small{display:block;color:#526176;overflow-wrap:anywhere}@media print{body{padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><main class="receipt"><header class="head"><h1>${supermarkets.find((sm) => sm.id === selectedSupermarketId)?.name || 'BodaGoEra store'}</h1><p>Customer purchase receipt</p><strong>${receipt.receipt_number}</strong><br>${new Date().toLocaleString('en-UG')}</header><table>${rows}</table><div class="total">TOTAL PAID ${formatUGX(receipt.total_ugx)}</div><section class="qr"><strong>Visit this store's public website</strong><br><img src="${qr}" alt="Store website QR"><small>${website}</small></section></main><script>window.onload=()=>window.print()</script></body></html>`);
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${receipt.receipt_number}</title><style>body{font:15px Georgia,serif;background:#f5f2e9;color:#25253f;padding:32px}.receipt{max-width:560px;margin:auto;background:#fffdf8;border:1px solid #c4a052;border-radius:16px;padding:28px}.head{margin:-28px -28px 22px;padding:22px;background:#312e81;color:#fff;border-bottom:4px solid #c4a052;border-radius:16px 16px 0 0}table{width:100%;border-collapse:collapse}td{padding:9px;border-bottom:1px solid #e8e1d0}td:last-child{text-align:right}.total{margin-top:18px;padding:14px;background:#312e81;color:white;border-radius:8px;font-size:20px;font-weight:bold;text-align:right}.qr{text-align:center;margin-top:20px;padding:16px;background:#faf8f1;border:1px solid #c4a052}.qr img{width:145px;height:145px}.qr small{display:block;color:#526176;overflow-wrap:anywhere}@media print{body{padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><main class="receipt"><header class="head"><h1>${supermarkets.find((sm) => sm.id === siteStoreId)?.name || 'BodaGoEra store'}</h1><p>Customer purchase receipt</p><strong>${receipt.receipt_number}</strong><br>${new Date().toLocaleString('en-UG')}</header><table>${rows}</table><div class="total">TOTAL PAID ${formatUGX(receipt.total_ugx)}</div><section class="qr"><strong>Visit this store's public website</strong><br><img src="${qr}" alt="Store website QR"><small>${website}</small></section></main><script>window.onload=()=>window.print()</script></body></html>`);
     printWindow.document.close();
   }
 
@@ -563,6 +570,9 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const canPayICAN = (icanBalance?.ican ?? 0) >= icanNeeded;
 
   const activeStore = supermarkets.find(sm => sm.id === selectedSupermarketId) || null;
+  // Store whose website/QR/receipt applies: the cart's store, else the chosen one, else the last paid one.
+  const cartStoreIds = Array.from(new Set(cart.map(i => i.product.supermarket_id).filter(Boolean) as string[]));
+  const siteStoreId = cartStoreIds.length === 1 ? cartStoreIds[0] : (selectedSupermarketId || receiptStoreId);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -650,7 +660,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             >
               <Store size={15} className="flex-shrink-0 text-orange-500" />
               <span className="min-w-0 flex-1 truncate">
-                {activeStore ? activeStore.name : 'Choose a store'}
+                {activeStore ? activeStore.name : 'All stores'}
               </span>
               <ChevronDown size={15} className={`flex-shrink-0 text-slate-400 transition-transform ${storePanelOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -697,54 +707,47 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             )}
           </div>
 
-          {/* Collapsible store chooser — opens itself until a store is picked */}
-          {storePanelOpen && (
-            <div className="space-y-2">
-              <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-hide">
-                {BUSINESS_TYPE_FILTERS.map(f => (
+          {/* Simple store list — tap a store to narrow the products to it, tap again for all stores.
+              Scanning needs a store, so the list stays open until one is picked. */}
+          {(storePanelOpen || (shopMode === 'scan' && !selectedSupermarketId)) && (
+            <ul className="divide-y divide-slate-100 text-sm" aria-label="Stores">
+              {shopMode === 'browse' && (
+                <li>
                   <button
-                    key={f.value}
                     type="button"
-                    onClick={() => setTypeFilter(f.value)}
-                    className={`shrink-0 flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
-                      typeFilter === f.value ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500'
-                    }`}
+                    onClick={() => { setSelectedSupermarketId(''); setStorePanelOpen(false); }}
+                    className={`w-full py-2 text-left ${!selectedSupermarketId ? 'font-bold text-orange-600' : 'text-slate-700'}`}
                   >
-                    <span>{f.emoji}</span> {f.label}
+                    All stores
                   </button>
-                ))}
-              </div>
-              <select
-                value={selectedSupermarketId}
-                onChange={e => { setSelectedSupermarketId(e.target.value); if (e.target.value) setStorePanelOpen(false); }}
-                aria-label="Store"
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-orange-300"
-              >
-                <option value="">Choose your store…</option>
-                {filteredSupermarkets.map(sm => (
-                  <option key={sm.id} value={sm.id}>
-                    {typeEmoji(sm.business_type)} {sm.name}{sm.location ? ` — ${sm.location}` : ''}
-                  </option>
-                ))}
-              </select>
-              {filteredSupermarkets.length === 0 && (
-                <p className="text-xs text-slate-400">No stores of this type yet.</p>
+                </li>
               )}
-            </div>
+              {supermarkets.map(sm => (
+                <li key={sm.id}>
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedSupermarketId(sm.id === selectedSupermarketId && shopMode === 'browse' ? '' : sm.id); setStorePanelOpen(false); }}
+                    className={`flex w-full items-baseline justify-between gap-3 py-2 text-left ${sm.id === selectedSupermarketId ? 'font-bold text-orange-600' : 'text-slate-700'}`}
+                  >
+                    <span className="min-w-0 truncate">{sm.name}</span>
+                    {sm.location && <span className="flex-shrink-0 text-xs font-normal text-slate-400">{sm.location}</span>}
+                  </button>
+                </li>
+              ))}
+              {supermarkets.length === 0 && <li className="py-2 text-xs text-slate-400">No stores yet.</li>}
+            </ul>
           )}
 
-          {/* Browse-a-store — real inventory, full-page, no scanning needed */}
+          {/* Browse — products from every store, optionally narrowed to one */}
           {shopMode === 'browse' && state !== 'scanning' && (
-            selectedSupermarketId ? (
-              <ProductPicker
-                supermarketId={selectedSupermarketId}
-                onCartChange={handleBrowseCartChange}
-                onOpenCart={() => setState('cart')}
-                fullPage
-              />
-            ) : (
-              <p className="text-sm text-slate-400 text-center py-10">Choose a store above to see its products.</p>
-            )
+            <ProductPicker
+              allStores
+              supermarketId={selectedSupermarketId || null}
+              stores={supermarkets}
+              onCartChange={handleBrowseCartChange}
+              onOpenCart={() => setState('cart')}
+              fullPage
+            />
           )}
 
           {/* Camera scanning panel */}
@@ -752,7 +755,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             <div>
               {!selectedSupermarketId && (
                 <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-                  Choose a store above before scanning.
+                  Pick a store from the list above before scanning.
                 </p>
               )}
 
