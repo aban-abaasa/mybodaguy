@@ -18,9 +18,9 @@ interface Props {
 const fmtDate = (d: Date) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 
 /**
- * "Pay in instalments" for a basket from one seller. Pick a deposit, how many
+ * "Pay in installments" for a basket from one seller. Pick a deposit, how many
  * payments after it and how often; the items are reserved while the customer
- * pays, and once the last instalment is in they collect the order or have it
+ * pays, and once the last installment is in they collect the order or have it
  * delivered. The IcanEra account the customer is already signed in with keeps
  * their balance, receipts and pickup code.
  */
@@ -105,10 +105,10 @@ export default function InstallmentOfferCard({ businessProfileId, cart, customer
   if (cart.length === 0 || accountsOn === false) return null;
   if (quote && quote.success === false) return null;
   if (!quote || !terms) {
-    return <div className="flex items-center gap-2 text-xs text-slate-400"><Loader size={14} className="animate-spin" />Checking instalment options…</div>;
+    return <div className="flex items-center gap-2 text-xs text-slate-400"><Loader size={14} className="animate-spin" />Checking installment options…</div>;
   }
   if (!quote.eligible) {
-    return <p className="text-xs text-slate-400">Pay in instalments on orders from {money(terms.min_order_amount)}.</p>;
+    return <p className="text-xs text-slate-400">Pay in installments on orders from {money(terms.min_order_amount)}.</p>;
   }
 
   const start = async (payWith: 'wallet' | 'flutterwave') => {
@@ -139,7 +139,7 @@ export default function InstallmentOfferCard({ businessProfileId, cart, customer
   return (
     <div className="space-y-3 rounded-xl border border-orange-200 bg-orange-50/60 p-3">
       <button type="button" onClick={() => setOpen(v => !v)} className="flex w-full items-center justify-between gap-2 text-left">
-        <span className="flex items-center gap-2 text-sm font-semibold text-slate-800"><CalendarClock size={16} className="text-orange-500" />Pay in instalments</span>
+        <span className="flex items-center gap-2 text-sm font-semibold text-slate-800"><CalendarClock size={16} className="text-orange-500" />Pay in installments</span>
         <ChevronDown size={16} className={`text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {!open && <p className="text-xs text-slate-500">{abroad
@@ -148,7 +148,7 @@ export default function InstallmentOfferCard({ businessProfileId, cart, customer
 
       {open && (
         <>
-          <p className="text-xs text-slate-500">Your items are reserved for you while you pay. {abroad ? 'Once the last payment is in, you give the seller your shipping address and they send it to you.' : 'Once the last instalment is in, you choose to collect them or have them delivered.'}</p>
+          <p className="text-xs text-slate-500">Your items are reserved for you while you pay. {abroad ? 'Once the last payment is in, you give the seller your shipping address and they send it to you.' : 'Once the last installment is in, you choose to collect them or have them delivered.'}</p>
 
           <div>
             <label className="mb-1 block text-xs text-slate-500">{n === 0 ? `You pay today (${cur})` : `Deposit today (${cur})`}</label>

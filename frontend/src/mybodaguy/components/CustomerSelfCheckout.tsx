@@ -1026,7 +1026,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
               className="mt-2 w-full py-2.5 rounded-lg text-sm font-semibold bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-all flex items-center justify-center gap-1.5"
             >
               <CalendarClock size={14} />
-              Pay in instalments
+              Pay in installments
               <ExternalLink size={12} className="opacity-60" />
             </button>
             <p className="text-[11px] text-slate-400 mt-1 text-center">Opens {activeStore?.name || 'the store'}'s website to set up and follow your plan</p>

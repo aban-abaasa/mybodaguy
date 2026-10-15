@@ -23,6 +23,7 @@ import ManageBusinessPanel from '../components/ManageBusinessPanel';
 import JourneyTracker from '../components/JourneyTracker';
 import RefundableDeliveries from '../components/RefundableDeliveries';
 import InstallmentsHub from '../components/installments/InstallmentsHub';
+import { countPlansNeedingAttention, getMyInstallmentPlans } from '../services/installmentService';
 import CancelReasonDialog from '../components/CancelReasonDialog';
 import {
   cancelRide, hideMyRides, isCancellableRideStatus, isFinishedRideStatus,
@@ -59,7 +60,7 @@ interface CustomerDashboardProps {
 // delivery toggle and vice versa. Book a Journey is inbuilt into Book a
 // Ride itself (a mode toggle inside EnhancedRideRequest, showJourneyOption)
 // rather than its own tab.
-type TabType = 'overview' | 'book-ride' | 'shop' | 'book-service' | 'delivery' | 'orders' | 'payments' | 'areas' | 'rewards' | 'cover' | 'become-operator' | 'manage-business' | 'profile';
+type TabType = 'overview' | 'book-ride' | 'shop' | 'book-service' | 'delivery' | 'orders' | 'installments' | 'areas' | 'rewards' | 'cover' | 'become-operator' | 'manage-business' | 'profile';
 
 // emoji drives the desktop tab strip; icon drives the phone header + menu
 // sheet, where crisp line icons read as more refined than mixed-font emoji.
@@ -70,7 +71,7 @@ const ALL_TABS: { id: TabType; label: string; emoji: string; icon: LucideIcon }[
   { id: 'book-service', label: 'Book', emoji: '📅', icon: CalendarDays },
   { id: 'delivery',  label: 'Delivery',  emoji: '📦', icon: Package },
   { id: 'orders',    label: 'Orders',    emoji: '📋', icon: ClipboardList },
-  { id: 'payments',  label: 'Payments',  emoji: '💳', icon: CalendarClock },
+  { id: 'installments', label: 'Installments', emoji: '💳', icon: CalendarClock },
   { id: 'areas',     label: 'My Areas',  emoji: '📍', icon: MapPin },
   { id: 'rewards',   label: 'Rewards',   emoji: '🎁', icon: Gift },
   { id: 'cover',     label: 'Cover',     emoji: '🛡️', icon: Shield },
@@ -79,12 +80,13 @@ const ALL_TABS: { id: TabType; label: string; emoji: string; icon: LucideIcon }[
   { id: 'profile',   label: 'Profile',   emoji: '👤', icon: User },
 ];
 
-// Phone bottom tab bar — the four most-used destinations. 'wallet' isn't a tab
+// Phone bottom tab bar — the most-used destinations. 'wallet' isn't a tab
 // (it hands off to the parent's wallet view), so it's special-cased in onSelect.
 const BOTTOM_TABS: { id: TabType | 'wallet'; label: string; icon: LucideIcon }[] = [
   { id: 'overview',  label: 'Home',   icon: Home },
   { id: 'book-ride', label: 'Ride',   icon: Bike },
   { id: 'orders',    label: 'Orders', icon: ClipboardList },
+  { id: 'installments', label: 'Installments', icon: CalendarClock },
   { id: 'wallet',    label: 'Wallet', icon: Wallet },
 ];
 
@@ -196,6 +198,18 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
   const [activeTab, setActiveTab]       = useState<TabType>('overview');
   const [mobileMenuOpen, setMobileMenu] = useState(false);
+  // Plans waiting on the customer (deposit due, overdue, ready to collect…) — the red
+  // number on the Installments icon. Re-read whenever the customer leaves that tab,
+  // so paying a plan clears it; the tab itself shows the live list.
+  const [installmentAlerts, setInstallmentAlerts] = useState(0);
+  useEffect(() => {
+    if (!user?.id || activeTab === 'installments') return;
+    let live = true;
+    getMyInstallmentPlans()
+      .then(plans => { if (live) setInstallmentAlerts(countPlansNeedingAttention(plans)); })
+      .catch(() => { /* no badge if plans can't be read — the tab explains why */ });
+    return () => { live = false; };
+  }, [user?.id, activeTab]);
   const [rides, setRides]               = useState<any[]>([]);
   const [ridesLoading, setRidesLoading] = useState(false);
   const [customerName, setCustomerName] = useState('You');
@@ -720,7 +734,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                   { label: 'Delivery',        desc: 'From a store or a normal pickup', icon: Package,       tile: 'bg-sky-50 text-sky-600',         tab: 'delivery' as TabType },
                   { label: 'Scan & Checkout', desc: 'POS · Pay with ICAN',             icon: ScanLine,      tile: 'bg-emerald-50 text-emerald-600', tab: 'shop' as TabType },
                   { label: 'My Orders',       desc: 'Track rides & deliveries',        icon: ClipboardList, tile: 'bg-orange-50 text-orange-600',   tab: 'orders' as TabType },
-                  { label: 'Pay in instalments', desc: 'Pay over time, then collect or deliver', icon: CalendarClock, tile: 'bg-violet-50 text-violet-600', tab: 'payments' as TabType },
+                  { label: 'Installments', desc: 'Pay over time, then collect or deliver', icon: CalendarClock, tile: 'bg-violet-50 text-violet-600', tab: 'installments' as TabType },
                   { label: 'Rewards',         desc: 'Earn & redeem points',            icon: Gift,          tile: 'bg-amber-50 text-amber-600',     tab: 'rewards' as TabType },
                 ].map(c => (
                   <button key={c.tab} type="button" onClick={() => setActiveTab(c.tab)}
@@ -920,8 +934,8 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
           </div>
         )}
 
-        {/* Payments — instalment plans: pay for products over time, then collect or have them delivered */}
-        {activeTab === 'payments' && user?.id && (
+        {/* Installments — pay for products over time, then collect or have them delivered */}
+        {activeTab === 'installments' && user?.id && (
           <InstallmentsHub customerName={customerName === 'You' ? null : customerName} customerPhone={(user as { phone?: string } | null)?.phone ?? null} />
         )}
 
@@ -1098,7 +1112,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
 
       {/* Phone bottom tabs — the four vital destinations; the rest live in Menu. */}
       <MobileBottomTabs
-        tabs={BOTTOM_TABS}
+        tabs={BOTTOM_TABS.map(t => (t.id === 'installments' ? { ...t, badge: installmentAlerts } : t))}
         activeTab={activeTab}
         onSelect={(id) => (id === 'wallet' ? goToWallet() : switchTab(id))}
       />

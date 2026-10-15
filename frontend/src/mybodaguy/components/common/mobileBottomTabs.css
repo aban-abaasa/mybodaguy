@@ -68,6 +68,13 @@
 .mbg-nav::before { margin-left: auto; margin-right: -0.5rem; }
 .mbg-nav::after { margin-right: auto; margin-left: -0.5rem; }
 
+/* Very narrow phones (320px): tighten the row so five tabs still fit unscrolled. */
+@media (max-width: 340px) {
+  .mbg-nav { gap: 0.125rem; padding-inline: 0.25rem; }
+  .mbg-nav::before { margin-right: -0.125rem; }
+  .mbg-nav::after { margin-left: -0.125rem; }
+}
+
 html[data-theme="dark"] .mbg-nav {
   --mn-surface: #0f172a;
   --mn-text: rgba(226, 232, 240, 0.78);
@@ -80,9 +87,9 @@ html[data-theme="dark"] .mbg-nav {
 /* ── One tab: icon over label, no box, no background ──────────────────── */
 .mbg-nav-tab {
   position: relative;
-  /* Compact (smaller than the ICAN apps'): still scrolls sideways, and
-     centres, when there are more of them than fit. */
-  flex: 1 0 3.5rem;
+  /* Compact (smaller than the ICAN apps'): five tabs fit a 320px phone; more
+     than that still scrolls sideways, and fewer centre. */
+  flex: 1 0 3.25rem;
   max-width: 4.5rem;
   scroll-snap-align: center;
   border-radius: 0.875rem;

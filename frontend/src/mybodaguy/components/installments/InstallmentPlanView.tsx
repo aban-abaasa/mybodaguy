@@ -39,7 +39,7 @@ interface Props {
 }
 
 /**
- * One instalment plan: what is paid and owed, pay more (wallet or Mobile Money
+ * One installment plan: what is paid and owed, pay more (wallet or Mobile Money
  * / card / bank) and — once the items are paid in full — collect them at the
  * store or have them delivered. Same plan, same rules as on icanera.space.
  */

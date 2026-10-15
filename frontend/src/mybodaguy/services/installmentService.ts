@@ -1,6 +1,6 @@
 /**
  * Installment plans — pay for a storefront / business-website order in
- * instalments, then collect it or have it delivered once it is paid in full.
+ * installments, then collect it or have it delivered once it is paid in full.
  *
  * The plans live in the shared IcanEra database (the ICAN repo's
  * supabase/migrations/20261011100000_installment_orders.sql), so a plan started
@@ -165,7 +165,7 @@ export async function payInstallmentWithFlutterwave(
   try {
     payment = await payWithFlutterwave({
       amount: Number(start.charge_amount), currency: start.currency, paymentOptions: paymentOptionsFor(start.currency), txRef: start.tx_ref, customerName: o.name || undefined, customerPhone: o.phone || undefined,
-      title: o.title || 'IcanEra instalment', description: `Instalment on plan ${code}`,
+      title: o.title || 'IcanEra installment', description: `Installment on plan ${code}`,
     });
   } catch (err) {
     writePending(null);
@@ -218,6 +218,17 @@ export async function getMyBusinessAccounts(): Promise<{ business_profile_id: st
   if (error) return [];
   return data || [];
 }
+
+/**
+ * How many plans are waiting on the customer — the number on the Installments badge:
+ * a deposit to pay, a payment that is overdue, a fully-paid order to collect or have
+ * delivered, or a parcel that has arrived and needs confirming.
+ */
+export const countPlansNeedingAttention = (plans: InstallmentPlan[] | null | undefined): number =>
+  (plans || []).filter(p =>
+    p.status === 'awaiting_deposit' || p.status === 'ready' || p.status === 'shipped'
+    || (p.status === 'active' && (p.schedule || []).some(s => s.status === 'overdue')),
+  ).length;
 
 // ── Collect or deliver ──────────────────────────────────────────────────────
 
