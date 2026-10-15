@@ -10,6 +10,7 @@ import ProductPicker, { CartLine } from './ProductPicker';
 import LocationPickerMap from './LocationPickerMap';
 import { locateDevice } from '../utils/geolocation';
 import LiveTrackingMap from './LiveTrackingMap';
+import MapReveal from './MapReveal';
 import JourneyBookingFlow from './JourneyBookingFlow';
 import JourneyTracker from './JourneyTracker';
 import CancelReasonDialog from './CancelReasonDialog';
@@ -512,7 +513,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // Map-based location picking — an alternative to the typed-suggestion
   // flow, not a replacement: either one ends up setting the same
   // selectedPickup/selectedDropoff state the rest of this component reads.
-  const [showMap, setShowMap] = useState(true);
+  const [showMap, setShowMap] = useState(false);
   const [routeInfo, setRouteInfo] = useState<{ distanceKm: number; durationMin: number } | null>(null);
 
   // Cross-border delivery detection — only meaningful for a plain "normal"
@@ -3410,7 +3411,7 @@ function RiderOnTheWay({
       {/* Live map — rider's real position, pushed instantly via realtime
           subscription on mbg_riders.current_lat/current_lng (kept fresh by
           useLiveLocationPing on the rider's own dashboard). */}
-      <LiveTrackingMap riderId={rider.rider_id} pickup={pickup} dropoff={dropoff} phase="to_pickup" />
+      <MapReveal showLabel="Show rider on map"><LiveTrackingMap riderId={rider.rider_id} pickup={pickup} dropoff={dropoff} phase="to_pickup" /></MapReveal>
 
       {/* Rider Details Card */}
       <div className="classic-card p-6">
@@ -3580,7 +3581,7 @@ function JourneyStarted({
 
       {/* Live map — same realtime rider position as the "On The Way" screen,
           now tracking the drop-off leg instead of the pickup leg. */}
-      <LiveTrackingMap riderId={rider.rider_id} pickup={pickup} dropoff={dropoff} phase="to_dropoff" />
+      <MapReveal showLabel="Show trip on map"><LiveTrackingMap riderId={rider.rider_id} pickup={pickup} dropoff={dropoff} phase="to_dropoff" /></MapReveal>
 
       {/* Trip Details */}
       <div className="classic-card p-6">

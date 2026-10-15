@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { X, MapPin, Navigation as NavigationIcon, Receipt } from 'lucide-react';
 import { toast } from 'sonner';
 import LiveTrackingMap from './LiveTrackingMap';
+import MapReveal from './MapReveal';
 import RideCommsBar from './RideCommsBar';
 import DeliveryReceiptCard from './DeliveryReceiptCard';
 import { supabase } from '../services/supabaseClient';
@@ -123,12 +124,14 @@ export default function RideTrackingModal({
 
         <div className="p-4 space-y-4">
           {canShowMap ? (
-            <LiveTrackingMap
-              riderId={ride.rider_id as string}
-              pickup={pickup as Location}
-              dropoff={dropoff as Location}
-              phase={ride.status === 'accepted' ? 'to_pickup' : 'to_dropoff'}
-            />
+            <MapReveal showLabel="Show live map">
+              <LiveTrackingMap
+                riderId={ride.rider_id as string}
+                pickup={pickup as Location}
+                dropoff={dropoff as Location}
+                phase={ride.status === 'accepted' ? 'to_pickup' : 'to_dropoff'}
+              />
+            </MapReveal>
           ) : (
             <div className="bg-slate-50 rounded-lg p-6 text-center text-sm text-slate-400">
               {isLive
