@@ -12,7 +12,7 @@ interface Props {
 }
 
 /**
- * Find something to pay for in instalments: browse products across every
+ * Find something to pay for in installments: browse products across every
  * reseller, pick the seller you want, fill a basket from that seller's shelf,
  * then choose the deposit and schedule.
  */
@@ -115,7 +115,7 @@ export default function InstallmentShop({ customerName, customerPhone, onCreated
     <div className="space-y-3">
       <div className="relative">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search products to pay for in instalments…"
+        <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search products to pay for in installments…"
           className="w-full rounded-lg border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800" />
       </div>
       <p className="flex items-start gap-1.5 text-[11px] text-slate-400"><Globe size={13} className="mt-0.5 shrink-0" />Shops from around the world. Items from abroad are priced in the shop's currency and shipped to you once they are paid in full.</p>

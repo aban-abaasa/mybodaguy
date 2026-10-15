@@ -9,6 +9,8 @@ export interface BottomTab<Id extends string = string> {
   badge?: number;
 }
 
+const MAX_TABS = 5;
+
 interface MobileBottomTabsProps<Id extends string> {
   tabs: BottomTab<Id>[];
   activeTab: string;
@@ -17,8 +19,8 @@ interface MobileBottomTabsProps<Id extends string> {
   hideFrom?: 'sm' | 'md';
 }
 
-// Phone-only bottom tab bar: the four vital destinations of a dashboard, in
-// reach of the thumb. Deliberately capped at 4 — everything else stays in the
+// Phone-only bottom tab bar: the vital destinations of a dashboard, in reach
+// of the thumb. Deliberately capped at 5 — everything else stays in the
 // header's Menu sheet.
 //
 // Bare icons, like TikTok's: nothing painted behind or around them. The current
@@ -35,7 +37,7 @@ export default function MobileBottomTabs<Id extends string>({
   onSelect,
   hideFrom = 'sm',
 }: MobileBottomTabsProps<Id>) {
-  const visible = tabs.slice(0, 4);
+  const visible = tabs.slice(0, MAX_TABS);
   if (visible.length === 0) return null;
 
   return (
