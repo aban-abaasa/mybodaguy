@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, X, Send, Headphones, Globe, ThumbsUp, Phone, Video as VideoIcon, Radio, Image as ImageIcon, Loader2 } from 'lucide-react';
 import {
   resolveChatIdentity,
@@ -318,6 +318,9 @@ export default function ChatWidget() {
   }, [hidden, identity, guestLikeKey]);
 
   const selectedThread = communityThreads.find((t) => t.id === selectedThreadId) || null;
+  // fetchPublicThreads returns newest-first, but the feed pins to the bottom
+  // like every chat — so list oldest-first and the latest lands in view.
+  const communityFeed = useMemo(() => [...communityThreads].reverse(), [communityThreads]);
 
   // Smart auto-scroll: always jump to the latest message on open/channel/
   // thread switches (deliberate navigation), but once you've scrolled up to
@@ -620,7 +623,7 @@ export default function ChatWidget() {
               ) : communityThreads.length === 0 ? (
                 <p className="mt-6 text-center text-xs text-slate-400">No public questions yet — ask something below.</p>
               ) : (
-                communityThreads.map((t) => (
+                communityFeed.map((t) => (
                   <button
                     key={t.id}
                     onClick={() => setSelectedThreadId(t.id)}
