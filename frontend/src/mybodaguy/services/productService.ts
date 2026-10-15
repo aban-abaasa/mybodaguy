@@ -78,12 +78,16 @@ function mapProductRow(row: any, stockByProduct: Map<string, number>): Product {
   };
 }
 
-async function fetchProducts(supermarketId: string, activeOnly: boolean): Promise<Product[]> {
+// supermarketId === null loads products from every store (capped), so the
+// customer Shop/Delivery views can always show everything and filter client-side.
+const ALL_STORES_PRODUCT_LIMIT = 1000;
+
+async function fetchProducts(supermarketId: string | null, activeOnly: boolean): Promise<Product[]> {
   let query = supabase
     .from('products')
     .select('id, supermarket_id, name, description, selling_price, images, is_active, created_at, sku, tax_rate, categories(name)')
-    .eq('supermarket_id', supermarketId)
     .order('created_at', { ascending: false });
+  query = supermarketId ? query.eq('supermarket_id', supermarketId) : query.limit(ALL_STORES_PRODUCT_LIMIT);
   if (activeOnly) query = query.eq('is_active', true);
 
   const { data: products, error } = await query;
@@ -91,15 +95,19 @@ async function fetchProducts(supermarketId: string, activeOnly: boolean): Promis
   if (!products || products.length === 0) return [];
 
   const ids = products.map((p: any) => p.id);
-  const { data: inventoryRows } = await supabase
-    .from('inventory')
-    .select('product_id, current_stock, reserved_stock')
-    .in('product_id', ids);
+  // Chunked so an all-stores load doesn't blow past the request URL length.
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  const inventoryPages = await Promise.all(
+    chunks.map(chunk =>
+      supabase.from('inventory').select('product_id, current_stock, reserved_stock').in('product_id', chunk),
+    ),
+  );
 
   const stockByProduct = new Map<string, number>();
-  (inventoryRows || []).forEach((inv: any) => {
+  inventoryPages.forEach(({ data }) => (data || []).forEach((inv: any) => {
     stockByProduct.set(inv.product_id, Math.max(0, Number(inv.current_stock || 0) - Number(inv.reserved_stock || 0)));
-  });
+  }));
 
   return products.map((p: any) => mapProductRow(p, stockByProduct));
 }
@@ -128,6 +136,11 @@ export const productService = {
   // Real products for a supermarket — used by the customer product picker.
   async getActiveProducts(supermarketId: string): Promise<Product[]> {
     return fetchProducts(supermarketId, true);
+  },
+
+  // Active products from every store — the customer Shop/Delivery default view.
+  async getActiveProductsAllStores(): Promise<Product[]> {
+    return fetchProducts(null, true);
   },
 
   // Everything (including inactive) — used by the supermarket's own manager view.

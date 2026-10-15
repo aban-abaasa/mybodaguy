@@ -14,7 +14,12 @@ export interface CartLine {
 }
 
 interface ProductPickerProps {
-  supermarketId: string;
+  /** With allStores: optional filter (null/undefined = every store). Otherwise the one store to load. */
+  supermarketId?: string | null;
+  /** Load products from every store once and filter client-side, so switching stores never clears the cart. */
+  allStores?: boolean;
+  /** With allStores: store names (shown under each product while no single store is selected); when given, only these stores' products are listed in that view. */
+  stores?: { id: string; name: string }[];
   onCartChange: (lines: CartLine[]) => void;
   /** Render as an edge-to-edge storefront (no card chrome, unbounded product grid) — used by the full-page Shop tab. */
   fullPage?: boolean;
@@ -26,37 +31,68 @@ interface ProductPickerProps {
   initialQty?: Record<string, number>;
 }
 
-export default function ProductPicker({ supermarketId, onCartChange, currency = 'UGX', initialQty, fullPage = false, onOpenCart }: ProductPickerProps) {
+export default function ProductPicker({ supermarketId, allStores = false, stores, onCartChange, currency = 'UGX', initialQty, fullPage = false, onOpenCart }: ProductPickerProps) {
   const [profile, setProfile] = useState<SupermarketProfile | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [qtyById, setQtyById] = useState<Record<string, number>>(initialQty ?? {});
   // The basket handed in belongs to the store it arrived with; any other store starts empty.
-  const initialFor = useRef<string | null>(initialQty ? supermarketId : null);
+  const initialFor = useRef<string | null>(initialQty ? supermarketId ?? null : null);
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('All');
 
+  // All-stores mode loads once; the store filter below is client-side so the
+  // cart survives switching stores. Single-store mode reloads per store.
   useEffect(() => {
     setLoading(true);
+    setActiveCategory('All');
+    if (allStores) {
+      productService.getActiveProductsAllStores()
+        .then(setAllProducts)
+        .catch(() => setAllProducts([]))
+        .finally(() => setLoading(false));
+      return;
+    }
+    if (!supermarketId) { setAllProducts([]); setLoading(false); return; }
     if (initialFor.current !== supermarketId) setQtyById({});
     setSearch('');
-    setActiveCategory('All');
     Promise.all([
       productService.getActiveProducts(supermarketId),
       productService.getSupermarketProfile(supermarketId),
     ])
-      .then(([prods, prof]) => { setProducts(prods); setProfile(prof); })
-      .catch(() => setProducts([]))
+      .then(([prods, prof]) => { setAllProducts(prods); setProfile(prof); })
+      .catch(() => setAllProducts([]))
       .finally(() => setLoading(false));
-  }, [supermarketId]);
+  }, [allStores ? 'all' : supermarketId]);
 
   useEffect(() => {
-    const lines: CartLine[] = products
+    setActiveCategory('All');
+    if (!allStores) return;
+    if (!supermarketId) { setProfile(null); return; }
+    productService.getSupermarketProfile(supermarketId).then(setProfile).catch(() => setProfile(null));
+  }, [allStores, supermarketId]);
+
+  // Products on screen: everything, or just the selected store's.
+  // With no store selected, `stores` (when given) limits which stores' products are listed.
+  const products = useMemo(() => {
+    if (!allStores) return allProducts;
+    if (supermarketId) return allProducts.filter(p => p.supermarket_id === supermarketId);
+    if (stores?.length) {
+      const ids = new Set(stores.map(st => st.id));
+      return allProducts.filter(p => ids.has(p.supermarket_id));
+    }
+    return allProducts;
+  }, [allProducts, allStores, supermarketId, stores]);
+  const storeNameById = useMemo(() => new Map((stores || []).map(s => [s.id, s.name])), [stores]);
+  const showStoreName = allStores && !supermarketId;
+
+  useEffect(() => {
+    const lines: CartLine[] = allProducts
       .filter((p) => (qtyById[p.id] || 0) > 0)
       .map((p) => ({ product: p, qty: qtyById[p.id] }));
     onCartChange(lines);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [qtyById, products]);
+  }, [qtyById, allProducts]);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -88,7 +124,7 @@ export default function ProductPicker({ supermarketId, onCartChange, currency = 
   const money = (n: number) => `${currency} ${foreign ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : n.toLocaleString()}`;
 
   const cartCount = Object.values(qtyById).reduce((sum, q) => sum + q, 0);
-  const cartTotal = products.reduce((sum, p) => sum + (qtyById[p.id] || 0) * inclusivePrice(p), 0);
+  const cartTotal = allProducts.reduce((sum, p) => sum + (qtyById[p.id] || 0) * inclusivePrice(p), 0);
 
   if (loading) {
     return <p className="text-sm text-slate-400 text-center py-6">Loading store…</p>;
@@ -97,7 +133,9 @@ export default function ProductPicker({ supermarketId, onCartChange, currency = 
   if (products.length === 0) {
     return (
       <div className="text-center py-6 text-sm text-slate-400 border border-dashed border-slate-200 rounded-lg">
-        This store hasn't listed any products yet — describe what you need below instead.
+        {allStores && !supermarketId
+          ? 'No products have been listed yet.'
+          : "This store hasn't listed any products yet — describe what you need below instead."}
       </div>
     );
   }
@@ -122,7 +160,7 @@ export default function ProductPicker({ supermarketId, onCartChange, currency = 
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={`Search ${profile?.name || 'store'}…`}
+              placeholder={`Search ${profile?.name || 'all stores'}…`}
               className="w-full pl-9 pr-3 py-2 bg-slate-100 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:bg-white"
             />
           </div>
@@ -152,38 +190,41 @@ export default function ProductPicker({ supermarketId, onCartChange, currency = 
               const qty = qtyById[p.id] || 0;
               return (
                 <div key={p.id} className="min-w-0">
-                  <div className={`aspect-square overflow-hidden rounded-xl bg-slate-100 flex items-center justify-center ${qty > 0 ? 'ring-2 ring-orange-400' : ''}`}>
-                    {p.image_url ? (
-                      <img src={p.image_url} alt={p.name} loading="lazy" className="w-full h-full object-cover" />
-                    ) : (
+                  {p.image_url ? (
+                    <img src={p.image_url} alt={p.name} loading="lazy" className="aspect-square w-full rounded-lg object-cover" />
+                  ) : (
+                    <div className="flex aspect-square w-full items-center justify-center">
                       <ImageIcon size={28} className="text-slate-300" />
-                    )}
-                  </div>
+                    </div>
+                  )}
                   <div className="pt-1.5">
                     <p className="text-[13px] font-semibold text-slate-800 leading-tight line-clamp-2">{p.name}</p>
+                    {showStoreName && storeNameById.get(p.supermarket_id) && (
+                      <p className="truncate text-[11px] text-slate-400">{storeNameById.get(p.supermarket_id)}</p>
+                    )}
                     <p className="text-sm text-orange-600 font-bold">{money(inclusivePrice(p))}</p>
                     {p.stock_qty <= 0 ? (
                       <p className="mt-1 text-xs font-medium text-red-500">Out of stock</p>
                     ) : qty === 0 ? (
                       <button
                         onClick={() => setQty(p.id, 1)}
-                        className="mt-1.5 w-full py-1.5 bg-orange-500 text-white rounded-lg text-sm font-semibold hover:bg-orange-600 active:scale-95 transition"
+                        className="mt-1 text-sm font-semibold text-orange-600 hover:text-orange-700 active:scale-95 transition"
                       >
-                        Add
+                        + Add
                       </button>
                     ) : (
-                      <div className="mt-1.5 flex items-center justify-between bg-orange-50 rounded-lg">
-                        <button onClick={() => setQty(p.id, qty - 1)} aria-label={`Remove one ${p.name}`} className="px-3 py-1.5 text-orange-700">
-                          <Minus size={14} />
+                      <div className="mt-1 flex items-center gap-3 text-orange-700">
+                        <button onClick={() => setQty(p.id, qty - 1)} aria-label={`Remove one ${p.name}`} className="py-1">
+                          <Minus size={16} />
                         </button>
-                        <span className="text-sm font-bold text-orange-700">{qty}</span>
+                        <span className="text-sm font-bold">{qty}</span>
                         <button
                           onClick={() => setQty(p.id, Math.min(qty + 1, p.stock_qty))}
                           aria-label={`Add one ${p.name}`}
-                          className="px-3 py-1.5 text-orange-700 disabled:opacity-30"
+                          className="py-1 disabled:opacity-30"
                           disabled={qty >= p.stock_qty}
                         >
-                          <Plus size={14} />
+                          <Plus size={16} />
                         </button>
                       </div>
                     )}
