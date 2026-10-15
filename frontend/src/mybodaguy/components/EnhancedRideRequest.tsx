@@ -15,7 +15,8 @@ import JourneyTracker from './JourneyTracker';
 import CancelReasonDialog from './CancelReasonDialog';
 import { cancelRide, CUSTOMER_CANCEL_REASONS, SUPERMARKET_CANCEL_REASONS } from '../services/orderActions';
 import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type CountryLookup } from '../services/geocodeService';
-import { verifyPin } from '../services/pinService';
+import { hasPinSet, validatePIN, verifyPin } from '../services/pinService';
+import SetPinPrompt from './SetPinPrompt';
 import { productService, type Product } from '../services/productService';
 import type { ImportStore } from '../services/journeyService';
 import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
@@ -443,6 +444,24 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // person — no surcharge, but the rider owes the commission out of pocket and
   // must confirm receipt before taking new jobs (see mbg_confirm_cash_received).
   const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'cash' | 'company'>('wallet');
+
+  // ── Store-delivery order: confirm the goods with the wallet PIN FIRST, then
+  // pick a vehicle. The PIN is the customer's up-front authorisation to spend
+  // from their wallet on the goods; the actual debit/credit still only happens
+  // when the rider accepts (mbg_respond_to_ride). It is re-asked whenever the
+  // items, the store or the payment method change.
+  const [goodsPinVerified, setGoodsPinVerified] = useState(false);
+  const [goodsPinOpen, setGoodsPinOpen] = useState(false);
+  const [goodsPinNeedsSet, setGoodsPinNeedsSet] = useState(false);
+  const [goodsPinUserId, setGoodsPinUserId] = useState('');
+  const [goodsPin, setGoodsPin] = useState('');
+  const [goodsPinBusy, setGoodsPinBusy] = useState(false);
+  const [goodsPinError, setGoodsPinError] = useState('');
+  const isStoreDelivery = serviceType === 'delivery' && deliveryMode === 'supermarket';
+  const needsGoodsPin = isStoreDelivery && paymentMethod === 'wallet' && deliveryCart.length > 0;
+  const goodsLocked = needsGoodsPin && !goodsPinVerified;
+  const orderSignature = `${activeStoreId}|${paymentMethod}|${deliveryCart.map(l => `${l.product.id}:${l.qty}`).join(',')}`;
+  useEffect(() => { setGoodsPinVerified(false); }, [orderSignature]);
   const [companyTransport, setCompanyTransport] = useState<{ eligible: boolean; business_name?: string; billing_mode?: string }>({ eligible: false });
 
   useEffect(() => {
@@ -1154,6 +1173,66 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     toast.success(`Drop-off: ${location.name}`);
   };
 
+  // What the customer is buying, priced the way the server will charge it (listed price + the product's tax).
+  const orderStore = supermarkets.find(sm => sm.id === activeStoreId) ?? null;
+  const orderLines = deliveryCart.map(l => {
+    const unit = Math.round(Number(l.product.price_ugx) * (1 + (l.product.tax_rate || 0) / 100));
+    return { id: l.product.id, name: l.product.name, qty: l.qty, unit, total: unit * l.qty };
+  });
+  const goodsTotal = orderLines.reduce((sum, l) => sum + l.total, 0);
+  const goodsItemCount = orderLines.reduce((sum, l) => sum + l.qty, 0);
+
+  const openGoodsPin = async () => {
+    const { data: authData } = await supabase.auth.getUser();
+    const authUser = authData?.user;
+    if (!authUser) {
+      toast.error('Please sign in again to pay this store from your wallet');
+      return;
+    }
+    try {
+      if (!(await hasPinSet(authUser.id))) { setGoodsPinUserId(authUser.id); setGoodsPinNeedsSet(true); return; }
+    } catch {
+      toast.error("We couldn't check your PIN. Please try again.");
+      return;
+    }
+    setGoodsPin('');
+    setGoodsPinError('');
+    setGoodsPinOpen(true);
+  };
+
+  const confirmGoodsPin = async () => {
+    if (!validatePIN(goodsPin) || goodsPinBusy) return;
+    setGoodsPinBusy(true);
+    setGoodsPinError('');
+    try {
+      const { data: authData } = await supabase.auth.getUser();
+      const authUser = authData?.user;
+      if (!authUser) { setGoodsPinError('Please sign in again.'); return; }
+      const pinCheck = await verifyPin(authUser.id, goodsPin);
+      if (!pinCheck.success) {
+        setGoodsPinError(pinCheck.error || 'Incorrect PIN. Order not confirmed.');
+        setGoodsPin('');
+        return;
+      }
+      setGoodsPinVerified(true);
+      setGoodsPinOpen(false);
+      setGoodsPin('');
+      toast.success('Order confirmed — now choose your vehicle');
+    } catch {
+      setGoodsPinError("We couldn't verify your PIN. Please try again.");
+    } finally {
+      setGoodsPinBusy(false);
+    }
+  };
+
+  // Shared guard for "find riders", "just send" and sending a request.
+  const requireGoodsPin = () => {
+    if (!goodsLocked) return true;
+    toast.error('Confirm your order with your PIN first');
+    openGoodsPin();
+    return false;
+  };
+
   const handleSearchRiders = async () => {
     if (!selectedPickup || !selectedDropoff) {
       toast.error('Please select both pickup and drop-off locations from suggestions');
@@ -1167,6 +1246,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       toast.error('Add an item from a store (or pick a store) for this delivery');
       return;
     }
+    if (!requireGoodsPin()) return;
 
     setSearching(true);
     try {
@@ -1274,6 +1354,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       toast.error('Add an item from a store (or pick a store) for this delivery');
       return;
     }
+    if (!requireGoodsPin()) return;
     if (needsCrossBorderPath) {
       toast.error('Cross-border deliveries need a specific courier — please pick one from the list below');
       return;
@@ -1333,27 +1414,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       return;
     }
 
-    // Paying a store for real goods (not just the ride fare) with the
-    // ICANera wallet — require the transaction PIN here, before the order
-    // even goes out, same as any other wallet-funded payment in this app.
-    // The actual debit + credit to the store's business wallet still only
-    // happens once the rider accepts (mbg_respond_to_ride); this is the
-    // customer's up-front authorization to spend from their wallet on it.
-    if (serviceType === 'delivery' && deliveryMode === 'supermarket' && paymentMethod === 'wallet') {
-      const { data: authData } = await supabase.auth.getUser();
-      const authUser = authData?.user;
-      if (!authUser) {
-        toast.error('Please sign in again to pay this store from your wallet');
-        return;
-      }
-      const pin = window.prompt('Enter your transaction PIN to pay this store from your ICANera wallet:');
-      if (pin === null) return;
-      const pinCheck = await verifyPin(authUser.id, pin);
-      if (!pinCheck.success) {
-        toast.error(pinCheck.error || 'Incorrect PIN. Order not sent.');
-        return;
-      }
-    }
+    // Paying a store for real goods with the ICANera wallet needs the
+    // transaction PIN, confirmed up front in the order step above (before a
+    // vehicle is even chosen). The debit + credit to the store's business
+    // wallet still only happens once the rider accepts (mbg_respond_to_ride).
+    if (!requireGoodsPin()) return;
 
     setSelectedRider(rider);
     setRideStatus('waiting_acceptance');
@@ -1362,8 +1427,14 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setAutoCandidateId(opts?.auto ? rider.rider_id : null);
 
     try {
+      // Written for the rider reading it on their request card: where to collect,
+      // exactly what, what it costs, and that the customer already confirmed it.
       const orderNotes = deliveryCart.length > 0
-        ? deliveryCart.map(l => `${l.qty}x ${l.product.name}`).join(', ')
+        ? [
+            `Collect at ${orderStore ? `${orderStore.name}${orderStore.location ? ` (${orderStore.location})` : ''}` : 'the store'}:`,
+            ...orderLines.map(l => `• ${l.qty} × ${l.name} — UGX ${l.total.toLocaleString()}`),
+            `Goods total: UGX ${goodsTotal.toLocaleString()}${paymentMethod === 'wallet' ? ' · customer confirmed with wallet PIN' : ''}`,
+          ].join('\n')
         : null;
       // Structured, priced cart — this is what lets the store actually get
       // paid for the goods (separately from the ride fare) at acceptance.
@@ -2172,6 +2243,48 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                   />
 
                   {deliveryCart.length > 0 && (
+                    <div className="rounded-xl border-2 border-orange-200 bg-orange-50/60 p-3">
+                      <p className="text-sm font-bold text-slate-800">
+                        Your order{orderStore ? ` · ${orderStore.name}` : ''}
+                      </p>
+                      <ul className="mt-1.5 space-y-0.5 text-sm text-slate-700">
+                        {orderLines.map(l => (
+                          <li key={l.id} className="flex justify-between gap-3">
+                            <span className="min-w-0 truncate">{l.qty} × {l.name}</span>
+                            <span className="flex-shrink-0 tabular-nums">UGX {l.total.toLocaleString()}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="mt-2 flex justify-between gap-3 border-t border-orange-200 pt-2 text-sm font-bold text-slate-800">
+                        <span>Goods · {goodsItemCount} item{goodsItemCount !== 1 ? 's' : ''}</span>
+                        <span className="text-orange-600 tabular-nums">UGX {goodsTotal.toLocaleString()}</span>
+                      </div>
+                      <p className="mt-1 text-[11px] text-slate-500">
+                        Prices include tax. The delivery fare is separate — you'll see it when you choose a vehicle.
+                      </p>
+                      {needsGoodsPin && !goodsPinVerified && (
+                        <button
+                          type="button"
+                          onClick={openGoodsPin}
+                          className="mt-2.5 w-full rounded-xl bg-orange-500 py-2.5 text-sm font-bold text-white hover:bg-orange-600 active:scale-[0.99] transition"
+                        >
+                          🔐 Confirm order with PIN
+                        </button>
+                      )}
+                      {needsGoodsPin && goodsPinVerified && (
+                        <p className="mt-2.5 rounded-lg bg-green-100 px-3 py-2 text-xs font-semibold text-green-800">
+                          ✓ Order confirmed with your PIN. The goods are charged from your wallet when a rider accepts.
+                        </p>
+                      )}
+                      {isStoreDelivery && paymentMethod !== 'wallet' && (
+                        <p className="mt-2.5 text-[11px] text-slate-500">
+                          Paying by {paymentMethod === 'company' ? 'your company account' : 'cash'} — no PIN needed.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {deliveryCart.length > 0 && (
                     <div className="p-3 rounded-lg border-2 border-slate-200 bg-slate-50">
                       <label className="block text-sm font-medium text-slate-700 mb-1">
                         Deliver within
@@ -2419,8 +2532,16 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         )}
       </div>
 
-      {/* Ride options */}
-      <div className="space-y-4">
+      {/* Ride options — locked until the store order is confirmed with the PIN */}
+      {goodsLocked && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+          <span>🔐 Confirm your order with your PIN first — then choose a vehicle.</span>
+          <button type="button" onClick={openGoodsPin} className="flex-shrink-0 rounded-lg bg-amber-500 px-3 py-1.5 font-bold text-white hover:bg-amber-600">
+            Confirm
+          </button>
+        </div>
+      )}
+      <div className={`space-y-4 ${goodsLocked ? 'pointer-events-none select-none opacity-50' : ''}`}>
         <StepHeading n={2 + stepBase}>{needsCrossBorderPath ? 'Your courier' : isDelivery ? 'Choose a vehicle' : 'Choose your ride'}</StepHeading>
 
         {/* Cross-border delivery: mode/vehicle-type/power/rain-cover filters
@@ -2704,6 +2825,67 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         </div>
       </div>
 
+      {goodsPinNeedsSet && (
+        <SetPinPrompt
+          onDone={async () => {
+            setGoodsPinNeedsSet(false);
+            try {
+              const { data: authData } = await supabase.auth.getUser();
+              if (authData?.user && await hasPinSet(authData.user.id)) { setGoodsPin(''); setGoodsPinError(''); setGoodsPinOpen(true); }
+            } catch { /* they can tap Confirm again */ }
+          }}
+          userId={goodsPinUserId}
+        />
+      )}
+
+      {goodsPinOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <form
+            onSubmit={(e) => { e.preventDefault(); confirmGoodsPin(); }}
+            className="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl"
+          >
+            <div className="mb-4 text-center">
+              <div className="mb-2 text-4xl">🔐</div>
+              <h2 className="text-lg font-bold text-slate-800">Confirm your order</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {goodsItemCount} item{goodsItemCount !== 1 ? 's' : ''} from {orderStore?.name || 'the store'} · UGX {goodsTotal.toLocaleString()}
+              </p>
+              <p className="mt-1 text-[11px] text-slate-400">Charged from your wallet only when a rider accepts.</p>
+            </div>
+            <input
+              type="password"
+              inputMode="numeric"
+              autoComplete="off"
+              autoFocus
+              maxLength={6}
+              value={goodsPin}
+              onChange={(e) => setGoodsPin(e.target.value.replace(/\D/g, ''))}
+              placeholder="4-6 digit PIN"
+              disabled={goodsPinBusy}
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-center text-lg tracking-widest focus:border-orange-400 focus:outline-none"
+            />
+            {goodsPinError && <p className="mt-2 text-center text-xs font-medium text-red-600">{goodsPinError}</p>}
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setGoodsPinOpen(false); setGoodsPin(''); }}
+                disabled={goodsPinBusy}
+                className="flex-1 rounded-xl border border-slate-200 py-3 text-sm font-medium text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={goodsPinBusy || !validatePIN(goodsPin)}
+                className="flex-1 rounded-xl bg-orange-500 py-3 text-sm font-semibold text-white hover:bg-orange-600 disabled:opacity-60"
+              >
+                {goodsPinBusy ? 'Verifying…' : 'Confirm order'}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       {/* Actions */}
       <div className="space-y-3">
         {!routeReady && (
@@ -2724,8 +2906,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             </>
           ) : (
             <>
-              <Search size={20} />
-              Find Available Riders — Choose One
+              {goodsLocked ? <>🔐 Confirm order with PIN first</> : <><Search size={20} /> Find Available Riders — Choose One</>}
             </>
           )}
         </button>
