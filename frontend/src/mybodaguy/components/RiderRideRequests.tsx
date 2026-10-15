@@ -36,6 +36,8 @@ interface RideRow {
   power_type_requested: string | null;
   umbrella_requested: boolean;
   order_notes: string | null;
+  // A store delivery: how it is paid and when the customer needs it by.
+  max_delivery_hours?: number | null;
   // A van / truck booking's declared load.
   cargo_weight_kg?: number | null;
   cargo_class?: string | null;
@@ -746,15 +748,40 @@ function RideSummary({ ride, live, hidePrice = false }: { ride: RideRow; live?: 
         </div>
       )}
 
-      {ride.order_notes && (
-        <div className="flex items-start gap-3 rounded-xl bg-orange-50 px-3.5 py-3">
-          <Package size={18} className="mt-0.5 shrink-0 text-orange-500" />
-          <div className="min-w-0">
-            <p className="classic-eyebrow">Items to buy</p>
-            <p className="break-words text-sm font-medium text-slate-700">{ride.order_notes}</p>
+      {ride.order_notes && (() => {
+        const isStoreOrder = ride.delivery_mode === 'supermarket';
+        return (
+          <div className="space-y-2 rounded-xl bg-orange-50 px-3.5 py-3">
+            <div className="flex items-start gap-3">
+              <Package size={18} className="mt-0.5 shrink-0 text-orange-500" />
+              <div className="min-w-0 flex-1">
+                <p className="classic-eyebrow">{isStoreOrder ? 'Store order — collect & deliver' : 'Items to buy'}</p>
+                {/* Written line by line by the customer's app: store, items with prices, goods total. */}
+                <p className="mt-0.5 whitespace-pre-line break-words text-sm font-medium leading-relaxed text-slate-700">{ride.order_notes}</p>
+              </div>
+            </div>
+            {isStoreOrder && (
+              <div className="flex flex-wrap items-center gap-2 pl-[30px]">
+                {ride.payment_method === 'wallet' && (
+                  <span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-700">
+                    ✓ Goods confirmed with customer's PIN — paid from their wallet when you accept
+                  </span>
+                )}
+                {ride.payment_method === 'cash' && (
+                  <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                    Customer pays in cash
+                  </span>
+                )}
+                {ride.max_delivery_hours != null && (
+                  <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                    Deliver within {Number(ride.max_delivery_hours)}h
+                  </span>
+                )}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {hasCoords && (
         <div className="space-y-3">
