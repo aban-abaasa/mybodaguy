@@ -30,6 +30,7 @@ import {
 } from '../services/orderActions';
 import { computeOrderInsights, shortenLocation } from '../utils/orderInsights';
 import NearbyRidersMap, { type NearbyRider } from '../components/NearbyRidersMap';
+import MapReveal from '../components/MapReveal';
 import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { ThemeToggle } from '../../components/ThemeToggle';
@@ -671,12 +672,14 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
               )}
               {myPos && (
                 <div className="mt-3">
-                  <NearbyRidersMap
-                    me={myPos}
-                    riders={nearby?.riders ?? []}
-                    stage={nearby?.stage_lat != null && nearby?.stage_lng != null && nearby.stage_name
-                      ? { name: nearby.stage_name, lat: nearby.stage_lat, lng: nearby.stage_lng } : null}
-                  />
+                  <MapReveal showLabel="Show riders near me" hideLabel="Hide riders map">
+                    <NearbyRidersMap
+                      me={myPos}
+                      riders={nearby?.riders ?? []}
+                      stage={nearby?.stage_lat != null && nearby?.stage_lng != null && nearby.stage_name
+                        ? { name: nearby.stage_name, lat: nearby.stage_lat, lng: nearby.stage_lng } : null}
+                    />
+                  </MapReveal>
                 </div>
               )}
             </div>

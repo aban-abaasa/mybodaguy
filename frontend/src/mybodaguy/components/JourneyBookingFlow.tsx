@@ -15,6 +15,7 @@ import JourneyRideOptions, { DEFAULT_PICKUP_PREFERENCES, preferencesForApi, desc
 import { getBalance, ICAN_TO_UGX, formatICAN, buyICANFromWallet } from '../services/icanWalletService';
 import { generateTxRef } from '../services/flutterwaveClient';
 import LocationPickerMap from './LocationPickerMap';
+import MapReveal from './MapReveal';
 import ImportStoreStep from './ImportStoreStep';
 import type { CartLine } from './ProductPicker';
 import FlightResultsPicker, { CabinPicker } from './FlightResultsPicker';
@@ -1068,16 +1069,18 @@ export default function JourneyBookingFlow({
           </div>
 
           <Field label="Delivery address" hint="Tap the map to drop a pin, or search for the place. Drag the pin to fine-tune it.">
-            <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
-              <LocationPickerMap
-                pickup={null}
-                dropoff={importDropoff ? { id: 'import_dropoff', name: importDropoff.address, area: importDropoff.address, fullAddress: importDropoff.address, coordinates: { lat: importDropoff.lat, lng: importDropoff.lng } } : null}
-                onPickupChange={() => {}}
-                onDropoffChange={(loc) => setImportDropoff({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
-                selectionMode="dropoff"
-                gpsTarget="dropoff"
-              />
-            </div>
+            <MapReveal showLabel="Pick delivery address on the map">
+              <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
+                <LocationPickerMap
+                  pickup={null}
+                  dropoff={importDropoff ? { id: 'import_dropoff', name: importDropoff.address, area: importDropoff.address, fullAddress: importDropoff.address, coordinates: { lat: importDropoff.lat, lng: importDropoff.lng } } : null}
+                  onPickupChange={() => {}}
+                  onDropoffChange={(loc) => setImportDropoff({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
+                  selectionMode="dropoff"
+                  gpsTarget="dropoff"
+                />
+              </div>
+            </MapReveal>
           </Field>
           {importDropoffCountry && (
             <p className="flex items-center justify-center gap-2 rounded-full bg-[#fbf3dc] px-3 py-1.5 text-xs font-semibold text-[#7a5a12]">
@@ -1281,17 +1284,19 @@ export default function JourneyBookingFlow({
               label={shipPickupLeg && shipDropoffLeg ? 'Pickup & destination' : shipPickupLeg ? 'Pickup location' : 'Delivery location'}
               hint={shipPickupLeg && shipDropoffLeg ? 'Tap the map to set the destination, drag either pin to fine-tune.' : 'Tap the map to set the pin, drag it to fine-tune.'}
             >
-              <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
-                <LocationPickerMap
-                  key={`${shipPickupLeg}-${shipDropoffLeg}`}
-                  pickup={shipPickupLeg && shipPickup ? { id: 'ship_pickup', name: shipPickup.address, area: shipPickup.address, fullAddress: shipPickup.address, coordinates: { lat: shipPickup.lat, lng: shipPickup.lng } } : null}
-                  dropoff={shipDropoffLeg && shipDropoff ? { id: 'ship_dropoff', name: shipDropoff.address, area: shipDropoff.address, fullAddress: shipDropoff.address, coordinates: { lat: shipDropoff.lat, lng: shipDropoff.lng } } : null}
-                  onPickupChange={(loc) => setShipPickup({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
-                  onDropoffChange={(loc) => setShipDropoff({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
-                  selectionMode={shipDropoffLeg ? 'dropoff' : 'pickup'}
-                  autoLocateGPS={shipPickupLeg}
-                />
-              </div>
+              <MapReveal showLabel="Set pin on the map">
+                <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
+                  <LocationPickerMap
+                    key={`${shipPickupLeg}-${shipDropoffLeg}`}
+                    pickup={shipPickupLeg && shipPickup ? { id: 'ship_pickup', name: shipPickup.address, area: shipPickup.address, fullAddress: shipPickup.address, coordinates: { lat: shipPickup.lat, lng: shipPickup.lng } } : null}
+                    dropoff={shipDropoffLeg && shipDropoff ? { id: 'ship_dropoff', name: shipDropoff.address, area: shipDropoff.address, fullAddress: shipDropoff.address, coordinates: { lat: shipDropoff.lat, lng: shipDropoff.lng } } : null}
+                    onPickupChange={(loc) => setShipPickup({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
+                    onDropoffChange={(loc) => setShipDropoff({ lat: loc.coordinates.lat, lng: loc.coordinates.lng, address: loc.fullAddress })}
+                    selectionMode={shipDropoffLeg ? 'dropoff' : 'pickup'}
+                    autoLocateGPS={shipPickupLeg}
+                  />
+                </div>
+              </MapReveal>
             </Field>
           )}
 
@@ -1591,18 +1596,20 @@ export default function JourneyBookingFlow({
           )}
 
           <Field label="Or drop a pin" hint="Same map picker as booking a ride.">
-            <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
-              <LocationPickerMap
-                pickup={
-                  pickup
-                    ? { id: 'journey_pickup', name: pickup.address, area: pickup.address, fullAddress: pickup.address, coordinates: { lat: pickup.lat, lng: pickup.lng } }
-                    : null
-                }
-                dropoff={null}
-                onPickupChange={handleMapPickupChange}
-                onDropoffChange={() => {}}
-              />
-            </div>
+            <MapReveal showLabel="Drop a pin on the map">
+              <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
+                <LocationPickerMap
+                  pickup={
+                    pickup
+                      ? { id: 'journey_pickup', name: pickup.address, area: pickup.address, fullAddress: pickup.address, coordinates: { lat: pickup.lat, lng: pickup.lng } }
+                      : null
+                  }
+                  dropoff={null}
+                  onPickupChange={handleMapPickupChange}
+                  onDropoffChange={() => {}}
+                />
+              </div>
+            </MapReveal>
           </Field>
           </>)}
 
@@ -1824,15 +1831,17 @@ export default function JourneyBookingFlow({
           </button>
           {destPin && (
             <div className="space-y-2">
-              <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
-                <LocationPickerMap
-                  pickup={null}
-                  dropoff={{ id: 'journey_destination', name: destPin.address, area: destPin.address, fullAddress: destPin.address, coordinates: { lat: destPin.lat, lng: destPin.lng } }}
-                  onPickupChange={() => {}}
-                  onDropoffChange={handleDestPinChange}
-                  autoLocateGPS={false}
-                />
-              </div>
+              <MapReveal showLabel="Confirm exact spot on the map">
+                <div className="overflow-hidden rounded-2xl border border-[#c4a052]/40">
+                  <LocationPickerMap
+                    pickup={null}
+                    dropoff={{ id: 'journey_destination', name: destPin.address, area: destPin.address, fullAddress: destPin.address, coordinates: { lat: destPin.lat, lng: destPin.lng } }}
+                    onPickupChange={() => {}}
+                    onDropoffChange={handleDestPinChange}
+                    autoLocateGPS={false}
+                  />
+                </div>
+              </MapReveal>
               <p className="text-xs text-slate-500">
                 Drag the pin if it isn't quite right — this is where the driver waiting for you will take you.
               </p>
