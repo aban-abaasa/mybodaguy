@@ -11,6 +11,7 @@ import LocationPickerMap from './LocationPickerMap';
 import { locateDevice } from '../utils/geolocation';
 import LiveTrackingMap from './LiveTrackingMap';
 import MapReveal from './MapReveal';
+import VehicleArt, { type VehicleArtKind } from './VehicleArt';
 import JourneyBookingFlow from './JourneyBookingFlow';
 import JourneyTracker from './JourneyTracker';
 import CancelReasonDialog from './CancelReasonDialog';
@@ -25,6 +26,7 @@ import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, ty
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
 type DeliveryMode = 'supermarket' | 'normal';
+type DeliveryTab = 'shop' | 'address' | 'vehicle' | 'pay';
 type PowerFilter = 'any' | 'electric' | 'fuel';
 type VehicleTypeFilter = 'any' | 'motorcycle' | 'car' | 'van' | 'truck';
 type ModePreference = 'all' | 'normal' | 'vip' | 'discount' | 'return';
@@ -172,11 +174,158 @@ const VEHICLE_OPTIONS: { id: VehicleTypeFilter; label: string; icon: typeof Car 
   { id: 'truck', label: 'Truck', icon: Truck },
 ];
 
+// What each class is good for, in words a shopper understands (no hard
+// capacities here — the live quote says whether a class can carry a load).
+const VEHICLE_BLURBS: Record<string, { fits: string; maxItems: number }> = {
+  motorcycle: { fits: 'A bag or two · small parcels', maxItems: 6 },
+  car: { fits: 'Boxes & a full shopping trip', maxItems: 30 },
+  van: { fits: 'Big orders · appliances', maxItems: 120 },
+  truck: { fits: 'Bulk, furniture & heavy loads', maxItems: Infinity },
+};
+const SHOWCASE_ORDER: VehicleArtKind[] = ['motorcycle', 'car', 'van', 'truck'];
+
+function suggestVehicle(itemCount: number): VehicleArtKind | null {
+  if (itemCount <= 0) return null;
+  return SHOWCASE_ORDER.find(k => itemCount <= VEHICLE_BLURBS[k].maxItems) ?? 'truck';
+}
+
+// The Delivery page's Vehicle tab: a route strip with a vehicle driving along
+// it, then one illustrated card per class with price, who is online and what
+// it is good for. With a basket, the class that fits it is flagged.
+function VehicleShowcase({ value, onChange, quotes, priceOf, itemCount, cheapest, pickup, dropoff }: {
+  value: VehicleTypeFilter;
+  onChange: (v: VehicleTypeFilter) => void;
+  quotes: VehicleClassQuote[] | null;
+  priceOf: (q: VehicleClassQuote) => number;
+  itemCount: number;
+  cheapest: number | null;
+  pickup: Location | null;
+  dropoff: Location | null;
+}) {
+  const quoteFor = (id: string) => quotes?.find(q => q.vehicle_type === id) ?? null;
+  const suggested = suggestVehicle(itemCount);
+  const driving: VehicleArtKind = value === 'any' ? (suggested ?? 'motorcycle') : (value as VehicleArtKind);
+  const distanceKm = quotes?.[0]?.distance_km ?? null;
+  const mostOnline = quotes ? Math.max(0, ...quotes.map(q => q.available_riders)) : 0;
+  const placeName = (l: Location | null, fallback: string) => (l?.name || fallback).split(',')[0];
+
+  return (
+    <div className="space-y-3">
+      <style>{`
+        @keyframes mbg-drive { 0% { left: 0%; } 100% { left: calc(100% - 3rem); } }
+        @keyframes mbg-road { to { background-position-x: -24px; } }
+        @media (prefers-reduced-motion: reduce) { .mbg-drive, .mbg-road { animation: none !important; } }
+      `}</style>
+
+      {/* Route strip */}
+      <div className="rounded-2xl bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-3.5 text-white ring-1 ring-inset ring-[#c4a052]/40">
+        <div className="flex items-center justify-between gap-3 text-[11px] font-semibold">
+          <span className="min-w-0 truncate"><span className="mr-1 inline-block h-2 w-2 rounded-full bg-green-400" />{placeName(pickup, 'Pickup')}</span>
+          <span className="min-w-0 truncate text-right">{placeName(dropoff, 'Drop-off')}<span className="ml-1 inline-block h-2 w-2 rounded-full bg-orange-400" /></span>
+        </div>
+        <div className="relative mt-3 h-12">
+          <div
+            className="mbg-road absolute inset-x-0 bottom-1 h-[3px] rounded-full opacity-70"
+            style={{ backgroundImage: 'repeating-linear-gradient(90deg, #e6c980 0 12px, transparent 12px 24px)', animation: 'mbg-road 0.8s linear infinite' }}
+          />
+          <div className="mbg-drive absolute bottom-1.5 w-12" style={{ animation: 'mbg-drive 4.5s ease-in-out infinite alternate' }}>
+            <VehicleArt kind={driving} active />
+          </div>
+        </div>
+        <p className="mt-1 text-center text-[11px] text-white/70">
+          {distanceKm != null ? `${distanceKm.toFixed(1)} km trip · ` : ''}
+          {suggested ? `${itemCount} item${itemCount !== 1 ? 's' : ''} in your basket` : 'Choose the vehicle that fits your delivery'}
+        </p>
+      </div>
+
+      {/* Auto-match */}
+      <button
+        type="button"
+        aria-pressed={value === 'any'}
+        onClick={() => onChange('any')}
+        className={`flex w-full items-center gap-3 rounded-2xl border-2 px-3 py-2.5 text-left transition-all active:scale-[0.99] ${
+          value === 'any' ? 'border-orange-500 bg-orange-50 ring-2 ring-orange-200/70' : 'border-slate-200 hover:border-orange-300'
+        }`}
+      >
+        <span className={`grid h-9 w-9 flex-shrink-0 place-items-center rounded-xl ${value === 'any' ? 'bg-gradient-to-br from-orange-500 to-amber-400 text-white' : 'bg-orange-50 text-orange-600'}`}>
+          <Sparkles size={17} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-bold text-slate-800">Any vehicle — fastest match</span>
+          <span className="block text-[11px] text-slate-500">Whoever is nearest takes it; the fare follows their vehicle.</span>
+        </span>
+        {cheapest != null && <span className="flex-shrink-0 text-xs font-semibold text-slate-500">from {formatUgxShort(cheapest)}</span>}
+      </button>
+
+      {/* One card per class */}
+      <div className="space-y-2.5">
+        {SHOWCASE_ORDER.map(kind => {
+          const quote = quoteFor(kind);
+          const isSelected = value === kind;
+          const cannotCarry = !!quote && !quote.can_carry;
+          const price = quote ? priceOf(quote) : null;
+          const isSuggested = suggested === kind;
+          const isCheapest = price != null && cheapest != null && price === cheapest && (quotes?.length ?? 0) > 1;
+          const online = quote?.available_riders ?? null;
+          return (
+            <button
+              key={kind}
+              type="button"
+              aria-pressed={isSelected}
+              onClick={() => onChange(kind)}
+              className={`relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border-2 p-2.5 pr-3 text-left transition-all active:scale-[0.99] ${
+                isSelected ? 'border-orange-500 bg-gradient-to-r from-orange-50 to-amber-50 ring-2 ring-orange-200/70' : 'border-slate-200 bg-white hover:border-orange-300'
+              } ${cannotCarry ? 'opacity-45' : ''}`}
+            >
+              <span className={`w-[84px] flex-shrink-0 rounded-xl px-1.5 py-1 ${isSelected ? 'bg-white/80' : 'bg-slate-50'}`}>
+                <VehicleArt kind={kind} active={isSelected || isSuggested} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-sm font-bold text-slate-800">{VEHICLE_OPTIONS.find(o => o.id === kind)?.label}</span>
+                  {isSuggested && <span className="rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-700">Fits your order</span>}
+                  {isCheapest && <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">Cheapest</span>}
+                  {online != null && online > 0 && online === mostOnline && (quotes?.length ?? 0) > 1 && (
+                    <span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700">Most available</span>
+                  )}
+                </span>
+                <span className="mt-0.5 block text-[11px] leading-tight text-slate-500">{VEHICLE_BLURBS[kind].fits}</span>
+                <span className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-slate-500">
+                  {online == null ? null : online > 0 ? (
+                    <><span className="relative flex h-2 w-2"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-70" /><span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" /></span>{online} online</>
+                  ) : (
+                    <><span className="h-2 w-2 rounded-full bg-slate-300" />None online right now</>
+                  )}
+                  {cannotCarry && <span className="text-red-500">· can't carry this load</span>}
+                </span>
+              </span>
+              <span className="flex flex-shrink-0 flex-col items-end">
+                {price != null ? (
+                  <>
+                    <span className="text-sm font-extrabold tabular-nums text-orange-600">{formatUgxShort(price)}</span>
+                    <span className="text-[10px] text-slate-400">UGX est.</span>
+                  </>
+                ) : (
+                  <span className="text-[10px] text-slate-400">{pickup && dropoff ? '…' : 'Set route'}</span>
+                )}
+                {isSelected && <CheckCircle size={16} className="mt-1 text-orange-500" />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      {quotes && (
+        <p className="text-center text-[11px] text-slate-400">Estimated prices in UGX. Each driver's final price is shown before you book.</p>
+      )}
+    </div>
+  );
+}
+
 // Boda / Car / Van / Truck each have their own fare rates, so once there is a
 // route the same trip is priced for every class side by side — the customer
 // sees what each vehicle costs (and how many are online) before choosing.
 // Without a route, or if the quote can't be loaded, it is just the chooser.
-function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod, cargoWeight, onCargoWeight, cargoClass, onCargoClass }: {
+function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod, cargoWeight, onCargoWeight, cargoClass, onCargoClass, showcase = false, itemCount = 0 }: {
   value: VehicleTypeFilter;
   onChange: (v: VehicleTypeFilter) => void;
   pickup: Location | null;
@@ -186,6 +335,10 @@ function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod, c
   onCargoWeight: (v: string) => void;
   cargoClass: CargoClass;
   onCargoClass: (v: CargoClass) => void;
+  /** Big illustrated cards with a route strip, instead of the compact 5-up grid — used on the Delivery page. */
+  showcase?: boolean;
+  /** Items in the basket, to suggest a vehicle size that fits (0 = no suggestion). */
+  itemCount?: number;
 }) {
   const walletSurchargePct = useWalletSurchargePct();
   // Van and truck are freight: what is being moved (weight + handling) is part of the price.
@@ -208,6 +361,18 @@ function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod, c
 
   return (
     <div className="space-y-2">
+      {showcase ? (
+        <VehicleShowcase
+          value={value}
+          onChange={onChange}
+          quotes={quotes}
+          priceOf={priceOf}
+          itemCount={itemCount}
+          cheapest={cheapest}
+          pickup={pickup}
+          dropoff={dropoff}
+        />
+      ) : (
       <div className="grid grid-cols-5 gap-2">
         {VEHICLE_OPTIONS.map(opt => {
           const isSelected = value === opt.id;
@@ -237,8 +402,9 @@ function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod, c
           );
         })}
       </div>
+      )}
 
-      {quotes && (
+      {quotes && !showcase && (
         <p className="text-[11px] text-slate-400 text-center">
           Estimated price for this {quotes[0].distance_km.toFixed(1)} km trip, in UGX. Each driver's final price is shown before you book.
         </p>
@@ -322,6 +488,10 @@ function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod, c
 
 export default function EnhancedRideRequest({ customerId, fixedServiceType, showJourneyOption, openJourneyId, onJourneyClosed }: EnhancedRideRequestProps) {
   const [bookingMode, setBookingMode] = useState<'ride' | 'journey'>(openJourneyId ? 'journey' : 'ride');
+  // The Delivery page is one step per tab (shop, address, vehicle, pay) instead of one long scroll.
+  // Every tab stays mounted, only hidden, so nothing typed or picked is lost when switching.
+  const [deliveryTab, setDeliveryTab] = useState<DeliveryTab>('shop');
+  const flowTopRef = useRef<HTMLDivElement>(null);
   // The booked journey being tracked, when the customer opened one from My Journeys.
   const [resumeJourneyId, setResumeJourneyId] = useState<string | null>(openJourneyId ?? null);
   const [pickup, setPickup] = useState('');
@@ -824,8 +994,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     let cancelled = false;
     setLoadingNearbyProducts(true);
     Promise.all(targets.map(sm =>
-      productService.getActiveProducts(sm.id)
-        .then(products => [sm.id, products.slice(0, 6)] as const)
+      productService.getProductsPage({ supermarketId: sm.id, page: 0, pageSize: 6 })
+        .then(({ products }) => [sm.id, products] as const)
         .catch(() => [sm.id, []] as const)
     )).then(results => {
       if (cancelled) return;
@@ -1899,6 +2069,34 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     escortRequested ? 'Security escort' : null,
   ].filter(Boolean).join(' · ');
 
+  const tabHidden = (t: DeliveryTab) => (isDelivery && deliveryTab !== t ? 'hidden' : '');
+  const goTab = (t: DeliveryTab) => {
+    setDeliveryTab(t);
+    requestAnimationFrame(() => flowTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
+  const storeShopping = deliveryMode === 'supermarket';
+  const vehicleLabel = vehicleTypeFilter === 'any' ? 'Any' : VEHICLE_OPTIONS.find(o => o.id === vehicleTypeFilter)?.label ?? 'Any';
+  const deliveryTabs: { id: DeliveryTab; emoji: string; label: string; summary: string; done: boolean }[] = [
+    { id: 'shop', emoji: storeShopping ? '🛍️' : '📦', label: storeShopping ? 'Shop' : 'Items',
+      summary: storeShopping ? (goodsItemCount > 0 ? `${goodsItemCount} item${goodsItemCount !== 1 ? 's' : ''}` : 'Browse') : 'Details',
+      done: storeShopping ? goodsItemCount > 0 : true },
+    { id: 'address', emoji: '📍', label: 'Address', summary: routeReady ? (routeInfo ? `${routeInfo.distanceKm.toFixed(1)} km` : 'Set') : 'Where to?', done: routeReady },
+    { id: 'vehicle', emoji: '🚚', label: 'Vehicle', summary: vehicleLabel, done: vehicleTypeFilter !== 'any' },
+    { id: 'pay', emoji: '💳', label: 'Pay', summary: paymentMethod === 'wallet' ? 'Wallet' : paymentMethod === 'cash' ? 'Cash' : 'Company', done: false },
+  ];
+  const tabOrder = deliveryTabs.map(t => t.id);
+  const nextTab = tabOrder[tabOrder.indexOf(deliveryTab) + 1] as DeliveryTab | undefined;
+  const prevTab = tabOrder[tabOrder.indexOf(deliveryTab) - 1] as DeliveryTab | undefined;
+  const nextLabel = nextTab ? deliveryTabs.find(t => t.id === nextTab)!.label : '';
+  // What the bottom bar says and whether "Next" is allowed on the current tab.
+  const tabBarNote = deliveryTab === 'shop'
+    ? (storeShopping ? `${goodsItemCount} item${goodsItemCount !== 1 ? 's' : ''} · UGX ${goodsTotal.toLocaleString()}` : 'Normal delivery')
+    : deliveryTab === 'address'
+      ? (routeReady ? (routeInfo ? `${routeInfo.distanceKm.toFixed(1)} km · ~${Math.round(routeInfo.durationMin)} min` : 'Route set') : 'Set pickup and drop-off')
+      : `${vehicleLabel} vehicle`;
+  const canGoNext = deliveryTab === 'shop' ? (!storeShopping || goodsItemCount > 0) : deliveryTab === 'address' ? routeReady : true;
+  const showTabBar = isDelivery && deliveryTab !== 'pay' && !(deliveryTab === 'shop' && storeShopping && goodsItemCount === 0);
+
   return (
     <div className="space-y-5">
       {/* Slim title — the big hero card is gone so the form starts right away.
@@ -1938,6 +2136,34 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         />
       )}
 
+      {/* Delivery steps — shop, address, vehicle, pay */}
+      {isDelivery && (
+        <div ref={flowTopRef} className="scroll-mt-28">
+          <div role="tablist" aria-label="Delivery steps" className="grid grid-cols-4 gap-1.5 rounded-2xl bg-slate-100 p-1.5">
+            {deliveryTabs.map(t => {
+              const active = deliveryTab === t.id;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => goTab(t.id)}
+                  className={`relative flex min-w-0 flex-col items-center gap-0.5 rounded-xl px-1 py-2 transition-all active:scale-[0.97] ${
+                    active ? 'bg-white shadow-sm ring-1 ring-orange-200' : 'hover:bg-white/60'
+                  }`}
+                >
+                  <span className="text-lg leading-none">{t.emoji}</span>
+                  <span className={`text-[11px] font-bold ${active ? 'text-orange-600' : 'text-slate-600'}`}>{t.label}</span>
+                  <span className="w-full truncate text-center text-[10px] text-slate-400">{t.summary}</span>
+                  {t.done && !active && <CheckCircle size={12} className="absolute right-1 top-1 text-emerald-500" />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Service type — hidden when the parent tab already fixes it, so
           "Book a Ride" and "Delivery" stay separate instead of one
           screen that toggles between both */}
@@ -1964,7 +2190,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
       {/* Delivery details — store picker, personal/business, delivery window */}
       {isDelivery && (
-        <div className="space-y-4">
+        <div className={`space-y-4 ${tabHidden('shop')}`}>
           <StepHeading n={1}>Delivery details</StepHeading>
           {/* Delivery mode + supermarket picker */}
           {serviceType === 'delivery' && (
@@ -2237,10 +2463,12 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                     key={pickerKey}
                     allStores
                     supermarketId={selectedSupermarketId || null}
-                    stores={supermarkets.filter(sm => !isAbroad(sm))}
+                    stores={supermarkets}
+                    excludeStoreIds={abroadStores.map(sm => sm.id)}
                     currency={selectedStoreAbroad ? selectedStore?.price_currency || 'UGX' : undefined}
                     onCartChange={setDeliveryCart}
                     fullPage
+                    hideCartBar
                   />
 
                   {deliveryCart.length > 0 && (
@@ -2342,7 +2570,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       )}
 
       {/* Route */}
-      <div className="space-y-4">
+      <div className={`space-y-4 ${tabHidden('address')}`}>
         <StepHeading
           n={1 + stepBase}
           action={
@@ -2534,6 +2762,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       </div>
 
       {/* Ride options — locked until the store order is confirmed with the PIN */}
+      <div className={`space-y-5 ${tabHidden('vehicle')}`}>
       {goodsLocked && (
         <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
           <span>🔐 Confirm your order with your PIN first — then choose a vehicle.</span>
@@ -2573,6 +2802,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               onCargoWeight={setCargoWeight}
               cargoClass={cargoClass}
               onCargoClass={setCargoClass}
+              showcase={isDelivery}
+              itemCount={isStoreDelivery ? goodsItemCount : 0}
             />
 
             {/* Power / rain cover — only mean anything for a boda
@@ -2646,8 +2877,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         )}
       </div>
 
+      </div>
+
       {/* Payment + extras */}
-      <div className="space-y-4">
+      <div className={`space-y-4 ${tabHidden('pay')}`}>
         <StepHeading n={3 + stepBase}>Payment</StepHeading>
 
         {/* Payment method — Wallet settles automatically the instant the
@@ -2888,7 +3121,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       )}
 
       {/* Actions */}
-      <div className="space-y-3">
+      <div className={`space-y-3 ${tabHidden('pay')}`}>
         {!routeReady && (
           <p className="text-center text-xs text-slate-500">
             Choose your pickup and drop-off above to see riders.
@@ -3018,7 +3251,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           : matchedRiders.filter(r => r.mode === modePreference);
 
         return (
-          <div ref={resultsRef} className="scroll-mt-32">
+          <div ref={resultsRef} className={`scroll-mt-32 ${tabHidden('pay')}`}>
             <div className="mb-4 flex items-center gap-3">
               <h3 className="font-classic-display text-lg font-semibold text-slate-800">
                 Available Riders ({displayedRiders.length})
@@ -3064,6 +3297,28 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           </div>
         );
       })()}
+
+      {/* Step bar — where you are, and the next step */}
+      {showTabBar && (
+        <div className="sticky bottom-20 z-30 sm:bottom-4">
+          <div className="flex items-center gap-2 rounded-full bg-slate-900/95 p-1.5 pl-2 text-white shadow-xl backdrop-blur">
+            {prevTab && (
+              <button type="button" onClick={() => goTab(prevTab)} aria-label="Back" className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-white/10 hover:bg-white/20">
+                <ArrowLeft size={16} />
+              </button>
+            )}
+            <span className="min-w-0 flex-1 truncate px-1 text-xs font-semibold">{tabBarNote}</span>
+            <button
+              type="button"
+              onClick={() => nextTab && goTab(nextTab)}
+              disabled={!canGoNext}
+              className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-sm font-bold text-white shadow disabled:opacity-40"
+            >
+              Next: {nextLabel} <ArrowRight size={14} />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

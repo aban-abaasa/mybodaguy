@@ -112,6 +112,44 @@ async function fetchProducts(supermarketId: string | null, activeOnly: boolean):
   return products.map((p: any) => mapProductRow(p, stockByProduct));
 }
 
+const PRODUCT_COLUMNS = 'id, supermarket_id, name, description, selling_price, images, is_active, created_at, sku, tax_rate';
+export const PRODUCT_PAGE_SIZE = 24;
+
+export interface ProductPageQuery {
+  /** One store, or omit/null for every store. */
+  supermarketId?: string | null;
+  /** All-stores view only: stores whose products must not be listed (e.g. stores abroad). */
+  excludeStoreIds?: string[];
+  search?: string;
+  /** A category name; 'Other' means uncategorised. Omit/null for every category. */
+  category?: string | null;
+  /** Zero-based. */
+  page: number;
+  pageSize?: number;
+}
+
+export interface ProductPage {
+  products: Product[];
+  hasMore: boolean;
+}
+
+// Available stock (on hand minus reserved) for just the products on screen.
+async function fetchStockFor(ids: string[]): Promise<Map<string, number>> {
+  const stock = new Map<string, number>();
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  const pages = await Promise.all(
+    chunks.map(chunk => supabase.from('inventory').select('product_id, current_stock, reserved_stock').in('product_id', chunk)),
+  );
+  pages.forEach(({ data }) => (data || []).forEach((inv: any) => {
+    stock.set(inv.product_id, Math.max(0, Number(inv.current_stock || 0) - Number(inv.reserved_stock || 0)));
+  }));
+  return stock;
+}
+
+// Strips characters that have meaning inside a PostgREST filter string.
+const cleanSearchTerm = (q: string) => q.replace(/[%*,()\\]/g, ' ').replace(/\s+/g, ' ').trim();
+
 async function resolveCategoryId(categoryName: string): Promise<string | null> {
   const name = categoryName.trim();
   if (!name) return null;
@@ -133,6 +171,75 @@ async function resolveCategoryId(categoryName: string): Promise<string | null> {
 }
 
 export const productService = {
+  // One page of active products, filtered on the server (store, search,
+  // category). The storefront scrolls through these instead of loading a
+  // whole catalog; the page is fetched with one extra row to learn if more exist.
+  async getProductsPage(q: ProductPageQuery): Promise<ProductPage> {
+    const pageSize = q.pageSize ?? PRODUCT_PAGE_SIZE;
+    const from = q.page * pageSize;
+    const byCategory = !!q.category && q.category !== 'Other';
+    const term = cleanSearchTerm(q.search ?? '');
+    // In the all-stores view, products of deactivated stores stay hidden.
+    // If the embedded filter isn't available on this project, retry without it.
+    const build = (activeStoresOnly: boolean) => {
+      let query = supabase
+        .from('products')
+        .select(`${PRODUCT_COLUMNS}, ${byCategory ? 'categories!inner(name)' : 'categories(name)'}${activeStoresOnly ? ', supermarkets!inner(is_active)' : ''}`)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, from + pageSize);
+      if (q.supermarketId) query = query.eq('supermarket_id', q.supermarketId);
+      else {
+        if (q.excludeStoreIds?.length) query = query.not('supermarket_id', 'in', `(${q.excludeStoreIds.join(',')})`);
+        if (activeStoresOnly) query = query.eq('supermarkets.is_active', true);
+      }
+      if (byCategory) query = query.eq('categories.name', q.category as string);
+      else if (q.category === 'Other') query = query.is('category_id', null);
+      if (term) query = query.or(`name.ilike.%${term}%,description.ilike.%${term}%`);
+      return query;
+    };
+
+    let { data, error } = await build(!q.supermarketId);
+    if (error && !q.supermarketId) ({ data, error } = await build(false));
+    if (error) throw error;
+    const rows = data || [];
+    const hasMore = rows.length > pageSize;
+    const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
+    const stock = await fetchStockFor(pageRows.map((r: any) => r.id));
+    return { products: pageRows.map((r: any) => mapProductRow(r, stock)), hasMore };
+  },
+
+  // Specific products, e.g. to restore a basket started on another screen.
+  async getProductsByIds(ids: string[]): Promise<Product[]> {
+    if (ids.length === 0) return [];
+    const chunks: string[][] = [];
+    for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+    const pages = await Promise.all(
+      chunks.map(chunk => supabase.from('products').select(`${PRODUCT_COLUMNS}, categories(name)`).in('id', chunk)),
+    );
+    const rows = pages.flatMap(({ data }) => data || []);
+    const stock = await fetchStockFor(rows.map((r: any) => r.id));
+    return rows.map((r: any) => mapProductRow(r, stock));
+  },
+
+  // Category chips for the storefront: the store's own, or the shared list for all stores.
+  async listCategoryNames(supermarketId?: string | null): Promise<string[]> {
+    if (supermarketId) {
+      const { data } = await supabase
+        .from('products')
+        .select('categories(name)')
+        .eq('supermarket_id', supermarketId)
+        .eq('is_active', true)
+        .limit(2000);
+      const names = new Set<string>();
+      (data || []).forEach((r: any) => { if (r.categories?.name) names.add(r.categories.name); });
+      return Array.from(names).sort();
+    }
+    const { data } = await supabase.from('categories').select('name').order('name').limit(80);
+    return Array.from(new Set((data || []).map((r: any) => r.name as string).filter(Boolean)));
+  },
+
   // Real products for a supermarket — used by the customer product picker.
   async getActiveProducts(supermarketId: string): Promise<Product[]> {
     return fetchProducts(supermarketId, true);
