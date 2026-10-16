@@ -306,14 +306,13 @@ export default function ProductPicker({ supermarketId, allStores = false, stores
     return ['All', ...Array.from(set)];
   }, [categoryNames, activeCategory]);
 
-  // The store's listed price plus its own tax_rate — always shown together,
-  // never added on top later. mbg_respond_to_ride charges the customer this
-  // exact same tax-inclusive amount at acceptance, so what's shown here
-  // while shopping is always what actually gets billed.
+  // The store's listed price already includes tax, so it is shown and billed
+  // as-is: mbg_respond_to_ride charges the customer exactly this amount at
+  // acceptance, so what's shown here while shopping is what gets billed.
   const foreign = currency !== 'UGX';
   const inclusivePrice = useCallback((p: Product) => foreign
-    ? Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100) * 100) / 100
-    : Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100)), [foreign]);
+    ? Math.round(Number(p.price_ugx) * 100) / 100
+    : Math.round(Number(p.price_ugx)), [foreign]);
   const money = useCallback<Money>((n) => `${currency} ${foreign ? n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : n.toLocaleString()}`, [currency, foreign]);
 
   const cartCount = Object.values(qtyById).reduce((sum, q) => sum + q, 0);

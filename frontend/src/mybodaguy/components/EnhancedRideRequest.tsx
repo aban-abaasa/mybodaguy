@@ -19,6 +19,7 @@ import { cancelRide, CUSTOMER_CANCEL_REASONS, SUPERMARKET_CANCEL_REASONS } from 
 import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type CountryLookup } from '../services/geocodeService';
 import { hasPinSet, validatePIN, verifyPin } from '../services/pinService';
 import SetPinPrompt from './SetPinPrompt';
+import { formatMoney } from '../services/money';
 import { productService, type Product } from '../services/productService';
 import type { ImportStore } from '../services/journeyService';
 import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
@@ -1344,13 +1345,17 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     toast.success(`Drop-off: ${location.name}`);
   };
 
-  // What the customer is buying, priced the way the server will charge it (listed price + the product's tax).
+  // What the customer is buying, priced the way the server will charge it (the listed price, which already includes tax).
   const orderStore = supermarkets.find(sm => sm.id === activeStoreId) ?? null;
+  // Goods are priced and shown in the store's own currency (cents kept for currencies that have them).
+  const goodsCurrency = (orderStore?.price_currency || 'UGX').toUpperCase();
+  const goodsMoney = (n: number) => formatMoney(n, goodsCurrency);
+  const cents = (n: number) => Math.round(n * 100) / 100;
   const orderLines = deliveryCart.map(l => {
-    const unit = Math.round(Number(l.product.price_ugx) * (1 + (l.product.tax_rate || 0) / 100));
-    return { id: l.product.id, name: l.product.name, qty: l.qty, unit, total: unit * l.qty };
+    const unit = cents(Number(l.product.price_ugx));
+    return { id: l.product.id, name: l.product.name, qty: l.qty, unit, total: cents(unit * l.qty) };
   });
-  const goodsTotal = orderLines.reduce((sum, l) => sum + l.total, 0);
+  const goodsTotal = cents(orderLines.reduce((sum, l) => sum + l.total, 0));
   const goodsItemCount = orderLines.reduce((sum, l) => sum + l.qty, 0);
 
   const openGoodsPin = async () => {
@@ -1603,8 +1608,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       const orderNotes = deliveryCart.length > 0
         ? [
             `Collect at ${orderStore ? `${orderStore.name}${orderStore.location ? ` (${orderStore.location})` : ''}` : 'the store'}:`,
-            ...orderLines.map(l => `• ${l.qty} × ${l.name} — UGX ${l.total.toLocaleString()}`),
-            `Goods total: UGX ${goodsTotal.toLocaleString()}${paymentMethod === 'wallet' ? ' · customer confirmed with wallet PIN' : ''}`,
+            ...orderLines.map(l => `• ${l.qty} × ${l.name} — ${goodsMoney(l.total)}`),
+            `Goods total: ${goodsMoney(goodsTotal)}${paymentMethod === 'wallet' ? ' · customer confirmed with wallet PIN' : ''}`,
           ].join('\n')
         : null;
       // Structured, priced cart — this is what lets the store actually get
@@ -2090,7 +2095,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const nextLabel = nextTab ? deliveryTabs.find(t => t.id === nextTab)!.label : '';
   // What the bottom bar says and whether "Next" is allowed on the current tab.
   const tabBarNote = deliveryTab === 'shop'
-    ? (storeShopping ? `${goodsItemCount} item${goodsItemCount !== 1 ? 's' : ''} · UGX ${goodsTotal.toLocaleString()}` : 'Normal delivery')
+    ? (storeShopping ? `${goodsItemCount} item${goodsItemCount !== 1 ? 's' : ''} · ${goodsMoney(goodsTotal)}` : 'Normal delivery')
     : deliveryTab === 'address'
       ? (routeReady ? (routeInfo ? `${routeInfo.distanceKm.toFixed(1)} km · ~${Math.round(routeInfo.durationMin)} min` : 'Route set') : 'Set pickup and drop-off')
       : `${vehicleLabel} vehicle`;
@@ -2329,7 +2334,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                                     </div>
                                     <p className="text-[10px] text-slate-700 truncate mt-1">{p.name}</p>
                                     <p className="text-[10px] text-orange-600 font-semibold">
-                                      UGX {Math.round(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100)).toLocaleString()}
+                                      {formatMoney(Number(p.price_ugx), (sm.price_currency || 'UGX').toUpperCase())}
                                     </p>
                                   </button>
                                 ))}
@@ -2367,7 +2372,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                                 </div>
                                 <p className="text-[10px] text-slate-700 truncate mt-1">{p.name}</p>
                                 <p className="text-[10px] text-violet-700 font-semibold">
-                                  {sm.price_currency || 'UGX'} {(Number(p.price_ugx) * (1 + (p.tax_rate || 0) / 100)).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  {formatMoney(Number(p.price_ugx), (sm.price_currency || 'UGX').toUpperCase())}
                                 </p>
                               </button>
                             ))}
@@ -2465,7 +2470,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                     supermarketId={selectedSupermarketId || null}
                     stores={supermarkets}
                     excludeStoreIds={abroadStores.map(sm => sm.id)}
-                    currency={selectedStoreAbroad ? selectedStore?.price_currency || 'UGX' : undefined}
+                    currency={selectedStore?.price_currency?.toUpperCase() || undefined}
                     onCartChange={setDeliveryCart}
                     fullPage
                     hideCartBar
@@ -2480,13 +2485,13 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                         {orderLines.map(l => (
                           <li key={l.id} className="flex justify-between gap-3">
                             <span className="min-w-0 truncate">{l.qty} × {l.name}</span>
-                            <span className="flex-shrink-0 tabular-nums">UGX {l.total.toLocaleString()}</span>
+                            <span className="flex-shrink-0 tabular-nums">{goodsMoney(l.total)}</span>
                           </li>
                         ))}
                       </ul>
                       <div className="mt-2 flex justify-between gap-3 border-t border-orange-200 pt-2 text-sm font-bold text-slate-800">
                         <span>Goods · {goodsItemCount} item{goodsItemCount !== 1 ? 's' : ''}</span>
-                        <span className="text-orange-600 tabular-nums">UGX {goodsTotal.toLocaleString()}</span>
+                        <span className="text-orange-600 tabular-nums">{goodsMoney(goodsTotal)}</span>
                       </div>
                       <p className="mt-1 text-[11px] text-slate-500">
                         Prices include tax. The delivery fare is separate — you'll see it when you choose a vehicle.
@@ -3082,7 +3087,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               <div className="mb-2 text-4xl">🔐</div>
               <h2 className="text-lg font-bold text-slate-800">Confirm your order</h2>
               <p className="mt-1 text-xs text-slate-500">
-                {goodsItemCount} item{goodsItemCount !== 1 ? 's' : ''} from {orderStore?.name || 'the store'} · UGX {goodsTotal.toLocaleString()}
+                {goodsItemCount} item{goodsItemCount !== 1 ? 's' : ''} from {orderStore?.name || 'the store'} · {goodsMoney(goodsTotal)}
               </p>
               <p className="mt-1 text-[11px] text-slate-400">Charged from your wallet only when a rider accepts.</p>
             </div>
