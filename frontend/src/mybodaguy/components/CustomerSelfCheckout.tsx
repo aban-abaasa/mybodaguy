@@ -10,12 +10,12 @@ import { QRCodeCanvas as ReceiptQrCode } from 'qrcode.react';
 import { supabase } from '../../services/supabaseClient';
 import {
   getBalance,
-  ugxToICAN,
   formatICAN,
   ICAN_TO_UGX,
   type ICANBalance,
 } from '../services/icanWalletService';
 import ProductPicker, { CartLine } from './ProductPicker';
+import { formatMoney } from '../services/money';
 import ScanFrameOverlay from './ScanFrameOverlay';
 import SetPinPrompt from './SetPinPrompt';
 import { hasPinSet, verifyPin, validatePIN } from '../services/pinService';
@@ -46,6 +46,8 @@ interface CartItem {
 }
 
 interface CheckoutReceipt {
+  /** Currency of every amount on the receipt (the store's own). */
+  currency?: string;
   transaction_id: string;
   receipt_number: string;
   total_ugx: number;
@@ -75,6 +77,7 @@ interface SupermarketRow {
   name: string;
   location: string | null;
   business_type: string;
+  price_currency?: string | null;
 }
 
 // Extend Window for BarcodeDetector (not in standard TS lib yet)
@@ -90,13 +93,34 @@ function formatUGX(n: number) {
   return `UGX ${n.toLocaleString('en-UG', { maximumFractionDigits: 0 })}`;
 }
 
+const icanPriceCache = new Map<string, number>();
+
+/** What one ICAN is worth in `currency` - the price the database converts with. UGX keeps the fixed rate. */
+async function getIcanPrice(currency: string): Promise<number | null> {
+  if (currency === 'UGX') return ICAN_TO_UGX;
+  const cached = icanPriceCache.get(currency);
+  if (cached) return cached;
+  const { data, error } = await supabase.rpc('ican_get_price_in_currency', { p_currency_code: currency });
+  const price = Number(Array.isArray(data) ? data[0]?.price_local : data?.price_local);
+  if (error || !Number.isFinite(price) || price <= 0) return null;
+  icanPriceCache.set(currency, price);
+  return price;
+}
+
 function cartTotals(cart: CartItem[]) {
-  const subtotal = cart.reduce((s, i) => s + i.product.selling_price * i.quantity, 0);
-  const tax = cart.reduce(
-    (s, i) => s + (i.product.selling_price * i.quantity * (i.product.tax_rate / 100)),
-    0,
-  );
-  return { subtotal: Math.round(subtotal), tax: Math.round(tax), total: Math.round(subtotal + tax) };
+  // Selling prices already include tax, so the customer pays exactly the
+  // displayed price. Tax is the portion inside it, shown for transparency.
+  const total = cart.reduce((s, i) => s + i.product.selling_price * i.quantity, 0);
+  const includedTax = cart.reduce((s, i) => {
+    const rate = Number(i.product.tax_rate ?? 18);
+    const gross = i.product.selling_price * i.quantity;
+    return s + (rate > 0 ? gross - gross / (1 + rate / 100) : 0);
+  }, 0);
+  return {
+    subtotal: Math.round(total - includedTax),
+    tax: Math.round(includedTax),
+    total: Math.round(total),
+  };
 }
 
 // ── Main Component ─────────────────────────────────────────────────────────────
@@ -104,6 +128,7 @@ function cartTotals(cart: CartItem[]) {
 export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [state, setState] = useState<ScannerState>('idle');
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [icanPrice, setIcanPrice] = useState<number>(ICAN_TO_UGX);
   const [foundProduct, setFoundProduct] = useState<Product | null>(null);
   const [scanError, setScanError] = useState('');
   const [manualBarcode, setManualBarcode] = useState('');
@@ -161,7 +186,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   useEffect(() => {
     supabase
       .from('supermarkets')
-      .select('id, name, location, business_type')
+      .select('id, name, location, business_type, price_currency')
       .eq('is_active', true)
       .order('name')
       .then(({ data }) => setSupermarkets(data || []));
@@ -417,6 +442,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
 
     const cashback = paid.reduce((sum, r) => sum + (r.data.ican_cashback?.success ? Number(r.data.ican_cashback.net_credited || 0) : 0), 0);
     setReceipt({
+      currency: paid[0].data.currency,
       transaction_id: paid[0].data.transaction_id,
       receipt_number: paid.map(r => r.data.receipt_number).filter(Boolean).join(', '),
       total_ugx: paid.reduce((sum, r) => sum + Number(r.data.total_ugx || 0), 0),
@@ -558,16 +584,28 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     const qr = await QRCode.toDataURL(website, { margin: 1, width: 240 });
     const printWindow = window.open('', '_blank', 'width=720,height=800');
     if (!printWindow) return;
-    const rows = receipt.items.map((item) => `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td>${formatUGX(item.line_total)}</td></tr>`).join('');
-    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${receipt.receipt_number}</title><style>body{font:15px Georgia,serif;background:#f5f2e9;color:#25253f;padding:32px}.receipt{max-width:560px;margin:auto;background:#fffdf8;border:1px solid #c4a052;border-radius:16px;padding:28px}.head{margin:-28px -28px 22px;padding:22px;background:#312e81;color:#fff;border-bottom:4px solid #c4a052;border-radius:16px 16px 0 0}table{width:100%;border-collapse:collapse}td{padding:9px;border-bottom:1px solid #e8e1d0}td:last-child{text-align:right}.total{margin-top:18px;padding:14px;background:#312e81;color:white;border-radius:8px;font-size:20px;font-weight:bold;text-align:right}.qr{text-align:center;margin-top:20px;padding:16px;background:#faf8f1;border:1px solid #c4a052}.qr img{width:145px;height:145px}.qr small{display:block;color:#526176;overflow-wrap:anywhere}@media print{body{padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><main class="receipt"><header class="head"><h1>${supermarkets.find((sm) => sm.id === siteStoreId)?.name || 'BodaGoEra store'}</h1><p>Customer purchase receipt</p><strong>${receipt.receipt_number}</strong><br>${new Date().toLocaleString('en-UG')}</header><table>${rows}</table><div class="total">TOTAL PAID ${formatUGX(receipt.total_ugx)}</div><section class="qr"><strong>Visit this store's public website</strong><br><img src="${qr}" alt="Store website QR"><small>${website}</small></section></main><script>window.onload=()=>window.print()</script></body></html>`);
+    const rows = receipt.items.map((item) => `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td>${fmtReceipt(item.line_total)}</td></tr>`).join('');
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${receipt.receipt_number}</title><style>body{font:15px Georgia,serif;background:#f5f2e9;color:#25253f;padding:32px}.receipt{max-width:560px;margin:auto;background:#fffdf8;border:1px solid #c4a052;border-radius:16px;padding:28px}.head{margin:-28px -28px 22px;padding:22px;background:#312e81;color:#fff;border-bottom:4px solid #c4a052;border-radius:16px 16px 0 0}table{width:100%;border-collapse:collapse}td{padding:9px;border-bottom:1px solid #e8e1d0}td:last-child{text-align:right}.total{margin-top:18px;padding:14px;background:#312e81;color:white;border-radius:8px;font-size:20px;font-weight:bold;text-align:right}.qr{text-align:center;margin-top:20px;padding:16px;background:#faf8f1;border:1px solid #c4a052}.qr img{width:145px;height:145px}.qr small{display:block;color:#526176;overflow-wrap:anywhere}@media print{body{padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><main class="receipt"><header class="head"><h1>${supermarkets.find((sm) => sm.id === siteStoreId)?.name || 'BodaGoEra store'}</h1><p>Customer purchase receipt</p><strong>${receipt.receipt_number}</strong><br>${new Date().toLocaleString('en-UG')}</header><table>${rows}</table><div class="total">TOTAL PAID ${fmtReceipt(receipt.total_ugx)}</div><section class="qr"><strong>Visit this store's public website</strong><br><img src="${qr}" alt="Store website QR"><small>${website}</small></section></main><script>window.onload=()=>window.print()</script></body></html>`);
     printWindow.document.close();
   }
 
   // ── Computed ──────────────────────────────────────────────────────────────
 
   const totals = cartTotals(cart);
-  const icanNeeded = ugxToICAN(totals.total);
-  const canPayICAN = (icanBalance?.ican ?? 0) >= icanNeeded;
+  // Everything is shown in the store's own currency, and ICAN is converted at that currency's price.
+  const cartStoreId = cart[0]?.product.supermarket_id || selectedSupermarketId;
+  const currency = (supermarkets.find(sm => sm.id === cartStoreId)?.price_currency || 'UGX').toUpperCase();
+  const fmt = (n: number) => formatMoney(n, currency);
+  const fmtReceipt = (n: number) => formatMoney(n, receipt?.currency || currency);
+  const icanNeeded = icanPrice > 0 ? Math.floor((totals.total / icanPrice) * 1e8) / 1e8 : 0;
+  const canPayICAN = icanPrice > 0 && (icanBalance?.ican ?? 0) >= icanNeeded;
+
+  useEffect(() => {
+    let cancelled = false;
+    setIcanPrice(currency === 'UGX' ? ICAN_TO_UGX : 0);
+    getIcanPrice(currency).then(price => { if (!cancelled) setIcanPrice(price ?? 0); });
+    return () => { cancelled = true; };
+  }, [currency]);
 
   const activeStore = supermarkets.find(sm => sm.id === selectedSupermarketId) || null;
   // Store whose website/QR/receipt applies: the cart's store, else the chosen one, else the last paid one.
@@ -607,17 +645,17 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                   {item.product_name || 'Product'} × {item.quantity}
                 </span>
                 <span className="font-semibold text-slate-900 whitespace-nowrap">
-                  {formatUGX(item.line_total)}
+                  {fmtReceipt(item.line_total)}
                 </span>
               </div>
             ))}
             <div className="flex justify-between text-sm">
               <span className="text-slate-500">Tax</span>
-              <span className="text-slate-900">{formatUGX(receipt.tax_ugx)}</span>
+              <span className="text-slate-900">{fmtReceipt(receipt.tax_ugx)}</span>
             </div>
             <div className="flex justify-between font-bold text-base border-t pt-2">
               <span>Total Paid</span>
-              <span className="text-orange-600">{formatUGX(receipt.total_ugx)}</span>
+              <span className="text-orange-600">{fmtReceipt(receipt.total_ugx)}</span>
             </div>
           </div>
 
@@ -886,10 +924,10 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
               )}
               <p className="text-xs text-slate-400 mt-1">{foundProduct.category_name} · SKU: {foundProduct.sku}</p>
               <p className="text-orange-600 font-bold text-xl mt-2">
-                {formatUGX(foundProduct.selling_price)}
+                {fmt(foundProduct.selling_price)}
               </p>
               <p className="text-xs text-slate-400">
-                {foundProduct.available_stock} in stock · +{foundProduct.tax_rate}% tax
+                {foundProduct.available_stock} in stock · {foundProduct.tax_rate}% tax included
               </p>
             </div>
           </div>
@@ -934,7 +972,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
               <div key={item.product.product_id} className="px-5 py-3 flex items-center gap-3">
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-800 text-sm truncate">{item.product.name}</p>
-                  <p className="text-xs text-slate-400">{formatUGX(item.product.selling_price)} each</p>
+                  <p className="text-xs text-slate-400">{fmt(item.product.selling_price)} each</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -952,7 +990,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                   </button>
                 </div>
                 <span className="w-24 text-right font-bold text-slate-800 text-sm">
-                  {formatUGX(item.line_total)}
+                  {fmt(item.line_total)}
                 </span>
               </div>
             ))}
@@ -961,14 +999,14 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           {/* Totals */}
           <div className="border-t border-slate-100 px-5 py-4 bg-slate-50 space-y-1">
             <div className="flex justify-between text-sm text-slate-500">
-              <span>Subtotal</span><span>{formatUGX(totals.subtotal)}</span>
+              <span>Subtotal</span><span>{fmt(totals.subtotal)}</span>
             </div>
             <div className="flex justify-between text-sm text-slate-500">
-              <span>Tax</span><span>{formatUGX(totals.tax)}</span>
+              <span>Tax included</span><span>{fmt(totals.tax)}</span>
             </div>
             <div className="flex justify-between font-bold text-slate-800 text-base border-t border-slate-200 pt-2">
               <span>Total</span>
-              <span className="text-orange-600">{formatUGX(totals.total)}</span>
+              <span className="text-orange-600">{fmt(totals.total)}</span>
             </div>
           </div>
 
@@ -1051,8 +1089,8 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                 <><Loader size={20} className="animate-spin" /> Processing...</>
               ) : (
                 payment === 'ican'
-                  ? <><ReceiptText size={20} /> Pay {formatUGX(totals.total)} with PIN</>
-                  : <><ExternalLink size={20} /> Pay {formatUGX(totals.total)} on website</>
+                  ? <><ReceiptText size={20} /> Pay {fmt(totals.total)} with PIN</>
+                  : <><ExternalLink size={20} /> Pay {fmt(totals.total)} on website</>
               )}
             </button>
           </div>
@@ -1079,7 +1117,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
               <div className="text-4xl mb-2">🔐</div>
               <h2 className="font-bold text-lg text-slate-800">Enter your PIN</h2>
               <p className="text-slate-500 text-xs mt-1">
-                Confirm {formatUGX(totals.total)} from your IcanEra Wallet
+                Confirm {fmt(totals.total)} from your IcanEra Wallet
               </p>
             </div>
             <input
