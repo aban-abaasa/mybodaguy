@@ -23,7 +23,7 @@ interface Props {
 }
 
 export default function RiderICANEarnings({ user }: Props) {
-  const [balance, setBalance] = useState<ICANBalance>({ ican: 0, ugx: 0, address: null, totalEarned: 0, totalSpent: 0, totalTithe: 0 });
+  const [balance, setBalance] = useState<ICANBalance>({ ican: 0, ugx: 0, address: null, totalEarned: 0, totalSpent: 0 });
   const [recentTx, setRecentTx] = useState<ICANTransaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

@@ -51,7 +51,7 @@ export default function RideCommsBar({ rideId, selfUserId, selfName, peerUserId,
         note: `Sent during ride ${rideId}`,
         referenceId: rideId,
       });
-      toast.success(`✅ Sent ${formatICAN(amount)} icanera to ${peerName} (they received ${formatICAN(result.recipient_received)} after tithe)`);
+      toast.success(`✅ Sent ${formatICAN(amount)} icanera to ${peerName}`);
       setSendOpen(false);
       setSendAmount('');
       setSendPin('');
@@ -130,7 +130,7 @@ export default function RideCommsBar({ rideId, selfUserId, selfName, peerUserId,
               autoFocus
               className="w-full px-4 py-3 border-2 border-slate-200 rounded-lg text-lg font-bold focus:border-purple-500 focus:outline-none mb-2"
             />
-            <p className="text-[11px] text-slate-400 mb-4">A standard 10% tithe applies, same as any personal transfer — {peerName} receives 90% of what you send.</p>
+            <p className="text-[11px] text-slate-400 mb-4">{peerName} receives the full amount you send.</p>
             <label className="block text-xs font-semibold text-slate-500 mb-1">Transaction PIN</label>
             <input
               type="password"

@@ -253,17 +253,16 @@ export function QuickActions({ onAction }: { onAction: (a: WalletAction) => void
 export interface DayFlow { label: string; in: number; out: number }
 
 /** Money in / out per day for the last 7 days — a tiny, honest bar chart. */
-export function ActivityStrip({ days, earned, spent, tithe, hidden, format }: { days: DayFlow[]; earned: string; spent: string; tithe: string; hidden: boolean; format: (n: number) => string }) {
+export function ActivityStrip({ days, earned, spent, hidden, format }: { days: DayFlow[]; earned: string; spent: string; hidden: boolean; format: (n: number) => string }) {
   const max = Math.max(...days.flatMap((d) => [d.in, d.out]), 0);
   const quiet = max === 0;
 
   return (
     <section className="classic-card p-4" aria-label="Wallet activity">
-      <div className="grid grid-cols-3 divide-x divide-[#c4a052]/25 text-center">
+      <div className="grid grid-cols-2 divide-x divide-[#c4a052]/25 text-center">
         {[
           { label: 'Earned', value: earned },
           { label: 'Spent', value: spent },
-          { label: 'Tithe', value: tithe },
         ].map((s) => (
           <div key={s.label} className="min-w-0 px-1.5 min-[380px]:px-2">
             <p className="classic-eyebrow !text-[9.5px]">{s.label}</p>
