@@ -1,7 +1,7 @@
 /**
  * ICAN Wallet Service — My Boda Guy (TypeScript)
  * 1 ICAN = 5,000 UGX floor price.
- * All rider/driver earnings auto-deduct 10% tithe via DB stored function.
+ * Earnings are credited in full — the wallet takes no tithe (tithe lives only in the ICAN app's church Tithe tab).
  */
 
 import { supabase } from '../../services/supabaseClient';
@@ -18,7 +18,6 @@ export interface ICANWallet {
   ican_balance: number;
   total_earned: number;
   total_spent: number;
-  total_tithe_paid: number;
   status: 'active' | 'suspended' | 'frozen';
   created_at: string;
   updated_at: string;
@@ -30,7 +29,6 @@ export interface ICANBalance {
   address: string | null;
   totalEarned: number;
   totalSpent: number;
-  totalTithe: number;
 }
 
 export interface ICANTransaction {
@@ -39,7 +37,7 @@ export interface ICANTransaction {
   recipient_user_id: string | null;
   ican_amount: number;
   ugx_equivalent: number;
-  transaction_type: 'earn' | 'transfer_in' | 'transfer_out' | 'tithe' | 'purchase' | 'sale' | 'cashback' | 'refund';
+  transaction_type: 'earn' | 'transfer_in' | 'transfer_out' | 'purchase' | 'sale' | 'cashback' | 'refund';
   source_app: string;
   reference_id: string | null;
   note: string | null;
@@ -52,7 +50,6 @@ export interface EarnResult {
   success: boolean;
   tx_id: string;
   gross_earned: number;
-  tithe_deducted: number;
   net_credited: number;
 }
 
@@ -60,7 +57,6 @@ export interface TransferResult {
   success: boolean;
   tx_id: string;
   amount_sent: number;
-  tithe_deducted: number;
   recipient_received: number;
 }
 
@@ -124,7 +120,6 @@ export async function getBalance(userId: string): Promise<ICANBalance> {
     address: accountNumber ?? wallet?.wallet_address ?? null,
     totalEarned: wallet?.total_earned ?? 0,
     totalSpent: wallet?.total_spent ?? 0,
-    totalTithe: wallet?.total_tithe_paid ?? 0,
   };
 }
 
@@ -149,14 +144,13 @@ export async function getTransactions(userId: string, limit = 50): Promise<ICANT
 /**
  * Credit ICAN to a rider when a delivery is completed.
  * Minimum payout floor: 5,000 UGX = 1 ICAN.
- * DB auto-deducts 10% tithe from gross.
+ * Credited in full.
  */
 /**
  * Called when a rider completes a delivery.
  * Uses mbg_credit_rider_delivery which enforces:
  *  - target must be rider or chairperson in mbg_users
  *  - 5,000 UGX floor price
- *  - 10% tithe auto-deducted
  */
 export async function earnFromDelivery({
   riderId,
@@ -334,7 +328,7 @@ export function detectUgandaMobileNetwork(phoneNumber: string): 'MTN' | 'AIRTEL'
 
 /**
  * Buy ICAN coins — user pays UGX (notional), ICAN is credited to their wallet.
- * 1 ICAN = 5,000 UGX floor price. No tithe on purchases.
+ * 1 ICAN = 5,000 UGX floor price.
  */
 export async function buyICAN({
   userId,

@@ -43,7 +43,7 @@ import { getStoreWebsiteUrl } from '../services/storeWebsite';
 const TX_LABELS: Record<string, string> = {
   earn: 'Earned', cashback: 'Cashback', purchase: 'Purchase',
   transfer_in: 'Received', transfer_out: 'Sent',
-  tithe: 'Tithe (10%)', sale: 'Sale', refund: 'Refund',
+  sale: 'Sale', refund: 'Refund',
   buy: 'Bought IcanEra', sell: 'Sold IcanEra', journey_payment: 'Journey payment',
 };
 
@@ -111,7 +111,6 @@ function dayLabel(ts: string): string {
 }
 
 function txTone(tx: ICANTransaction): { text: string; bg: string } {
-  if (tx.transaction_type === 'tithe') return { text: 'text-amber-700 dark:text-amber-400', bg: 'bg-amber-100 dark:bg-amber-500/15' };
   if (tx.direction === 'in') return { text: 'text-emerald-700 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-500/15' };
   return { text: 'text-[#9a4a2e] dark:text-rose-400', bg: 'bg-[#f6e6df] dark:bg-rose-500/15' };
 }
@@ -120,8 +119,7 @@ function TxIcon({ tx }: { tx: ICANTransaction }) {
   const tone = txTone(tx);
   const type = tx.transaction_type as string;
   let inner: ReactNode;
-  if (type === 'tithe') inner = <span className="text-[11px] font-bold">10%</span>;
-  else if (type === 'buy' || type === 'purchase') inner = <ShoppingCart size={16} />;
+  if (type === 'buy' || type === 'purchase') inner = <ShoppingCart size={16} />;
   else if (type === 'sell' || type === 'sale') inner = <Banknote size={16} />;
   else if (type === 'refund') inner = <RotateCcw size={16} />;
   else if (isRiderCardTx(tx)) inner = <IdCard size={16} />;
@@ -419,10 +417,10 @@ interface ICANWalletPageProps {
   user: any;
 }
 
-type TxTab = 'all' | 'in' | 'out' | 'tithe';
+type TxTab = 'all' | 'in' | 'out';
 
 export default function ICANWalletPage({ user }: ICANWalletPageProps) {
-  const [balance, setBalance] = useState<ICANBalance>({ ican: 0, ugx: 0, address: null, totalEarned: 0, totalSpent: 0, totalTithe: 0 });
+  const [balance, setBalance] = useState<ICANBalance>({ ican: 0, ugx: 0, address: null, totalEarned: 0, totalSpent: 0 });
   const [transactions, setTransactions] = useState<ICANTransaction[]>([]);
   const [local, setLocal] = useState<LocalValue | null>(null);
   const [loading, setLoading] = useState(true);
@@ -568,7 +566,6 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const filteredTx = useMemo(() => transactions.filter((tx) => {
     if (activeTab === 'in') return tx.direction === 'in';
     if (activeTab === 'out') return tx.direction === 'out';
-    if (activeTab === 'tithe') return tx.transaction_type === 'tithe';
     return true;
   }).filter((tx) => matchesQuery(tx, query)), [transactions, activeTab, query]);
 
@@ -641,7 +638,6 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
         days={week}
         earned={compactNumber(balance.totalEarned)}
         spent={compactNumber(balance.totalSpent)}
-        tithe={compactNumber(balance.totalTithe)}
         hidden={balanceHidden}
         format={(n) => compactNumber(n)}
       />
@@ -652,7 +648,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
           <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/50 dark:bg-[#c4a052]/15"><Wallet size={16} /></span>
           <span className="min-w-0 flex-1">
             <span className="block font-classic-display text-[15px] font-semibold leading-tight text-slate-800 dark:text-slate-100">Earn IcanEra on every delivery</span>
-            <span className="block text-[11.5px] text-slate-500">How earnings and tithe work</span>
+            <span className="block text-[11.5px] text-slate-500">How earnings work</span>
           </span>
           <ChevronDown size={18} className="shrink-0 text-[#a17c28] transition-transform group-open:rotate-180" />
         </summary>
@@ -660,7 +656,6 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
           {[
             'Riders earn IcanEra per completed delivery (minimum UGX 5,000).',
             'Chairpersons earn a group bonus in IcanEra each month.',
-            'A 10% tithe is deducted automatically from all earnings.',
           ].map((item) => (
             <li key={item} className="flex gap-2"><span aria-hidden className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-[#c4a052]" />{item}</li>
           ))}
@@ -718,7 +713,7 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex gap-1 rounded-full border border-[#c4a052]/40 bg-white/80 p-1 dark:bg-slate-800" role="tablist" aria-label="Filter transactions">
-                {(['all', 'in', 'out', 'tithe'] as const).map((tab) => (
+                {(['all', 'in', 'out'] as const).map((tab) => (
                   <button
                     key={tab}
                     type="button"

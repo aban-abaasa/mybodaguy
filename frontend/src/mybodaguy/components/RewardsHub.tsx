@@ -140,7 +140,7 @@ export default function RewardsHub({ user, role, onGoToWallet }: Props) {
         <h4 className="font-semibold text-slate-800 mb-1 flex items-center gap-2">
           <Coins size={16} className="text-violet-500" /> Convert to icaneracoins
         </h4>
-        <p className="text-xs text-slate-500 mb-3">{POINTS_PER_ICAN} points = 1 ₡ ICAN — no tithe on point redemptions</p>
+        <p className="text-xs text-slate-500 mb-3">{POINTS_PER_ICAN} points = 1 ₡ ICAN</p>
         <div className="flex items-center gap-2">
           <input
             type="number"

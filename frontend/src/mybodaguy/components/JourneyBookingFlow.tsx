@@ -1968,7 +1968,7 @@ export default function JourneyBookingFlow({
             <p className="relative mt-2 text-[12.5px] leading-relaxed text-white/70">
               {payWithCompany
                 ? `A fixed price in ICAN, paid in full by ${companyBenefit.businessName || 'your company'} from its business wallet.`
-                : 'A fixed price in ICAN, paid in full from your wallet with no tithe.'}
+                : 'A fixed price in ICAN, paid in full from your wallet.'}
               {quote.local && ` At today's live value: 1 ICAN = ${formatMoney(quote.local.pricePerIcan, quote.local.currency)}.`}
               {quote.groundPricedInIcan && ' Because this journey crosses a border, the airport rides are priced in ICAN too, so their price keeps its value.'}
             </p>
