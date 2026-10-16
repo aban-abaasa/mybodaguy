@@ -1014,6 +1014,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
           <div className="landing-classic-divider mb-6 opacity-40" />
           <div className="text-center text-sm text-[#8B7355] font-sans">
             <p>&copy; 2026 BodaGoEra. All rights reserved.</p>
+            <p className="mt-1">A product of GODMINDERA ORGANISATION (U) LTD</p>
             <p className="mt-1">Your Trusted Ride Partner in Uganda</p>
           </div>
         </div>
