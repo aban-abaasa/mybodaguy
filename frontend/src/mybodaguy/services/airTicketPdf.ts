@@ -175,7 +175,7 @@ export async function downloadAirTicketPdf(ticket: AirTicket): Promise<void> {
     doc.text(lines, M, y);
     y += lines.length * 4 + 2;
   });
-  doc.text(`Generated ${new Date().toLocaleString()}`, M, Math.max(y + 4, 286));
+  doc.text(`Generated ${new Date().toLocaleString()}  |  A product of GODMINDERA ORGANISATION (U) LTD`, M, Math.max(y + 4, 286));
 
   doc.save(`Air-Ticket-${ticket.bookingReference || ticket.journeyId.slice(0, 8)}.pdf`);
 }
