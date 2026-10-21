@@ -3,10 +3,10 @@ import {
   Camera, CameraOff, ScanLine, X, Plus, Minus, Trash2,
   ShoppingCart, CheckCircle, Loader, AlertCircle, Coins,
   ReceiptText, QrCode, Store, ChevronDown, CalendarClock, ExternalLink,
+  Download, Clock, ShieldCheck,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import QRCode from 'qrcode';
-import { QRCodeCanvas as ReceiptQrCode } from 'qrcode.react';
+import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../../services/supabaseClient';
 import {
   getBalance,
@@ -20,6 +20,8 @@ import ScanFrameOverlay from './ScanFrameOverlay';
 import SetPinPrompt from './SetPinPrompt';
 import { hasPinSet, verifyPin, validatePIN } from '../services/pinService';
 import { getStoreSiteForCustomer, getStoreWebsiteUrl } from '../services/storeWebsite';
+import { buildApprovalUrl, downloadReceiptPdf, type StoreReceipt } from '../services/receiptPdf';
+import ShopStoreChooser from './ShopStoreChooser';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -46,22 +48,10 @@ interface CartItem {
 }
 
 interface CheckoutReceipt {
-  /** Currency of every amount on the receipt (the store's own). */
-  currency?: string;
   transaction_id: string;
-  receipt_number: string;
-  total_ugx: number;
-  tax_ugx: number;
   items_count: number;
-  items: Array<{
-    product_id: string;
-    product_name: string;
-    product_sku?: string | null;
-    quantity: number;
-    unit_price: number;
-    tax_rate: number;
-    line_total: number;
-  }>;
+  /** The store paid: its name, the products bought, the verification QR and who approved it. */
+  store: StoreReceipt;
   ican_cashback: {
     success: boolean;
     net_credited?: number;
@@ -136,7 +126,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const [payment, setPayment] = useState<PaymentMethod>('cash');
   const [submitting, setSubmitting] = useState(false);
   const [receipt, setReceipt] = useState<CheckoutReceipt | null>(null);
-  const [receiptWebsiteUrl, setReceiptWebsiteUrl] = useState(typeof window !== 'undefined' ? window.location.origin : 'https://bodagoera.icanera.space');
+  const [downloading, setDownloading] = useState(false);
   const [icanBalance, setIcanBalance] = useState<ICANBalance | null>(null);
   const [detectorSupported, setDetectorSupported] = useState(false);
 
@@ -149,11 +139,15 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   // Products load right away (browse); scanning is one tap away
   const [shopMode, setShopMode] = useState<ShopMode>('browse');
   const [supermarkets, setSupermarkets] = useState<SupermarketRow[]>([]);
+  const [storesLoaded, setStoresLoaded] = useState(false);
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
-  // Simple store list — collapsed by default; products from every store always show
-  const [storePanelOpen, setStorePanelOpen] = useState(false);
-  // Store of the last completed checkout, for the receipt's website/QR after the cart is cleared
-  const [receiptStoreId, setReceiptStoreId] = useState('');
+  // The customer is asked which store they are in every time they start picking
+  // products (opening Shop, "Start New Shop", or tapping the store name to switch).
+  // Until they answer, no products are listed and nothing can be scanned or added.
+  const [storeConfirmed, setStoreConfirmed] = useState(false);
+  // A store the customer picked while their cart still holds another store's products —
+  // waits for them to confirm that the cart will be cleared.
+  const [pendingStoreId, setPendingStoreId] = useState('');
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -189,7 +183,11 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       .select('id, name, location, business_type, price_currency')
       .eq('is_active', true)
       .order('name')
-      .then(({ data }) => setSupermarkets(data || []));
+      .then(({ data, error }) => {
+        if (error) toast.error("Couldn't load the stores. Check your connection and reopen Shop.");
+        setSupermarkets(data || []);
+        setStoresLoaded(true);
+      });
   }, []);
 
   // ── Camera start / stop ───────────────────────────────────────────────────
@@ -394,80 +392,128 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   async function submitCheckout() {
     if (cart.length === 0) return;
     setSubmitting(true);
-
-    // Browsing shows every store, so one cart can span several stores. Each
-    // store's sale is recorded separately; the receipts are merged below.
-    const groups = new Map<string, CartItem[]>();
-    cart.forEach(item => {
-      const storeId = item.product.supermarket_id || selectedSupermarketId;
-      groups.set(storeId, [...(groups.get(storeId) || []), item]);
-    });
-
-    const paid: Array<{ data: any; items: CartItem[] }> = [];
-    let failure = '';
-
-    for (const [, items] of groups) {
-      const cartPayload = items.map(i => ({
-        product_id: i.product.product_id,
-        quantity: i.quantity,
-        unit_price: i.product.selling_price,
-        tax_rate: i.product.tax_rate,
-      }));
+    try {
+      // A cart only ever holds one store's products (choosing another store clears it),
+      // and the database refuses a sale that spans stores.
+      const storeId = cart[0].product.supermarket_id || selectedSupermarketId;
+      const store = supermarkets.find(sm => sm.id === storeId);
 
       const { data, error } = await supabase.rpc('customer_self_checkout', {
-        p_cart: cartPayload,
+        p_cart: cart.map(i => ({
+          product_id: i.product.product_id,
+          quantity: i.quantity,
+          unit_price: i.product.selling_price,
+          tax_rate: i.product.tax_rate,
+        })),
         p_payment_method: payment,
         p_pay_with_ican: payment === 'ican',
       });
-
       if (error || !data?.success) {
-        failure = error?.message ?? data?.error ?? 'Checkout failed';
-        break;
+        toast.error(error?.message ?? data?.error ?? 'Checkout failed');
+        return;
       }
-      paid.push({ data, items });
-    }
 
-    setSubmitting(false);
+      // Payment is final. Issue the receipt its QR token (staff scan it to approve the
+      // receipt, which stamps their name on it). Best effort: a failure here must never
+      // undo or hide a sale that is already paid — the receipt just shows without a QR.
+      let approvalToken: string | null = null;
+      if (data.receipt_id) {
+        try {
+          const { data: reg, error: regError } = await supabase.rpc('register_receipt_approval', {
+            p_receipt_id: data.receipt_id,
+            p_supermarket_id: storeId,
+          });
+          if (regError || !reg?.success) {
+            console.warn('Receipt approval was not registered:', regError?.message ?? reg?.error);
+          } else {
+            approvalToken = reg.approval_token ?? null;
+          }
+        } catch (regErr) {
+          console.warn('Receipt approval was not registered:', regErr);
+        }
+      }
 
-    // Stores already paid stay paid: drop their lines so a retry can't charge them twice.
-    if (paid.length > 0 && failure) {
-      const paidIds = new Set(paid.flatMap(r => r.items.map(i => i.product.product_id)));
-      setCart(prev => prev.filter(i => !paidIds.has(i.product.product_id)));
-      if (user?.id) getBalance(user.id).then(setIcanBalance).catch(() => {});
-    }
-    if (failure) {
-      toast.error(paid.length > 0 ? `${failure} Items from other stores in your cart were already paid for.` : failure);
-      return;
-    }
-
-    const cashback = paid.reduce((sum, r) => sum + (r.data.ican_cashback?.success ? Number(r.data.ican_cashback.net_credited || 0) : 0), 0);
-    setReceipt({
-      currency: paid[0].data.currency,
-      transaction_id: paid[0].data.transaction_id,
-      receipt_number: paid.map(r => r.data.receipt_number).filter(Boolean).join(', '),
-      total_ugx: paid.reduce((sum, r) => sum + Number(r.data.total_ugx || 0), 0),
-      tax_ugx: paid.reduce((sum, r) => sum + Number(r.data.tax_ugx || 0), 0),
-      items_count: paid.reduce((sum, r) => sum + Number(r.data.items_count || 0), 0),
-      items: paid.flatMap(r => r.data.items?.length ? r.data.items : r.items.map(i => ({
+      const lines: any[] = data.items?.length ? data.items : cart.map(i => ({
         product_id: i.product.product_id,
         product_name: i.product.name,
-        product_sku: i.product.sku,
         quantity: i.quantity,
         unit_price: i.product.selling_price,
-        tax_rate: i.product.tax_rate,
         line_total: i.line_total,
-      }))),
-      ican_cashback: cashback > 0 ? { success: true, net_credited: cashback } : paid[0].data.ican_cashback,
-    });
+      }));
+      setReceipt({
+        transaction_id: data.transaction_id,
+        items_count: Number(data.items_count || 0),
+        store: {
+          receipt_id: data.receipt_id || '',
+          receipt_number: data.receipt_number || '',
+          store_id: storeId,
+          store_name: store?.name || 'Store',
+          store_location: store?.location ?? null,
+          currency: String(data.currency || store?.price_currency || 'UGX').toUpperCase(),
+          purchased_at: new Date().toISOString(),
+          customer_name: user?.user_metadata?.full_name || user?.email || null,
+          items: lines.map(i => ({
+            product_id: i.product_id,
+            product_name: i.product_name || i.name || 'Product',
+            quantity: Number(i.quantity),
+            unit_price: Number(i.unit_price),
+            line_total: Number(i.line_total),
+          })),
+          subtotal: Number(data.subtotal_ugx ?? data.total_ugx ?? 0),
+          tax: Number(data.tax_ugx || 0),
+          total: Number(data.total_ugx || 0),
+          approval_token: approvalToken,
+          approval_status: 'pending',
+          approved_by_name: null,
+          approved_at: null,
+        },
+        ican_cashback: data.ican_cashback ?? null,
+      });
 
-    // Refresh ICAN balance
-    if (user?.id) getBalance(user.id).then(setIcanBalance).catch(() => {});
+      // Refresh ICAN balance
+      if (user?.id) getBalance(user.id).then(setIcanBalance).catch(() => {});
 
-    const firstStoreId = groups.keys().next().value as string;
-    setReceiptStoreId(firstStoreId);
-    setReceiptWebsiteUrl(await resolveReceiptWebsite(firstStoreId));
-    setCart([]);
-    setState('complete');
+      setCart([]);
+      setState('complete');
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // While the receipt waits for staff, check every few seconds whether it has been
+  // approved, so "Approved by <staff name>" appears on the customer's screen.
+  const pendingReceiptId = receipt?.store.receipt_id && receipt.store.approval_token && receipt.store.approval_status === 'pending'
+    ? receipt.store.receipt_id
+    : '';
+  useEffect(() => {
+    if (state !== 'complete' || !pendingReceiptId) return undefined;
+    let cancelled = false;
+    const check = async () => {
+      const { data, error } = await supabase.rpc('get_my_receipt_approvals', { p_receipt_ids: [pendingReceiptId] });
+      if (cancelled || error || !Array.isArray(data)) return;
+      const hit = data.find((row: any) => row.approval_status === 'approved');
+      if (!hit) return;
+      setReceipt(prev => prev && {
+        ...prev,
+        store: { ...prev.store, approval_status: 'approved', approved_by_name: hit.approved_by_name ?? null, approved_at: hit.approved_at ?? null },
+      });
+      toast.success('Your receipt was approved by staff');
+    };
+    const timer = setInterval(check, 5000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [state, pendingReceiptId]);
+
+  async function handleDownloadReceipt() {
+    if (!receipt) return;
+    setDownloading(true);
+    try {
+      await downloadReceiptPdf(receipt.store);
+    } catch (error) {
+      console.error('Receipt PDF failed:', error);
+      toast.error('Could not create the receipt PDF. Please try again.');
+    } finally {
+      setDownloading(false);
+    }
   }
 
   // ── Reset ─────────────────────────────────────────────────────────────────
@@ -480,12 +526,51 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     setManualBarcode('');
     setReceipt(null);
     setPayment('cash');
+    // A new shop starts by asking which store the customer is in.
+    setSelectedSupermarketId('');
+    setStoreConfirmed(false);
+    setPendingStoreId('');
     setState('idle');
   }
 
-  async function resolveReceiptWebsite(storeId: string = siteStoreId) {
-    if (!storeId) return window.location.origin;
-    return (await getStoreWebsiteUrl({ supermarketId: storeId })) ?? window.location.origin;
+  // ── Which store? ──────────────────────────────────────────────────────────
+
+  function openStore(storeId: string) {
+    setSelectedSupermarketId(storeId);
+    setStoreConfirmed(true);
+    setScanError('');
+  }
+
+  // A cart holds products from one store only. Choosing a different store while the
+  // cart has products in it asks first, because the cart is cleared to make the switch.
+  function chooseStore(storeId: string) {
+    if (cart.length > 0 && cartStoreId && storeId !== cartStoreId) {
+      setPendingStoreId(storeId);
+      return;
+    }
+    openStore(storeId);
+  }
+
+  function confirmStoreSwitch() {
+    const next = pendingStoreId;
+    setPendingStoreId('');
+    setCart([]);
+    browsedIdsRef.current = new Set();
+    openStore(next);
+  }
+
+  function keepCurrentStore() {
+    setPendingStoreId('');
+    openStore(cartStoreId);
+  }
+
+  // Back to the "Which store are you shopping at?" question.
+  function askStore() {
+    stopCamera();
+    setFoundProduct(null);
+    setScanError('');
+    setStoreConfirmed(false);
+    setState('idle');
   }
 
   // Instalments are set up and followed up on the store's business website
@@ -547,7 +632,6 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   // Pay button: wallet → PIN first, anything else → the store's website.
   async function handlePay() {
     if (payment !== 'ican') {
-      if (cartStoreIds.length > 1) { toast.error('Website payment is per store — remove items so they all come from one store, or pay with your wallet.'); return; }
       await payOnStoreWebsite();
       return;
     }
@@ -577,18 +661,6 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     }
   }
 
-  async function printCheckoutReceipt() {
-    if (!receipt) return;
-    const website = await resolveReceiptWebsite();
-    setReceiptWebsiteUrl(website);
-    const qr = await QRCode.toDataURL(website, { margin: 1, width: 240 });
-    const printWindow = window.open('', '_blank', 'width=720,height=800');
-    if (!printWindow) return;
-    const rows = receipt.items.map((item) => `<tr><td>${item.product_name}</td><td>${item.quantity}</td><td>${fmtReceipt(item.line_total)}</td></tr>`).join('');
-    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${receipt.receipt_number}</title><style>body{font:15px Georgia,serif;background:#f5f2e9;color:#25253f;padding:32px}.receipt{max-width:560px;margin:auto;background:#fffdf8;border:1px solid #c4a052;border-radius:16px;padding:28px}.head{margin:-28px -28px 22px;padding:22px;background:#312e81;color:#fff;border-bottom:4px solid #c4a052;border-radius:16px 16px 0 0}table{width:100%;border-collapse:collapse}td{padding:9px;border-bottom:1px solid #e8e1d0}td:last-child{text-align:right}.total{margin-top:18px;padding:14px;background:#312e81;color:white;border-radius:8px;font-size:20px;font-weight:bold;text-align:right}.qr{text-align:center;margin-top:20px;padding:16px;background:#faf8f1;border:1px solid #c4a052}.qr img{width:145px;height:145px}.qr small{display:block;color:#526176;overflow-wrap:anywhere}@media print{body{padding:0;background:#fff;-webkit-print-color-adjust:exact;print-color-adjust:exact}}</style></head><body><main class="receipt"><header class="head"><h1>${supermarkets.find((sm) => sm.id === siteStoreId)?.name || 'BodaGoEra store'}</h1><p>Customer purchase receipt</p><strong>${receipt.receipt_number}</strong><br>${new Date().toLocaleString('en-UG')}</header><table>${rows}</table><div class="total">TOTAL PAID ${fmtReceipt(receipt.total_ugx)}</div><section class="qr"><strong>Visit this store's public website</strong><br><img src="${qr}" alt="Store website QR"><small>${website}</small></section></main><script>window.onload=()=>window.print()</script></body></html>`);
-    printWindow.document.close();
-  }
-
   // ── Computed ──────────────────────────────────────────────────────────────
 
   const totals = cartTotals(cart);
@@ -596,7 +668,6 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const cartStoreId = cart[0]?.product.supermarket_id || selectedSupermarketId;
   const currency = (supermarkets.find(sm => sm.id === cartStoreId)?.price_currency || 'UGX').toUpperCase();
   const fmt = (n: number) => formatMoney(n, currency);
-  const fmtReceipt = (n: number) => formatMoney(n, receipt?.currency || currency);
   const icanNeeded = icanPrice > 0 ? Math.floor((totals.total / icanPrice) * 1e8) / 1e8 : 0;
   const canPayICAN = icanPrice > 0 && (icanBalance?.ican ?? 0) >= icanNeeded;
 
@@ -608,9 +679,11 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   }, [currency]);
 
   const activeStore = supermarkets.find(sm => sm.id === selectedSupermarketId) || null;
-  // Store whose website/QR/receipt applies: the cart's store, else the chosen one, else the last paid one.
-  const cartStoreIds = Array.from(new Set(cart.map(i => i.product.supermarket_id).filter(Boolean) as string[]));
-  const siteStoreId = cartStoreIds.length === 1 ? cartStoreIds[0] : (selectedSupermarketId || receiptStoreId);
+  // The store whose website applies (instalments, paying on the site) is the cart's store.
+  const siteStoreId = cartStoreId;
+  const lockedStore = cart.length > 0 ? supermarkets.find(sm => sm.id === cartStoreId) || null : null;
+  const pendingStore = supermarkets.find(sm => sm.id === pendingStoreId) || null;
+  const pickerCurrency = (activeStore?.price_currency || 'UGX').toUpperCase();
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -618,89 +691,150 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     <div className="space-y-3">
 
       {/* ── Receipt ────────────────────────────────────────────────────── */}
-      {state === 'complete' && receipt && (
-        <div className="bg-white rounded-2xl shadow-xl p-6 text-center">
-          <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <CheckCircle className="text-green-500" size={32} />
-          </div>
-          <h3 className="text-2xl font-bold text-slate-800 mb-1">Order Complete!</h3>
-          <p className="text-slate-500 text-sm mb-6">Your items are ready</p>
+      {state === 'complete' && receipt && (() => {
+        const sr = receipt.store;
+        const approved = sr.approval_status === 'approved';
+        const money = (n: number) => formatMoney(n, sr.currency);
+        return (
+          <div className="bg-white rounded-2xl shadow-xl p-6 text-center">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <CheckCircle className="text-green-500" size={32} />
+            </div>
+            <h3 className="text-2xl font-bold text-slate-800 mb-1">Order Complete!</h3>
+            <p className="text-slate-500 text-sm mb-6">Your items are ready</p>
 
-          <div className="bg-slate-50 rounded-xl p-4 text-left space-y-2 mb-4">
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-500">Transaction #</span>
-              <span className="font-mono font-semibold text-xs text-slate-900">{receipt.transaction_id?.slice(-12)}</span>
+            {/* The receipt: the store's name, the products bought there, a QR code staff
+                scan to approve it (and anyone can scan to verify it), and who approved it. */}
+            <div className="bg-slate-50 rounded-xl p-4 text-left space-y-2 mb-4">
+              <div className="flex items-center gap-2 pb-1">
+                <Store size={18} className="flex-shrink-0 text-orange-500" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-base font-bold text-slate-900">{sr.store_name}</p>
+                  {sr.store_location && <p className="truncate text-xs text-slate-500">{sr.store_location}</p>}
+                </div>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Receipt #</span>
+                <span className="font-mono font-semibold text-slate-900">{sr.receipt_number}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Transaction #</span>
+                <span className="font-mono font-semibold text-xs text-slate-900">{receipt.transaction_id?.slice(-12)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Items</span>
+                <span className="font-semibold text-slate-900">{receipt.items_count}</span>
+              </div>
+              {sr.items.map((item, index) => (
+                <div key={`${item.product_id}-${index}`} className="flex justify-between gap-3 text-sm border-t border-slate-200 pt-2">
+                  <span className="text-slate-900">
+                    {item.product_name} × {item.quantity}
+                  </span>
+                  <span className="font-semibold text-slate-900 whitespace-nowrap">
+                    {money(item.line_total)}
+                  </span>
+                </div>
+              ))}
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Tax</span>
+                <span className="text-slate-900">{money(sr.tax)}</span>
+              </div>
+              <div className="flex justify-between font-bold text-base border-t pt-2">
+                <span>Total Paid</span>
+                <span className="text-orange-600">{money(sr.total)}</span>
+              </div>
+
+              {/* Verification QR + staff approval */}
+              <div className={`flex items-center gap-3 rounded-lg border p-3 ${approved ? 'border-green-300 bg-green-50' : 'border-amber-300 bg-amber-50'}`}>
+                {sr.approval_token && (
+                  <div className="flex-shrink-0 rounded-md bg-white p-1.5">
+                    <QRCodeSVG
+                      value={buildApprovalUrl(sr.approval_token)}
+                      size={96}
+                      level="M"
+                      title={`Verification QR code for receipt ${sr.receipt_number}`}
+                    />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1 text-sm">
+                  {approved ? (
+                    <>
+                      <p className="flex items-center gap-1.5 font-bold text-green-700">
+                        <ShieldCheck size={16} /> Approved
+                      </p>
+                      <p className="text-xs text-slate-600">Approved by</p>
+                      <p className="truncate font-semibold text-slate-900">{sr.approved_by_name || 'Store staff'}</p>
+                      {sr.approved_at && <p className="text-xs text-slate-500">{new Date(sr.approved_at).toLocaleString()}</p>}
+                    </>
+                  ) : sr.approval_token ? (
+                    <>
+                      <p className="flex items-center gap-1.5 font-bold text-amber-700">
+                        <Clock size={16} /> Awaiting staff approval
+                      </p>
+                      <p className="text-xs text-slate-600">
+                        Show this QR code to a {sr.store_name} staff member. Their name appears here once they approve.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-slate-600">
+                      Your payment is complete. The verification code could not be created for this receipt; ask {sr.store_name} staff to confirm it with receipt # {sr.receipt_number}.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDownloadReceipt}
+                disabled={downloading}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-orange-300 bg-white py-2.5 text-sm font-semibold text-orange-600 transition-colors hover:bg-orange-50 disabled:opacity-60"
+              >
+                {downloading ? <Loader size={16} className="animate-spin" /> : <Download size={16} />}
+                {downloading ? 'Preparing PDF…' : 'Download receipt (PDF)'}
+              </button>
             </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-500">Receipt #</span>
-              <span className="font-mono font-semibold text-slate-900">{receipt.receipt_number}</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-500">Items</span>
-              <span className="font-semibold text-slate-900">{receipt.items_count}</span>
-            </div>
-            {receipt.items?.map((item, index) => (
-              <div key={`${item.product_id}-${index}`} className="flex justify-between gap-3 text-sm border-t border-slate-200 pt-2">
-                <span className="text-slate-900">
-                  {item.product_name || 'Product'} × {item.quantity}
-                </span>
-                <span className="font-semibold text-slate-900 whitespace-nowrap">
-                  {fmtReceipt(item.line_total)}
+
+            {receipt.ican_cashback?.success && receipt.ican_cashback.net_credited && (
+              <div className="flex items-center gap-2 justify-center bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 mb-4">
+                <Coins className="text-orange-500" size={16} />
+                <span className="text-sm font-semibold text-orange-700">
+                  +₡ {formatICAN(receipt.ican_cashback.net_credited)} ICAN cashback earned!
                 </span>
               </div>
-            ))}
-            <div className="flex justify-between text-sm">
-              <span className="text-slate-500">Tax</span>
-              <span className="text-slate-900">{fmtReceipt(receipt.tax_ugx)}</span>
-            </div>
-            <div className="flex justify-between font-bold text-base border-t pt-2">
-              <span>Total Paid</span>
-              <span className="text-orange-600">{fmtReceipt(receipt.total_ugx)}</span>
-            </div>
-          </div>
+            )}
 
-          {receipt.ican_cashback?.success && receipt.ican_cashback.net_credited && (
-            <div className="flex items-center gap-2 justify-center bg-orange-50 border border-orange-200 rounded-lg px-4 py-2 mb-4">
-              <Coins className="text-orange-500" size={16} />
-              <span className="text-sm font-semibold text-orange-700">
-                +₡ {formatICAN(receipt.ican_cashback.net_credited)} ICAN cashback earned!
-              </span>
-            </div>
-          )}
-
-          <button
-            onClick={reset}
-            className="w-full py-3 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all"
-          >
-            Start New Shop
-          </button>
-          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-center">
-            <ReceiptQrCode value={receiptWebsiteUrl} size={126} includeMargin />
-            <p className="mt-2 text-sm font-semibold text-indigo-900">Scan to visit the store's public website</p>
-            <p className="mt-1 break-all text-xs text-slate-600">{receiptWebsiteUrl}</p>
+            <button
+              onClick={reset}
+              className="w-full py-3 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-xl hover:from-orange-600 hover:to-yellow-600 transition-all"
+            >
+              Start New Shop
+            </button>
           </div>
-          <button type="button" onClick={printCheckoutReceipt} className="mt-3 w-full rounded-xl bg-indigo-900 py-3 font-semibold text-white">Print receipt</button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ── Idle / Scan entry ──────────────────────────────────────────── */}
       {(state === 'idle' || state === 'product_found' || state === 'cart' || state === 'checkout') && (
         <>
-          {/* One slim toolbar instead of stacked cards: store switcher, Scan/Browse
-              toggle, wallet balance and cart. The store filters + picker stay
-              collapsed until needed so the products get the page. */}
+          {/* One slim toolbar instead of stacked cards: the store being shopped at,
+              Scan/Browse toggle, wallet balance and cart. */}
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setStorePanelOpen(o => !o)}
-              aria-expanded={storePanelOpen}
-              className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-slate-100 px-3 py-2 text-left text-sm font-semibold text-slate-700 hover:bg-slate-200 transition-colors"
+              onClick={askStore}
+              aria-label={storeConfirmed && activeStore ? `Shopping at ${activeStore.name}. Change store` : 'Choose a store'}
+              className="flex min-w-0 flex-1 items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-left hover:bg-slate-200 transition-colors"
             >
               <Store size={15} className="flex-shrink-0 text-orange-500" />
-              <span className="min-w-0 flex-1 truncate">
-                {activeStore ? activeStore.name : 'All stores'}
+              <span className="min-w-0 flex-1 leading-tight">
+                <span className="block text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                  {storeConfirmed && activeStore ? 'Shopping at' : 'No store chosen'}
+                </span>
+                <span className="block truncate text-sm font-semibold text-slate-700">
+                  {storeConfirmed && activeStore ? activeStore.name : 'Choose a store'}
+                </span>
               </span>
-              <ChevronDown size={15} className={`flex-shrink-0 text-slate-400 transition-transform ${storePanelOpen ? 'rotate-180' : ''}`} />
+              <ChevronDown size={15} className="flex-shrink-0 text-slate-400" />
             </button>
 
             <div className="flex flex-shrink-0 gap-0.5 rounded-full bg-slate-100 p-0.5" role="tablist" aria-label="Shop mode">
@@ -745,58 +879,37 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
             )}
           </div>
 
-          {/* Simple store list — tap a store to narrow the products to it, tap again for all stores.
-              Scanning needs a store, so the list stays open until one is picked. */}
-          {(storePanelOpen || (shopMode === 'scan' && !selectedSupermarketId)) && (
-            <ul className="divide-y divide-slate-100 text-sm" aria-label="Stores">
-              {shopMode === 'browse' && (
-                <li>
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedSupermarketId(''); setStorePanelOpen(false); }}
-                    className={`w-full py-2 text-left ${!selectedSupermarketId ? 'font-bold text-orange-600' : 'text-slate-700'}`}
-                  >
-                    All stores
-                  </button>
-                </li>
-              )}
-              {supermarkets.map(sm => (
-                <li key={sm.id}>
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedSupermarketId(sm.id === selectedSupermarketId && shopMode === 'browse' ? '' : sm.id); setStorePanelOpen(false); }}
-                    className={`flex w-full items-baseline justify-between gap-3 py-2 text-left ${sm.id === selectedSupermarketId ? 'font-bold text-orange-600' : 'text-slate-700'}`}
-                  >
-                    <span className="min-w-0 truncate">{sm.name}</span>
-                    {sm.location && <span className="flex-shrink-0 text-xs font-normal text-slate-400">{sm.location}</span>}
-                  </button>
-                </li>
-              ))}
-              {supermarkets.length === 0 && <li className="py-2 text-xs text-slate-400">No stores yet.</li>}
-            </ul>
-          )}
-
-          {/* Browse — products from every store, optionally narrowed to one */}
-          {shopMode === 'browse' && state !== 'scanning' && (
-            <ProductPicker
-              allStores
-              supermarketId={selectedSupermarketId || null}
+          {/* Always ask which store the customer is in before showing any products or
+              taking a scan. A cart holds one store's products only. */}
+          {!storeConfirmed && state === 'idle' && (
+            <ShopStoreChooser
               stores={supermarkets}
-              onCartChange={handleBrowseCartChange}
-              onOpenCart={() => setState('cart')}
-              fullPage
+              loading={!storesLoaded}
+              currentStoreId={lockedStore?.id || selectedSupermarketId}
+              notice={lockedStore
+                ? `Your cart has ${cart.length} item${cart.length === 1 ? '' : 's'} from ${lockedStore.name}. You can only buy from one store at a time, so choosing another store clears your cart.`
+                : undefined}
+              onChoose={chooseStore}
             />
           )}
 
-          {/* Camera scanning panel */}
-          {shopMode === 'scan' && (state === 'scanning' || (
-            <div>
-              {!selectedSupermarketId && (
-                <p className="text-sm text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-3">
-                  Pick a store from the list above before scanning.
-                </p>
-              )}
+          {/* Browse — the chosen store's products. Stays mounted (just hidden) while the
+              question is asked again, so the basket survives if the customer keeps the store. */}
+          {shopMode === 'browse' && selectedSupermarketId && (
+            <div hidden={!storeConfirmed}>
+              <ProductPicker
+                supermarketId={selectedSupermarketId}
+                currency={pickerCurrency}
+                onCartChange={handleBrowseCartChange}
+                onOpenCart={() => setState('cart')}
+                fullPage
+              />
+            </div>
+          )}
 
+          {/* Camera scanning panel — scans are looked up in the chosen store only */}
+          {shopMode === 'scan' && storeConfirmed && (
+            <div>
               {/* Camera button */}
               <button
                 onClick={startCamera}
@@ -834,7 +947,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                 </div>
               )}
             </div>
-          ))}
+          )}
         </>
       )}
 
@@ -956,7 +1069,10 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           <div className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white px-5 py-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <ShoppingCart size={18} />
-              <span className="font-semibold">Your Cart ({cart.length} items)</span>
+              <span className="min-w-0">
+                <span className="block font-semibold">Your Cart ({cart.length} items)</span>
+                {lockedStore && <span className="block truncate text-xs text-white/80">from {lockedStore.name}</span>}
+              </span>
             </div>
             <button
               onClick={() => setState('idle')}
@@ -1013,7 +1129,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           {/* Add more items — scan or keep browsing, depending on mode */}
           <div className="px-5 py-3 border-t border-slate-100">
             <button
-              onClick={() => { setState('idle'); if (shopMode === 'scan') startCamera(); }}
+              onClick={() => { setStoreConfirmed(true); setState('idle'); if (shopMode === 'scan') startCamera(); }}
               className="w-full py-2.5 border-2 border-dashed border-orange-300 text-orange-600 font-semibold rounded-xl hover:bg-orange-50 transition-colors text-sm flex items-center justify-center gap-2"
             >
               {shopMode === 'browse' ? <><Store size={16} /> Add More Items</> : <><ScanLine size={16} /> Scan More Items</>}
@@ -1097,6 +1213,36 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
         </div>
       )}
 
+      {pendingStore && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="switch-store-title">
+          <div className="bg-white rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+            <div className="text-center mb-5">
+              <div className="text-4xl mb-2">🛒</div>
+              <h2 id="switch-store-title" className="font-bold text-lg text-slate-800">Switch to {pendingStore.name}?</h2>
+              <p className="text-slate-500 text-sm mt-2">
+                You can only buy from one store at a time. Your {cart.length} item{cart.length === 1 ? '' : 's'} from {lockedStore?.name || 'your current store'} will be removed from the cart.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={keepCurrentStore}
+                className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-600 font-medium text-sm"
+              >
+                Keep my cart
+              </button>
+              <button
+                type="button"
+                onClick={confirmStoreSwitch}
+                className="flex-1 py-3 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-semibold text-sm"
+              >
+                Switch store
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {needsPin && user?.id && (
         <SetPinPrompt
           userId={user.id}
@@ -1154,7 +1300,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       )}
 
       {/* ── Empty state — scan mode only; browse mode shows the products ── */}
-      {state === 'idle' && shopMode === 'scan' && cart.length === 0 && !foundProduct && !looking && (
+      {state === 'idle' && shopMode === 'scan' && storeConfirmed && cart.length === 0 && !foundProduct && !looking && (
         <p className="text-center text-sm text-slate-400 py-6">Your cart is empty — scan a barcode to add items.</p>
       )}
     </div>

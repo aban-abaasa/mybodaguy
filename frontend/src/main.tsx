@@ -11,6 +11,7 @@ import BookingConfirmPage, { BOOK_RETURN_CODE_KEY } from "./mybodaguy/components
 import { isBookingCode } from "./mybodaguy/services/eraBooking";
 import TicketVerifyPage from "./mybodaguy/components/TicketVerifyPage";
 import RiderCardVerifyPage from "./mybodaguy/components/RiderCardVerifyPage";
+import ReceiptApprovePage, { RECEIPT_APPROVE_RETURN_KEY } from "./mybodaguy/components/ReceiptApprovePage";
 import SupportConsole from "./mybodaguy/pages/SupportConsole";
 import { captureReferralFromUrl } from "./mybodaguy/services/referralService";
 
@@ -73,6 +74,10 @@ const riderCardMatch = window.location.pathname.match(/^\/rider-card\/([A-Za-z0-
 const bookMatch = window.location.pathname.match(/^\/book\/([A-Za-z0-9]+)/);
 const bookCode = bookMatch && isBookingCode(bookMatch[1].toUpperCase()) ? bookMatch[1].toUpperCase() : null;
 
+// Shop receipt QR (https://bodagoera.icanera.space/receipt-approve/<token>) — store staff scan it to approve
+// a customer's receipt. The page itself asks them to sign in, so it also short-circuits the <App/> tree.
+const receiptApproveMatch = window.location.pathname.match(/^\/receipt-approve\/([A-Za-z0-9]{20,})/);
+
 const isSupportConsole = window.location.pathname === '/support-console';
 
 // VerifyReceiptPage's "Sign in with Google to Approve" passes
@@ -99,9 +104,20 @@ if (!bookMatch && window.location.hash.includes('access_token')) {
   }
 }
 
+// Same recovery for the staff receipt-approval page: return to the receipt they scanned.
+if (!receiptApproveMatch && window.location.hash.includes('access_token')) {
+  const pendingReceipt = sessionStorage.getItem(RECEIPT_APPROVE_RETURN_KEY);
+  if (pendingReceipt) {
+    sessionStorage.removeItem(RECEIPT_APPROVE_RETURN_KEY);
+    window.location.replace(`/receipt-approve/${pendingReceipt}${window.location.hash}`);
+  }
+}
+
 createRoot(document.getElementById("root")!).render(
   bookCode ? (
     <BookingConfirmPage code={bookCode} />
+  ) : receiptApproveMatch ? (
+    <ReceiptApprovePage token={receiptApproveMatch[1]} />
   ) : verifyMatch ? (
     <VerifyReceiptPage code={verifyMatch[1]} />
   ) : ticketMatch ? (
