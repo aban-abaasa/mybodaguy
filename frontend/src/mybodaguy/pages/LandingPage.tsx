@@ -16,6 +16,7 @@ import {
   type LandingThread,
 } from '../services/landingMessagesService';
 import { Linkify } from '../utils/linkify';
+import ProductOfLink from '../components/ProductOfLink';
 
 interface Contributor {
   authId: string | null;
@@ -1014,7 +1015,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
           <div className="landing-classic-divider mb-6 opacity-40" />
           <div className="text-center text-sm text-[#8B7355] font-sans">
             <p>&copy; 2026 BodaGoEra. All rights reserved.</p>
-            <p className="mt-1">A product of GODMINDERA ORGANISATION (U) LTD</p>
+            <p className="mt-1"><ProductOfLink className="underline underline-offset-2 hover:text-[#C4A052] transition-colors" /></p>
             <p className="mt-1">Your Trusted Ride Partner in Uganda</p>
           </div>
         </div>
