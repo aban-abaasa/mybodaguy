@@ -649,9 +649,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
         </div>
       </header>
 
-      {/* Generous bottom padding so the floating chat button never sits on
-          top of the last card when scrolled to the end. */}
-      <div className="container mx-auto px-4 pb-28 pt-5">
+      {/* Generous bottom padding so the bottom tab icons and the floating chat
+          button never sit on top of the last card when scrolled to the end —
+          the safe-area inset is added so it holds on phones with a home bar. */}
+      <div className="container mx-auto px-4 pb-[calc(7rem_+_env(safe-area-inset-bottom,0px))] pt-5">
         {activeTab === 'overview' && (
           <div className="space-y-6">
             {/* Greeting — live insights from this rider's own work: how today

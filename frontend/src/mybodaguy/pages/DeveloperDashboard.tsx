@@ -3017,25 +3017,26 @@ function CommissionsTab() {
 
   // Live picture of how one ride's fare is split, from the values as typed
   // (before saving) so a developer sees the effect of an edit immediately.
-  // Model: customer's slice + rider's slice = the platform pool; the boda
-  // chairpersons are paid out of that pool and ICANera keeps the rest.
+  // Model: the platform charge is added on top of the exact fare (same on cash
+  // and wallet) and the rider always receives the whole fare. The boda
+  // chairpersons are paid out of the charge — stage earns chain% of it, each
+  // level above earns chain% of the level below — and ICANera keeps the rest.
   const pct = (key: string) => {
     const n = Number(drafts[key]);
     return Number.isFinite(n) ? n : 0;
   };
   const round2 = (n: number) => Math.round(n * 100) / 100;
-  const hasFeeModel = settings.some((s) => s.key === 'commission.rider_platform_cut_percentage');
-  const customerPct = pct('commission.icanera_platform_fee_percentage');
-  const riderPct = pct('commission.rider_platform_cut_percentage');
+  const hasFeeModel = settings.some((s) => s.key === 'commission.icanera_platform_fee_percentage');
+  const chargePct = pct('commission.icanera_platform_fee_percentage');
+  const chainRate = (settings.some((s) => s.key === 'commission.chain_percentage') ? pct('commission.chain_percentage') : 5) / 100;
+  // Most the five chairperson levels can take of the charge (a vacant seat pays nothing).
+  const chairMaxPct = chargePct * [1, 2, 3, 4, 5].reduce((sum, level) => sum + Math.pow(chainRate, level), 0);
   const chairTotalPct = pct('commission.boda_chair_total_percentage');
   const chairLevelsPct = ['stage', 'parish', 'subcounty', 'division', 'district']
     .reduce((sum, level) => sum + pct(`commission.${level}_chair_percentage`), 0);
-  const poolPct = customerPct + riderPct;
   const feeWarnings = [
     Math.abs(chairLevelsPct - chairTotalPct) > 0.01 &&
       `The five chairperson levels add up to ${round2(chairLevelsPct)}% but the chair total says ${round2(chairTotalPct)}%. Payouts use the individual levels, so make them match.`,
-    Math.max(chairLevelsPct, chairTotalPct) > poolPct + 0.01 &&
-      `Chairpersons would take more than the whole platform pool (${round2(poolPct)}%), leaving ICANera nothing on boda rides.`,
   ].filter(Boolean) as string[];
 
   return (
@@ -3059,19 +3060,17 @@ function CommissionsTab() {
         <div className="mb-6 rounded-xl border border-orange-200 bg-orange-50 p-4">
           <p className="text-sm font-semibold text-slate-800">How each ride's fare is split (shown as typed, before saving)</p>
           <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
-            <div><p className="text-xs text-slate-500">Customer pays extra (wallet)</p><p className="font-bold text-slate-800">+{round2(customerPct)}%</p></div>
-            <div><p className="text-xs text-slate-500">Rider is cut</p><p className="font-bold text-slate-800">−{round2(riderPct)}%</p></div>
-            <div><p className="text-xs text-slate-500">Chairpersons (boda)</p><p className="font-bold text-slate-800">{round2(chairTotalPct)}%</p></div>
-            <div><p className="text-xs text-slate-500">ICANera keeps</p><p className="font-bold text-slate-800">{round2(poolPct - chairTotalPct)}%</p></div>
+            <div><p className="text-xs text-slate-500">Customer pays extra (cash &amp; wallet)</p><p className="font-bold text-slate-800">+{round2(chargePct)}%</p></div>
+            <div><p className="text-xs text-slate-500">Rider receives</p><p className="font-bold text-slate-800">100% of the fare</p></div>
+            <div><p className="text-xs text-slate-500">Chairpersons (boda), at most</p><p className="font-bold text-slate-800">{round2(chairMaxPct)}%</p></div>
+            <div><p className="text-xs text-slate-500">ICANera keeps, at least</p><p className="font-bold text-slate-800">{round2(chargePct - chairMaxPct)}%</p></div>
           </div>
           <p className="mt-2 text-xs text-slate-600">
-            The platform pool is {round2(poolPct)}% of the fare. Chairpersons are paid out of it; customers and riders never see a breakdown. On cash rides the rider fronts the whole pool.
+            The platform charge is {round2(chargePct)}% of the fare, added on top of the exact fee — the customer pays the same total on cash and wallet and the rider always gets the exact fare. Chairpersons are paid out of the charge; customers and riders never see a breakdown. On cash rides the charge is deducted from the rider's wallet when the trip ends (any shortfall is recovered from their next wallet-paid trip).
           </p>
-          {settings.some((s) => s.key === 'commission.company_platform_cut_percentage') && (
-            <p className="mt-1 text-xs text-slate-600">
-              Company riders: customer +{round2(customerPct)}%, and ICANera takes {round2(pct('commission.company_platform_cut_percentage'))}% from the ride's pay, so the rider gets {round2(100 - pct('commission.company_platform_cut_percentage'))}% on wallet ({round2(100 - pct('commission.company_platform_cut_percentage') - customerPct)}% on cash). No chairperson share. Each company sets its own fare rates.
-            </p>
-          )}
+          <p className="mt-1 text-xs text-slate-600">
+            Company riders follow the same rule (no chairperson share); each company sets its own fare rates. Percentages are of the fare.
+          </p>
           {feeWarnings.map((w) => (
             <p key={w} className="mt-2 text-xs font-semibold text-red-600">⚠ {w}</p>
           ))}

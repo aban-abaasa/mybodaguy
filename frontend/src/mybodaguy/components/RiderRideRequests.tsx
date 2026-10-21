@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt, Map, Trash2, ChevronDown, History } from 'lucide-react';
+import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt, Map, Trash2, ChevronDown, History, Bell, Music, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import RideCommsBar from './RideCommsBar';
@@ -7,9 +7,11 @@ import DeliveryReceiptCard from './DeliveryReceiptCard';
 import RouteMap from './RouteMap';
 import LiveTrackingMap from './LiveTrackingMap';
 import type { Location } from '../data/mockLocations';
-import { startJobRingLoop, stopJobRingLoop } from '../services/notificationSound';
+import { startJobRingLoop, stopJobRingLoop, playNewJobChime } from '../services/notificationSound';
+import RingtonePicker from './RingtonePicker';
 import CancelReasonDialog from './CancelReasonDialog';
 import { cancelRide, hideMyRides, RIDER_CANCEL_REASONS } from '../services/orderActions';
+import { usePlatformChargePct, platformCharge, customerTotal } from '../services/platformCharge';
 
 function toLocation(name: string, lat: number | null, lng: number | null): Location | null {
   if (lat == null || lng == null) return null;
@@ -60,6 +62,9 @@ interface CustomerContact {
 }
 
 export default function RiderRideRequests({ riderId, vehicleType, collapsed = false }: { riderId: string; vehicleType: string | null; collapsed?: boolean }) {
+  const chargePct = usePlatformChargePct();
+  // The request page has two sections: the live requests, and the rider's own ringtone.
+  const [view, setView] = useState<'requests' | 'ringtone'>('requests');
   const [riderRowId, setRiderRowId] = useState<string | null>(null);
   const [pending, setPending] = useState<RideRow | null>(null);
   const [active, setActive] = useState<RideRow | null>(null);
@@ -146,6 +151,16 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
   // Stop the ring loop the instant this component unmounts (e.g. rider
   // navigates away while a job is still ringing) so it never plays forever.
   useEffect(() => stopJobRingLoop, []);
+
+  // A request arriving (or an accepted trip) brings the rider back to the
+  // Requests tab. Keyed on the ride ids, not the rows: the poll replaces the
+  // row objects every few seconds and must not keep yanking the rider off the
+  // Ringtone tab while a trip is already running.
+  const pendingId = pending?.id;
+  const activeId = active?.id;
+  useEffect(() => {
+    if (pendingId || activeId) setView('requests');
+  }, [pendingId, activeId]);
 
   useEffect(() => {
     supabase
@@ -327,12 +342,22 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
       }
 
       setPaymentPickerOpen(false);
-      // Cash and wallet trips both settle automatically server-side now —
-      // for cash, the commission owed is recorded as a debt and quietly
-      // recovered from the rider's next wallet-paid ride, with no
-      // confirmation step and no offline gate in between.
+      // Cash and wallet trips both settle automatically server-side now. On
+      // cash the customer handed over the fare plus the platform charge: the
+      // rider keeps the exact fare and the charge is taken straight from their
+      // wallet (anything the balance can't cover is recovered from their next
+      // wallet-paid ride), with no confirmation step and no offline gate.
       if (data.payment_method === 'cash') {
-        toast.success(`✅ Trip complete! You earned UGX ${Number(data.rider_earning || 0).toLocaleString()} in cash.`);
+        const earning = Number(data.rider_earning || 0).toLocaleString();
+        const charge = Number(data.platform_charge_ugx || 0);
+        const fromDebt = Number(data.charge_added_to_debt_ugx || 0);
+        const fromWallet = Number(data.charge_taken_from_wallet_ugx || 0);
+        const chargeNote = charge <= 0
+          ? ''
+          : fromDebt > 0
+            ? ` The UGX ${charge.toLocaleString()} platform charge: UGX ${fromWallet.toLocaleString()} was taken from your wallet and UGX ${fromDebt.toLocaleString()} will be taken from your next wallet-paid trip.`
+            : ` The UGX ${charge.toLocaleString()} platform charge was deducted from your wallet.`;
+        toast.success(`✅ Trip complete! You keep the exact fare, UGX ${earning}.${chargeNote}`);
       } else if (data.awaiting_customer_confirmation) {
         // Store deliveries: the customer has to confirm they actually
         // received it (same QR code, "I've Received This") before this
@@ -377,7 +402,7 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
           arrives instead of only after the rider taps into the Requests
           tab. */}
       {pending && (
-        <div className="ring-backdrop fixed inset-0 z-[60] flex items-end justify-center sm:items-center sm:p-4">
+        <div className="ring-backdrop fixed inset-0 z-[1001] flex items-end justify-center sm:items-center sm:p-4">
           <div
             role="dialog"
             aria-modal="true"
@@ -445,6 +470,50 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
             </button>
           </div>
 
+          <div role="tablist" aria-label="Request page sections" className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+            {([
+              { id: 'requests', label: 'Requests', icon: Bell },
+              { id: 'ringtone', label: 'My Ringtone', icon: Music },
+            ] as const).map(tab => {
+              const selected = view === tab.id;
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => setView(tab.id)}
+                  className={`flex min-h-[44px] items-center justify-center gap-2 rounded-lg px-3 text-sm font-semibold transition-colors ${
+                    selected ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <Icon size={16} /> {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {view === 'ringtone' ? (
+            <div role="tabpanel" className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+              <p className="flex items-center gap-2 font-semibold text-slate-700">
+                <Music size={16} className="text-orange-500" /> My ringtone
+              </p>
+              <RingtonePicker
+                kind="job"
+                title="New request ringtone"
+                description="Rings on repeat, like a phone call, until you accept or decline a new ride or delivery request. Pick a built-in tone or upload your own song."
+              />
+              <button
+                type="button"
+                onClick={() => playNewJobChime()}
+                className="mt-4 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border-2 border-orange-300 bg-white text-sm font-semibold text-orange-600 transition-colors hover:bg-orange-50 active:scale-[0.99]"
+              >
+                <Volume2 size={16} /> Test my ringtone
+              </button>
+            </div>
+          ) : (
+          <>
           {pending && (
             <div className="border-2 border-orange-400 bg-orange-50 rounded-xl p-5 shadow-md animate-pulse-slow">
               <div className="flex items-center justify-between mb-3">
@@ -520,7 +589,11 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
                 </button>
               ) : paymentPickerOpen ? (
                 <div className="mt-4 border-2 border-teal-400 bg-teal-50 rounded-lg p-4">
-                  <p className="text-sm font-semibold text-teal-800 mb-3">How did the customer pay?</p>
+                  <p className="text-sm font-semibold text-teal-800 mb-1">How did the customer pay?</p>
+                  <p className="text-xs leading-relaxed text-teal-700 mb-3">
+                    Either way you receive UGX {Number(active.rider_earning ?? active.fare).toLocaleString()}.
+                    If paid in cash, the customer hands you UGX {customerTotal(active.fare, chargePct).toLocaleString()} and the UGX {platformCharge(active.fare, chargePct).toLocaleString()} platform charge is deducted from your wallet.
+                  </p>
                   <div className="flex gap-3">
                     <button
                       onClick={() => completeTrip('cash')}
@@ -615,6 +688,8 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
               </div>
             )}
           </div>
+          </>
+          )}
         </div>
       )}
 
@@ -641,9 +716,10 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
   );
 }
 
-// The one flat price: rider_earning is already the final take-home (all fees
-// are worked out on the server when the ride is requested), so there is
-// deliberately no fare / fee breakdown anywhere.
+// The one flat price: rider_earning is the final take-home — the exact fare,
+// worked out on the server when the ride is requested (the platform charge is
+// added on top for the customer, never taken from this) — so there is
+// deliberately no fare / fee breakdown here.
 function TakeHome({ ride }: { ride: RideRow }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -664,6 +740,7 @@ function RideSummary({ ride, live, hidePrice = false }: { ride: RideRow; live?: 
   // shouldn't need an extra tap to appear. Still collapsed by default for
   // the still-pending request preview, where there's no journey yet to show.
   const [showMap, setShowMap] = useState(!!live);
+  const chargePct = usePlatformChargePct();
   const hasCoords = ride.pickup_lat != null && ride.pickup_lng != null && ride.dropoff_lat != null && ride.dropoff_lng != null;
   const pickupLoc = hasCoords ? toLocation(ride.pickup_location, ride.pickup_lat, ride.pickup_lng) : null;
   const dropoffLoc = hasCoords ? toLocation(ride.dropoff_location, ride.dropoff_lat, ride.dropoff_lng) : null;
@@ -813,7 +890,7 @@ function RideSummary({ ride, live, hidePrice = false }: { ride: RideRow; live?: 
 
       {ride.payment_method === 'cash' && (
         <p className="rounded-xl bg-amber-50 px-3.5 py-2.5 text-xs leading-relaxed text-amber-700">
-          💵 Customer pays you cash directly — the price shown is already your final take-home; what the platform is owed on a cash trip is settled from your wallet on your next wallet-paid trip, not on top.
+          💵 Customer pays you UGX {customerTotal(ride.fare, chargePct).toLocaleString()} in cash — the exact fare is yours to keep. The UGX {platformCharge(ride.fare, chargePct).toLocaleString()} platform charge on top is deducted from your wallet when you finish the trip.
         </p>
       )}
 
