@@ -37,6 +37,8 @@ interface ProductPickerProps {
   currency?: string;
   /** Quantities already chosen elsewhere (product id -> qty) for THIS store, so a basket started on another screen carries over. */
   initialQty?: Record<string, number>;
+  /** Replaces the quantities (product id -> qty) each time `version` changes, e.g. after the basket was edited on a cart page. */
+  syncQty?: { version: number; qty: Record<string, number> };
 }
 
 type Money = (n: number) => string;
@@ -164,7 +166,7 @@ function SkeletonGrid({ count, full }: { count: number; full: boolean }) {
 
 const SEARCH_DEBOUNCE_MS = 300;
 
-export default function ProductPicker({ supermarketId, allStores = false, stores, excludeStoreIds, onCartChange, currency = 'UGX', initialQty, fullPage = false, onOpenCart, hideCartBar = false }: ProductPickerProps) {
+export default function ProductPicker({ supermarketId, allStores = false, stores, excludeStoreIds, onCartChange, currency = 'UGX', initialQty, syncQty, fullPage = false, onOpenCart, hideCartBar = false }: ProductPickerProps) {
   const [profile, setProfile] = useState<SupermarketProfile | null>(null);
   const [categoryNames, setCategoryNames] = useState<string[]>([]);
 
@@ -291,6 +293,13 @@ export default function ProductPicker({ supermarketId, allStores = false, stores
     setQtyById(prev => ({ ...prev, [product.id]: next }));
     setCartProducts(prev => (prev[product.id] ? prev : { ...prev, [product.id]: product }));
   }, []);
+
+  const syncedVersion = useRef(syncQty?.version ?? 0);
+  useEffect(() => {
+    if (!syncQty || syncQty.version === syncedVersion.current) return;
+    syncedVersion.current = syncQty.version;
+    setQtyById(syncQty.qty);
+  }, [syncQty]);
 
   useEffect(() => {
     const lines: CartLine[] = Object.keys(qtyById)

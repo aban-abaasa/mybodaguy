@@ -3,7 +3,7 @@ import {
   Camera, CameraOff, ScanLine, X, Plus, Minus, Trash2,
   ShoppingCart, CheckCircle, Loader, AlertCircle, Coins,
   ReceiptText, QrCode, Store, ChevronDown, CalendarClock, ExternalLink,
-  Download, Clock, ShieldCheck,
+  Download, Clock, ShieldCheck, ArrowLeft,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { QRCodeSVG } from 'qrcode.react';
@@ -145,10 +145,14 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   // products (opening Shop, "Start New Shop", or tapping the store name to switch).
   // Until they answer, no products are listed and nothing can be scanned or added.
   const [storeConfirmed, setStoreConfirmed] = useState(false);
+  // Quantities from the cart handed back to the product grid when the cart page is left,
+  // so edits made on the cart page show on the grid (and removed products stay removed).
+  const [pickerSync, setPickerSync] = useState<{ version: number; qty: Record<string, number> }>({ version: 0, qty: {} });
   // A store the customer picked while their cart still holds another store's products —
   // waits for them to confirm that the cart will be cleared.
   const [pendingStoreId, setPendingStoreId] = useState('');
 
+  const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectorRef = useRef<any>(null);
@@ -367,7 +371,6 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       browsedIdsRef.current = new Set(lines.map(l => l.product.id));
       return [...nonBrowsed, ...browsedItems];
     });
-    if (lines.length > 0) setState(s => (s === 'idle' ? 'cart' : s));
   }, []);
 
   function updateQty(productId: string, delta: number) {
@@ -564,6 +567,15 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     openStore(cartStoreId);
   }
 
+  // Leave the cart page and return to shopping.
+  function leaveCartPage() {
+    setPickerSync(prev => ({
+      version: prev.version + 1,
+      qty: Object.fromEntries(cart.map(i => [i.product.product_id, i.quantity])),
+    }));
+    setState('idle');
+  }
+
   // Back to the "Which store are you shopping at?" question.
   function askStore() {
     stopCamera();
@@ -684,11 +696,23 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
   const lockedStore = cart.length > 0 ? supermarkets.find(sm => sm.id === cartStoreId) || null : null;
   const pendingStore = supermarkets.find(sm => sm.id === pendingStoreId) || null;
   const pickerCurrency = (activeStore?.price_currency || 'UGX').toUpperCase();
+  // The cart is its own page: while it is open the shop (toolbar, products, scanner) is hidden.
+  const showCartPage = (state === 'cart' || state === 'checkout') && cart.length > 0;
+
+  // Opening the cart jumps to the top of the page — the customer may have scrolled far down
+  // the products — and removing its last item goes back to shopping.
+  useEffect(() => {
+    if (showCartPage) window.scrollTo({ top: 0 });
+  }, [showCartPage]);
+  useEffect(() => {
+    if (state === 'cart' && cart.length === 0) leaveCartPage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state, cart.length]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
-    <div className="space-y-3">
+    <div ref={rootRef} className="space-y-3">
 
       {/* ── Receipt ────────────────────────────────────────────────────── */}
       {state === 'complete' && receipt && (() => {
@@ -814,8 +838,10 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       })()}
 
       {/* ── Idle / Scan entry ──────────────────────────────────────────── */}
+      {/* Hidden, not removed, while the cart page is open: the product picker keeps its
+          basket in its own state, which would be lost if it unmounted. */}
       {(state === 'idle' || state === 'product_found' || state === 'cart' || state === 'checkout') && (
-        <>
+        <div hidden={showCartPage} className="space-y-3">
           {/* One slim toolbar instead of stacked cards: the store being shopped at,
               Scan/Browse toggle, wallet balance and cart. */}
           <div className="flex items-center gap-2">
@@ -900,6 +926,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
               <ProductPicker
                 supermarketId={selectedSupermarketId}
                 currency={pickerCurrency}
+                syncQty={pickerSync}
                 onCartChange={handleBrowseCartChange}
                 onOpenCart={() => setState('cart')}
                 fullPage
@@ -948,7 +975,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
               )}
             </div>
           )}
-        </>
+        </div>
       )}
 
       {/* ── Camera live view ────────────────────────────────────────────── */}
@@ -1063,23 +1090,23 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
       )}
 
       {/* ── Cart ───────────────────────────────────────────────────────── */}
-      {(state === 'cart' || state === 'checkout') && cart.length > 0 && (
+      {showCartPage && (
         <div className="bg-white border-y border-slate-200 overflow-hidden">
           {/* Cart header */}
-          <div className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white px-5 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <ShoppingCart size={18} />
-              <span className="min-w-0">
-                <span className="block font-semibold">Your Cart ({cart.length} items)</span>
-                {lockedStore && <span className="block truncate text-xs text-white/80">from {lockedStore.name}</span>}
-              </span>
-            </div>
+          <div className="bg-gradient-to-r from-orange-500 to-yellow-500 text-white px-3 py-3 flex items-center gap-2">
             <button
-              onClick={() => setState('idle')}
-              className="text-white/80 hover:text-white"
+              type="button"
+              onClick={leaveCartPage}
+              aria-label="Back to shopping"
+              className="grid h-9 w-9 flex-shrink-0 place-items-center rounded-full bg-white/20 hover:bg-white/30 transition-colors"
             >
-              <ScanLine size={18} />
+              <ArrowLeft size={18} />
             </button>
+            <ShoppingCart size={18} className="flex-shrink-0" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold">Your Cart ({cart.length} items)</span>
+              {lockedStore && <span className="block truncate text-xs text-white/80">from {lockedStore.name}</span>}
+            </span>
           </div>
 
           {/* Cart items */}
@@ -1129,7 +1156,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
           {/* Add more items — scan or keep browsing, depending on mode */}
           <div className="px-5 py-3 border-t border-slate-100">
             <button
-              onClick={() => { setStoreConfirmed(true); setState('idle'); if (shopMode === 'scan') startCamera(); }}
+              onClick={() => { setStoreConfirmed(true); leaveCartPage(); if (shopMode === 'scan') startCamera(); }}
               className="w-full py-2.5 border-2 border-dashed border-orange-300 text-orange-600 font-semibold rounded-xl hover:bg-orange-50 transition-colors text-sm flex items-center justify-center gap-2"
             >
               {shopMode === 'browse' ? <><Store size={16} /> Add More Items</> : <><ScanLine size={16} /> Scan More Items</>}
