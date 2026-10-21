@@ -20,6 +20,7 @@ import { reverseGeocodeCountry, searchAddressSuggestions, geocodeAddress, type C
 import { hasPinSet, validatePIN, verifyPin } from '../services/pinService';
 import SetPinPrompt from './SetPinPrompt';
 import { formatMoney } from '../services/money';
+import { usePlatformChargePct, customerTotal } from '../services/platformCharge';
 import { productService, type Product } from '../services/productService';
 import type { ImportStore } from '../services/journeyService';
 import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
@@ -135,36 +136,13 @@ interface EnhancedRideRequestProps {
   onJourneyClosed?: () => void;
 }
 
-// Wallet payments carry the same platform fee the backend applies when it
-// actually debits the wallet (commission.icanera_platform_fee_percentage,
-// mbg_respond_to_ride / mbg_complete_ride) — folded into the one number shown
-// here so the customer always sees a single all-in payable amount, matching
-// what leaves their wallet, with no separate fee breakdown on screen. The rate
-// is read live from the public setting (developer-editable); this default only
-// covers the moment before it loads.
-const DEFAULT_WALLET_SURCHARGE_PCT = 8;
-let cachedWalletSurchargePct: number | null = null;
-function useWalletSurchargePct(): number {
-  const [pct, setPct] = useState(cachedWalletSurchargePct ?? DEFAULT_WALLET_SURCHARGE_PCT);
-  useEffect(() => {
-    if (cachedWalletSurchargePct !== null) return;
-    supabase
-      .from('mbg_platform_settings')
-      .select('value')
-      .eq('key', 'commission.icanera_platform_fee_percentage')
-      .maybeSingle()
-      .then(({ data }) => {
-        const fee = Number(data?.value);
-        if (Number.isFinite(fee) && fee >= 0) {
-          cachedWalletSurchargePct = fee;
-          setPct(fee);
-        }
-      });
-  }, []);
-  return pct;
-}
-function payableFare(fare: number, paymentMethod: 'wallet' | 'cash' | 'company', surchargePct: number): number {
-  return paymentMethod === 'wallet' ? Math.round(fare * (1 + surchargePct / 100)) : fare;
+// The customer pays the exact fare plus the platform charge
+// (commission.icanera_platform_fee_percentage) — one all-in number, the same
+// whether they pay by wallet or cash, with no separate breakdown on screen. The
+// rider always receives the exact fare. Company-billed rides are settled by the
+// company's own billing, so they show the plain fare. See services/platformCharge.
+function payableFare(fare: number, paymentMethod: 'wallet' | 'cash' | 'company', chargePct: number): number {
+  return paymentMethod === 'company' ? fare : customerTotal(fare, chargePct);
 }
 
 const VEHICLE_OPTIONS: { id: VehicleTypeFilter; label: string; icon: typeof Car }[] = [
@@ -341,7 +319,7 @@ function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod, c
   /** Items in the basket, to suggest a vehicle size that fits (0 = no suggestion). */
   itemCount?: number;
 }) {
-  const walletSurchargePct = useWalletSurchargePct();
+  const platformChargePct = usePlatformChargePct();
   // Van and truck are freight: what is being moved (weight + handling) is part of the price.
   const isFreight = value === 'van' || value === 'truck';
   const weightKg = isFreight && Number(cargoWeight) > 0 ? Number(cargoWeight) : null;
@@ -351,7 +329,7 @@ function VehicleClassPicker({ value, onChange, pickup, dropoff, paymentMethod, c
     isFreight ? { weightKg, cargoClass } : null,
   );
   const quoteFor = (id: VehicleTypeFilter) => quotes?.find(q => q.vehicle_type === id) ?? null;
-  const priceOf = (q: VehicleClassQuote) => payableFare(q.fare, paymentMethod, walletSurchargePct);
+  const priceOf = (q: VehicleClassQuote) => payableFare(q.fare, paymentMethod, platformChargePct);
 
   const classPrices = (['motorcycle', 'car', 'van', 'truck'] as const)
     .map(id => quoteFor(id))
@@ -611,10 +589,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [selectedSecurityCompanyId, setSelectedSecurityCompanyId] = useState('');
   const [securityPassengerCount, setSecurityPassengerCount] = useState(1);
   const [modePreference, setModePreference] = useState<ModePreference>('all');
-  // Wallet = charged automatically (fare + the platform fee, folded into one
-  // total) the instant the trip completes. Cash = pay the rider directly in
-  // person — no surcharge, but the rider owes the commission out of pocket and
-  // must confirm receipt before taking new jobs (see mbg_confirm_cash_received).
+  // Wallet = charged automatically the instant the trip completes. Cash = pay
+  // the rider directly in person. Either way the customer pays the same total
+  // (the exact fare + the platform charge, folded into one number); the rider
+  // always keeps the exact fare and, on cash, the charge is taken from their
+  // own wallet (see mbg_complete_ride).
   const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'cash' | 'company'>('wallet');
 
   // ── Store-delivery order: confirm the goods with the wallet PIN FIRST, then
@@ -2931,7 +2910,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           ) : paymentMethod === 'wallet' ? (
             <p className="text-[11px] text-slate-400 mt-2">Charged automatically when the trip ends.</p>
           ) : (
-            <p className="text-[11px] text-slate-400 mt-2">Pay the rider directly in cash at the end of the trip.</p>
+            <p className="text-[11px] text-slate-400 mt-2">Pay the rider the full amount shown, in cash, at the end of the trip.</p>
           )}
         </div>
 
@@ -3455,7 +3434,7 @@ function RiderCard({
 
   const config = modeConfig[rider.mode] || modeConfig.normal;
   const ModeIcon = config.icon;
-  const walletSurchargePct = useWalletSurchargePct();
+  const platformChargePct = usePlatformChargePct();
 
   return (
     <div className={`border-2 rounded-xl p-4 sm:p-5 transition-all ${
@@ -3535,7 +3514,7 @@ function RiderCard({
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-baseline gap-2">
               <span className="text-xl sm:text-2xl font-bold text-slate-800">
-                UGX {payableFare(rider.fare, paymentMethod, walletSurchargePct).toLocaleString()}
+                UGX {payableFare(rider.fare, paymentMethod, platformChargePct).toLocaleString()}
               </span>
             </div>
 
@@ -3830,7 +3809,7 @@ function RiderOnTheWay({
   paymentMethod: 'wallet' | 'cash' | 'company';
   onChangePaymentMethod: (m: 'wallet' | 'cash') => void;
 }) {
-  const walletSurchargePct = useWalletSurchargePct();
+  const platformChargePct = usePlatformChargePct();
 
   return (
     <div className="space-y-6">
@@ -3935,7 +3914,7 @@ function RiderOnTheWay({
           <div className="flex items-center justify-between">
             <span className="text-slate-600">Fare Amount</span>
             <span className="text-2xl font-bold text-slate-800">
-              UGX {payableFare(rider.fare, paymentMethod, walletSurchargePct).toLocaleString()}
+              UGX {payableFare(rider.fare, paymentMethod, platformChargePct).toLocaleString()}
             </span>
           </div>
           <PaymentMethodSwitcher paymentMethod={paymentMethod} onChange={onChangePaymentMethod} />
@@ -3976,7 +3955,7 @@ function JourneyStarted({
   onChangePaymentMethod: (m: 'wallet' | 'cash') => void;
 }) {
   const [journeyTime, setJourneyTime] = React.useState(0);
-  const walletSurchargePct = useWalletSurchargePct();
+  const platformChargePct = usePlatformChargePct();
 
   React.useEffect(() => {
     const timer = setInterval(() => {
@@ -4086,7 +4065,7 @@ function JourneyStarted({
           <div className="flex items-center justify-between">
             <span className="text-slate-600 font-medium">Trip Fare</span>
             <span className="text-2xl sm:text-3xl font-bold text-green-600">
-              UGX {payableFare(rider.fare, paymentMethod, walletSurchargePct).toLocaleString()}
+              UGX {payableFare(rider.fare, paymentMethod, platformChargePct).toLocaleString()}
             </span>
           </div>
           <PaymentMethodSwitcher paymentMethod={paymentMethod} onChange={onChangePaymentMethod} />
@@ -4120,7 +4099,7 @@ function JourneyCompleted({
 }) {
   const [rating, setRating] = React.useState(0);
   const [hoveredRating, setHoveredRating] = React.useState(0);
-  const walletSurchargePct = useWalletSurchargePct();
+  const platformChargePct = usePlatformChargePct();
 
   return (
     <div className="space-y-6">
@@ -4167,7 +4146,7 @@ function JourneyCompleted({
           <div className="flex justify-between py-2 border-t-2 border-slate-200 pt-4">
             <span className="text-slate-700 font-medium text-lg">Total Fare</span>
             <span className="text-2xl sm:text-3xl font-bold text-green-600">
-              UGX {payableFare(rider.fare, paymentMethod, walletSurchargePct).toLocaleString()}
+              UGX {payableFare(rider.fare, paymentMethod, platformChargePct).toLocaleString()}
             </span>
           </div>
         </div>
