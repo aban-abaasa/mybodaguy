@@ -12,6 +12,7 @@ import RingtonePicker from './RingtonePicker';
 import CancelReasonDialog from './CancelReasonDialog';
 import { cancelRide, hideMyRides, RIDER_CANCEL_REASONS } from '../services/orderActions';
 import { usePlatformChargePct, platformCharge, customerTotal } from '../services/platformCharge';
+import { AUTO_DISPATCH_OFFER_SECONDS, DIRECT_OFFER_SECONDS } from '../services/offerWindows';
 
 function toLocation(name: string, lat: number | null, lng: number | null): Location | null {
   if (lat == null || lng == null) return null;
@@ -49,6 +50,10 @@ interface RideRow {
   parcel_weight_kg?: number | null;
   recipient_name?: string | null;
   recipient_phone?: string | null;
+  // "Just Send" rides are offered to one rider at a time, a few seconds each
+  // (offer_sent_at is when this rider was handed it).
+  dispatch_mode?: 'direct' | 'auto' | null;
+  offer_sent_at?: string | null;
   created_at: string;
 }
 
@@ -59,6 +64,40 @@ interface CustomerContact {
   userId: string;
   name: string;
   phone: string | null;
+}
+
+// How long this rider has left to answer, so a short "Just Send" offer never
+// vanishes without warning. Timed from when this device first saw the offer
+// rather than from the server's timestamp, which a phone with a wrong clock
+// would misread; a new offer (another ride, or the same ride handed over again)
+// restarts it. Informational only — the server decides when the offer moves on.
+function OfferCountdown({ ride }: { ride: RideRow }) {
+  const windowSec = ride.dispatch_mode === 'auto' ? AUTO_DISPATCH_OFFER_SECONDS : DIRECT_OFFER_SECONDS;
+  const offerKey = `${ride.id}:${ride.offer_sent_at ?? ''}`;
+  const [left, setLeft] = useState(windowSec);
+
+  useEffect(() => {
+    const endsAt = Date.now() + windowSec * 1000;
+    const tick = () => setLeft(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [offerKey, windowSec]);
+
+  return (
+    <div className="mt-3" role="timer" aria-label={`${left} seconds left to respond`}>
+      <div className="h-1.5 overflow-hidden rounded-full bg-orange-100">
+        <div
+          key={offerKey}
+          className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400 animate-offer-drain"
+          style={{ animationDuration: `${windowSec}s` }}
+        />
+      </div>
+      <p className={`mt-1 text-right text-[11px] font-semibold ${left <= 3 ? 'text-red-600' : 'text-slate-500'}`}>
+        {left > 0 ? `${left}s left to respond` : 'Respond now'}
+      </p>
+    </div>
+  );
 }
 
 export default function RiderRideRequests({ riderId, vehicleType, collapsed = false }: { riderId: string; vehicleType: string | null; collapsed?: boolean }) {
@@ -214,7 +253,14 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
       }
       await load();
     } catch (e: any) {
-      toast.error(e.message || 'Failed to respond');
+      // With a few seconds per offer, tapping a moment after it moved on to
+      // the next rider is routine, not a failure worth a red error.
+      if (/not offered to you|no longer pending/i.test(e?.message || '')) {
+        toast.info('Too slow — that request has moved on to another rider');
+        await load();
+      } else {
+        toast.error(e.message || 'Failed to respond');
+      }
     } finally {
       setActing(false);
     }
@@ -429,6 +475,7 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
                   </p>
                 </div>
               </div>
+              <OfferCountdown ride={pending} />
             </div>
             <div className="landing-classic-divider shrink-0" />
 

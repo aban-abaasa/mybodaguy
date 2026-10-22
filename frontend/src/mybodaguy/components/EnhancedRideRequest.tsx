@@ -21,6 +21,7 @@ import { hasPinSet, validatePIN, verifyPin } from '../services/pinService';
 import SetPinPrompt from './SetPinPrompt';
 import { formatMoney } from '../services/money';
 import { usePlatformChargePct, customerTotal } from '../services/platformCharge';
+import { AUTO_DISPATCH_OFFER_SECONDS, DIRECT_OFFER_SECONDS } from '../services/offerWindows';
 import { productService, type Product } from '../services/productService';
 import type { ImportStore } from '../services/journeyService';
 import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
@@ -487,14 +488,15 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [rideStatus, setRideStatus] = useState<RideStatus | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
-  const [waitingTimer, setWaitingTimer] = useState(30);
+  const [waitingTimer, setWaitingTimer] = useState(DIRECT_OFFER_SECONDS);
   // "Just Send" — customer skips picking a specific rider; the server
-  // (mbg_sweep_auto_dispatch_cascade, pg_cron every 10s) offers it to the
-  // best-matched rider and, if they don't respond within 10s, silently
-  // reassigns to the next-best candidate and repeats until one accepts or
-  // riders are exhausted. The client-side 30s per-rider countdown below is
-  // for the "pick a specific rider" flow only — it's disabled in this mode
-  // since the server owns the whole timeout/cascade lifecycle instead.
+  // (mbg_sweep_auto_dispatch_cascade, swept every second) offers it to the
+  // best-matched rider and, if they don't respond within
+  // AUTO_DISPATCH_OFFER_SECONDS, silently reassigns to the next-best
+  // candidate and repeats until one accepts or riders are exhausted. The
+  // client-side DIRECT_OFFER_SECONDS countdown below is for the "pick a
+  // specific rider" flow only — it's disabled in this mode since the server
+  // owns the whole timeout/cascade lifecycle instead.
   const [isAutoDispatch, setIsAutoDispatch] = useState(false);
   const [autoDispatching, setAutoDispatching] = useState(false);
   // Which candidate mbg_sweep_auto_dispatch_cascade currently has the offer
@@ -1145,9 +1147,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
   // Timer for waiting acceptance — real timeout withdraws the live offer.
   // Skipped entirely in auto-dispatch mode: the server-side cascade
-  // (10s per rider) owns that timeout there instead, so this 30s
-  // single-rider countdown would otherwise race it and kill the request
-  // out from under an in-progress reassignment.
+  // (AUTO_DISPATCH_OFFER_SECONDS per rider) owns that timeout there instead,
+  // so this single-rider countdown would otherwise race it and kill the
+  // request out from under an in-progress reassignment.
   useEffect(() => {
     if (isAutoDispatch) return;
     if (rideStatus === 'waiting_acceptance' && waitingTimer > 0) {
@@ -1199,7 +1201,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       }
     };
 
-    const interval = setInterval(poll, 3000);
+    // While the cascade is hopping between riders every few seconds, poll
+    // fast enough that "Asking …" never trails the real rider by much.
+    const everyMs = isAutoDispatch && rideStatus === 'waiting_acceptance' ? 1000 : 3000;
+    const interval = setInterval(poll, everyMs);
     return () => clearInterval(interval);
   }, [rideId, rideStatus, selectedRider, isAutoDispatch, autoCandidateId]);
 
@@ -1577,7 +1582,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
     setSelectedRider(rider);
     setRideStatus('waiting_acceptance');
-    setWaitingTimer(30);
+    setWaitingTimer(DIRECT_OFFER_SECONDS);
     setIsAutoDispatch(!!opts?.auto);
     setAutoCandidateId(opts?.auto ? rider.rider_id : null);
 
@@ -1648,7 +1653,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       setRideId(data.ride_id);
 
       // Flips this ride into the server-owned cascade (mbg_sweep_auto_dispatch_cascade,
-      // pg_cron every 10s) instead of the plain single-rider offer just created above.
+      // swept every second) instead of the plain single-rider offer just created above.
       if (opts?.auto) {
         supabase.rpc('mbg_mark_ride_auto_dispatch', {
           p_ride_id: data.ride_id,
@@ -1741,7 +1746,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       });
       setRideId(data.ride_id);
       setRideStatus('waiting_acceptance');
-      setWaitingTimer(30);
+      setWaitingTimer(DIRECT_OFFER_SECONDS);
 
       toast.success(
         data.mode === 'escort_self_transport'
@@ -1797,7 +1802,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         // Auto-dispatch rides must be actually cancelled (terminal status) —
         // mbg_withdraw_ride_offer only clears rider_id and leaves the row
         // 'pending', which the cascade sweep would just pick back up and
-        // reassign to yet another rider on its next 10s tick.
+        // reassign to yet another rider on its next sweep.
         if (isAutoDispatch) {
           await supabase.rpc('mbg_cancel_ride', { p_ride_id: rideId, p_reason: 'Cancelled by customer' });
         } else {
@@ -3149,7 +3154,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           </button>
         )}
         <p className="text-[11px] text-slate-400 text-center">
-          We'll offer it to the nearest rider first — if they don't respond in 10s, it moves to the next one automatically.
+          We'll offer it to the nearest rider first — if they don't respond in {AUTO_DISPATCH_OFFER_SECONDS}s, it moves to the next one automatically.
           {!needsCrossBorderPath && vehicleTypeFilter === 'any' && ' Boda, car, van and truck are priced differently, so the fare follows whichever vehicle accepts — pick a vehicle type above to fix the price.'}
         </p>
       </div>
@@ -3715,16 +3720,22 @@ function WaitingForAcceptance({
         </div>
       )}
 
-      {/* Loading Bar — indeterminate sweep in auto mode (no fixed countdown
-          to size it against), a real 0-30s fill otherwise. */}
+      {/* Loading Bar — in auto mode it fills over one rider's window and
+          starts over each time the cascade moves to the next rider (keyed on
+          who is being asked); otherwise a real fill over the single rider's
+          countdown. */}
       <div className="w-full max-w-md mb-8">
         <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
           {isAutoDispatch ? (
-            <div className="h-full w-1/3 bg-gradient-to-r from-orange-500 to-yellow-500 rounded-full animate-[loading-sweep_1.2s_ease-in-out_infinite]" />
+            <div
+              key={activeId}
+              className="h-full bg-gradient-to-r from-orange-500 to-yellow-500 rounded-full animate-offer-fill"
+              style={{ animationDuration: `${AUTO_DISPATCH_OFFER_SECONDS}s` }}
+            />
           ) : (
             <div
               className="h-full bg-gradient-to-r from-orange-500 to-yellow-500 transition-all duration-1000"
-              style={{ width: `${((30 - timer) / 30) * 100}%` }}
+              style={{ width: `${((DIRECT_OFFER_SECONDS - timer) / DIRECT_OFFER_SECONDS) * 100}%` }}
             />
           )}
         </div>

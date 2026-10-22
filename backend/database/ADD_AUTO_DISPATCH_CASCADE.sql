@@ -1,6 +1,10 @@
 -- ============================================================================
 -- "Just Send" — auto-dispatch cascade for ride/delivery requests.
 -- ============================================================================
+-- NOTE: the sweep procedure below was replaced by FIX_AUTO_DISPATCH_7S_CASCADE.sql
+-- (7s per rider, swept every second). As written here it is SECURITY DEFINER,
+-- which makes its COMMIT fail — so run the FIX file after this one, not before.
+-- ----------------------------------------------------------------------------
 -- Until now a customer always had to pick one specific rider from
 -- mbg_find_available_riders' results (EnhancedRideRequest.tsx's "Find
 -- Available Riders" list) and manually retry a different one if that rider
