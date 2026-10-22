@@ -189,12 +189,26 @@ textarea:-webkit-autofill:active {
   animation: fadeIn 0.3s ease-in-out;
 }
 
-/* Indeterminate "still searching" progress sweep — used by the auto-dispatch
-   waiting screen, which has no fixed countdown to size a real fill against. */
-@keyframes loading-sweep {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(300%); }
+/* One offer's time window, drawn as a bar. The duration is set inline from
+   services/offerWindows.ts so the bar always matches the server's timing.
+   offer-fill: the customer's "Matching you with a rider" bar, filling over one
+   rider's turn. offer-drain: the rider's incoming-request bar, emptying. */
+@keyframes offer-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
 }
+@keyframes offer-drain {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+.animate-offer-fill,
+.animate-offer-drain {
+  transform-origin: left center;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+.animate-offer-fill { animation-name: offer-fill; }
+.animate-offer-drain { animation-name: offer-drain; }
 
 /* Auto-dispatch "radar" — expanding rings behind the central hub on the
    Matching-you-with-a-rider screen, suggesting an active nearby search. */

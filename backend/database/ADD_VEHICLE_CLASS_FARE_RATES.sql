@@ -1236,6 +1236,10 @@ $$;
 --    except the search for the next rider carries the ride's cargo weight/class, so a
 --    heavy load is never offered to a vehicle that cannot carry it. Its cron schedule
 --    is unchanged.
+--
+--    SUPERSEDED by FIX_AUTO_DISPATCH_7S_CASCADE.sql. This version is
+--    SECURITY DEFINER, so its COMMIT always fails and the cascade never runs.
+--    Re-running this section reinstates that bug — run the FIX file after it.
 -- ----------------------------------------------------------------------------
 
 CREATE OR REPLACE PROCEDURE public.mbg_sweep_auto_dispatch_cascade()
