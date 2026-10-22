@@ -37,7 +37,7 @@ export default async function handler(req, res) {
           flight_booking:mbg_flight_bookings!mbg_journey_legs_flight_booking_fkey(*),
           ride:mbg_rides(
             id, status, fare, distance_km, duration_minutes,
-            rider:mbg_riders(
+            rider:mbg_riders!mbg_rides_rider_id_fkey(
               id, plate_number, vehicle_type, vehicle_color, vehicle_model, rating,
               user:mbg_users!user_id(phone, profile:mbg_user_profiles(full_name))
             )
