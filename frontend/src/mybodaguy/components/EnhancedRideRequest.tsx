@@ -21,7 +21,7 @@ import { hasPinSet, validatePIN, verifyPin } from '../services/pinService';
 import SetPinPrompt from './SetPinPrompt';
 import { formatMoney } from '../services/money';
 import { usePlatformChargePct, customerTotal } from '../services/platformCharge';
-import { AUTO_DISPATCH_OFFER_SECONDS, DIRECT_OFFER_SECONDS } from '../services/offerWindows';
+import { AUTO_DISPATCH_STAGGER_SECONDS, OFFER_SECONDS } from '../services/offerWindows';
 import { productService, type Product } from '../services/productService';
 import type { ImportStore } from '../services/journeyService';
 import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
@@ -488,21 +488,27 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [rideStatus, setRideStatus] = useState<RideStatus | null>(null);
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
-  const [waitingTimer, setWaitingTimer] = useState(DIRECT_OFFER_SECONDS);
+  const [waitingTimer, setWaitingTimer] = useState(OFFER_SECONDS);
   // "Just Send" — customer skips picking a specific rider; the server
-  // (mbg_sweep_auto_dispatch_cascade, swept every second) offers it to the
-  // best-matched rider and, if they don't respond within
-  // AUTO_DISPATCH_OFFER_SECONDS, silently reassigns to the next-best
-  // candidate and repeats until one accepts or riders are exhausted. The
-  // client-side DIRECT_OFFER_SECONDS countdown below is for the "pick a
-  // specific rider" flow only — it's disabled in this mode since the server
-  // owns the whole timeout/cascade lifecycle instead.
+  // (mbg_sweep_auto_dispatch_cascade, swept every second) shares the request
+  // with the best-matched rider, then adds another nearby rider every
+  // AUTO_DISPATCH_STAGGER_SECONDS while the earlier ones keep it for
+  // OFFER_SECONDS each. Whoever accepts first takes it; the request is
+  // cancelled only once every rider has been asked and every offer has run out.
+  // The client-side OFFER_SECONDS countdown below is for the "pick a specific
+  // rider" flow only — it's disabled in this mode since the server owns the
+  // whole timeout/cascade lifecycle instead.
   const [isAutoDispatch, setIsAutoDispatch] = useState(false);
   const [autoDispatching, setAutoDispatching] = useState(false);
-  // Which candidate mbg_sweep_auto_dispatch_cascade currently has the offer
-  // out to (mbg_rides.rider_id) — used only to light up the right avatar in
-  // WaitingForAcceptance's orbit; matched against matchedRiders by rider_id.
-  const [autoCandidateId, setAutoCandidateId] = useState<string | null>(null);
+  // Which riders hold the shared request right now (mbg_ride_dispatch_status), and
+  // how many have been asked in all — lights up their avatars in
+  // WaitingForAcceptance's orbit (matched against matchedRiders by rider_id).
+  const [offeredRiderIds, setOfferedRiderIds] = useState<string[]>([]);
+  const [offeredCount, setOfferedCount] = useState(0);
+  const resetOffers = () => {
+    setOfferedRiderIds([]);
+    setOfferedCount(0);
+  };
   const [rideId, setRideId] = useState<string | null>(null);
   const [riderUserId, setRiderUserId] = useState<string | null>(null);
   const [customerName, setCustomerName] = useState('Customer');
@@ -1147,9 +1153,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
   // Timer for waiting acceptance — real timeout withdraws the live offer.
   // Skipped entirely in auto-dispatch mode: the server-side cascade
-  // (AUTO_DISPATCH_OFFER_SECONDS per rider) owns that timeout there instead,
-  // so this single-rider countdown would otherwise race it and kill the
-  // request out from under an in-progress reassignment.
+  // (offers of OFFER_SECONDS each) owns that timeout there instead, so this
+  // single-rider countdown would otherwise race it and kill the request out
+  // from under riders who still hold it.
   useEffect(() => {
     if (isAutoDispatch) return;
     if (rideStatus === 'waiting_acceptance' && waitingTimer > 0) {
@@ -1160,12 +1166,69 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     }
   }, [rideStatus, waitingTimer, isAutoDispatch]);
 
+  // The rider who took a shared "Just Send" request (mbg_ride_dispatch_status).
+  // Every screen after acceptance reads selectedRider — the first rider the
+  // request was sent to — so whoever actually accepted is swapped in for it,
+  // keeping what the search already knew about them (distance, arrival time).
+  const winnerAsMatchedRider = (w: any, fare: number | null): MatchedRider => {
+    const known = matchedRiders.find(r => r.rider_id === w.rider_id);
+    return {
+      distance_to_pickup_km: null,
+      estimated_arrival_min: 10,
+      knows_destination: false,
+      time_multiplier: 1,
+      distance_km: selectedRider?.distance_km ?? 0,
+      ...known,
+      rider_id: w.rider_id,
+      full_name: w.full_name || 'Your rider',
+      phone: w.phone ?? null,
+      rating: Number(w.rating ?? 0),
+      total_rides: Number(w.total_rides ?? 0),
+      vehicle_type: w.vehicle_type ?? known?.vehicle_type ?? 'motorcycle',
+      power_type: w.power_type === 'electric' ? 'electric' : 'fuel',
+      has_umbrella: !!w.has_umbrella,
+      plate_number: w.plate_number ?? '',
+      vehicle_color: w.vehicle_color ?? '',
+      mode: (['normal', 'vip', 'discount', 'return'].includes(w.mode) ? w.mode : 'normal') as MatchedRider['mode'],
+      fare: fare ?? known?.fare ?? selectedRider?.fare ?? 0,
+    };
+  };
+
   // Poll the real ride row for status changes made by the rider
   useEffect(() => {
     if (!rideId) return;
     if (rideStatus !== 'waiting_acceptance' && rideStatus !== 'accepted' && rideStatus !== 'journey_started') return;
 
     const poll = async () => {
+      if (isAutoDispatch && rideStatus === 'waiting_acceptance') {
+        // A shared request: which riders hold it right now, how many have been
+        // asked, and — once one accepts — who. If this function isn't there yet
+        // we fall through to the plain row check below.
+        const { data: st, error: stError } = await supabase.rpc('mbg_ride_dispatch_status', { p_ride_id: rideId });
+        if (!stError && st) {
+          if (['accepted', 'in_progress', 'completed'].includes(st.status)) {
+            const winner = st.rider ? winnerAsMatchedRider(st.rider, st.fare ?? null) : null;
+            if (winner) setSelectedRider(winner);
+            setRideStatus('accepted');
+            toast.success(`🎉 ${winner?.full_name ?? 'A rider'} accepted your ride!`, {
+              description: 'Rider is on the way',
+              duration: 4000
+            });
+          } else if (st.status === 'cancelled') {
+            // Everyone nearby was asked and nobody took it (mbg_sweep_auto_dispatch_cascade).
+            setRideStatus('declined');
+            toast.error('No riders were available to accept this request', {
+              description: 'Please try again in a moment',
+              duration: 4000
+            });
+          } else {
+            setOfferedRiderIds(st.active_rider_ids ?? []);
+            setOfferedCount(st.offered_total ?? 0);
+          }
+          return;
+        }
+      }
+
       const { data } = await supabase.from('mbg_rides').select('status, rider_id').eq('id', rideId).maybeSingle();
       if (!data) return;
 
@@ -1189,10 +1252,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             description: 'Try requesting from another rider',
             duration: 4000
           });
-        } else if (isAutoDispatch && data.rider_id && data.rider_id !== autoCandidateId) {
-          // The cascade quietly moved on to the next candidate — nothing
-          // changes for rideStatus, just which avatar glows in the orbit.
-          setAutoCandidateId(data.rider_id);
+        } else if (isAutoDispatch && data.rider_id) {
+          // Fallback when mbg_ride_dispatch_status isn't available: the one
+          // rider the ride row names is the one being asked.
+          setOfferedRiderIds(prev => (prev.length === 1 && prev[0] === data.rider_id ? prev : [data.rider_id]));
         }
       } else if (rideStatus === 'accepted' && data.status === 'in_progress') {
         setRideStatus('journey_started');
@@ -1201,12 +1264,12 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       }
     };
 
-    // While the cascade is hopping between riders every few seconds, poll
-    // fast enough that "Asking …" never trails the real rider by much.
+    // While riders are being added every few seconds, poll fast enough that the
+    // screen (and the moment someone accepts) never trails by much.
     const everyMs = isAutoDispatch && rideStatus === 'waiting_acceptance' ? 1000 : 3000;
     const interval = setInterval(poll, everyMs);
     return () => clearInterval(interval);
-  }, [rideId, rideStatus, selectedRider, isAutoDispatch, autoCandidateId]);
+  }, [rideId, rideStatus, selectedRider, isAutoDispatch, matchedRiders]);
 
   // Resolve the rider's real auth user id (MatchedRider.rider_id is the
   // mbg_riders row id, not the auth id) so RideCommsBar can address them.
@@ -1582,9 +1645,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
     setSelectedRider(rider);
     setRideStatus('waiting_acceptance');
-    setWaitingTimer(DIRECT_OFFER_SECONDS);
+    setWaitingTimer(OFFER_SECONDS);
     setIsAutoDispatch(!!opts?.auto);
-    setAutoCandidateId(opts?.auto ? rider.rider_id : null);
+    setOfferedRiderIds(opts?.auto ? [rider.rider_id] : []);
+    setOfferedCount(opts?.auto ? 1 : 0);
 
     try {
       // Written for the rider reading it on their request card: where to collect,
@@ -1746,7 +1810,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       });
       setRideId(data.ride_id);
       setRideStatus('waiting_acceptance');
-      setWaitingTimer(DIRECT_OFFER_SECONDS);
+      setWaitingTimer(OFFER_SECONDS);
 
       toast.success(
         data.mode === 'escort_self_transport'
@@ -1815,7 +1879,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setSelectedRider(null);
     setRideId(null);
     setIsAutoDispatch(false);
-    setAutoCandidateId(null);
+    resetOffers();
   };
 
   const handleStartNewRide = () => {
@@ -1828,7 +1892,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setRideStatus(null);
     setRideId(null);
     setIsAutoDispatch(false);
-    setAutoCandidateId(null);
+    resetOffers();
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
@@ -1865,7 +1929,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     setRideStatus(null);
     setRideId(null);
     setIsAutoDispatch(false);
-    setAutoCandidateId(null);
+    resetOffers();
     setPickupSuggestions([]);
     setDropoffSuggestions([]);
     setSelectedSupermarketId('');
@@ -1976,7 +2040,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         timer={waitingTimer}
         isAutoDispatch={isAutoDispatch}
         candidates={matchedRiders}
-        activeRiderId={autoCandidateId}
+        activeRiderIds={offeredRiderIds}
+        askedCount={offeredCount}
         onCancel={handleBackToSearch}
       />
     );
@@ -3154,7 +3219,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           </button>
         )}
         <p className="text-[11px] text-slate-400 text-center">
-          We'll offer it to the nearest rider first — if they don't respond in {AUTO_DISPATCH_OFFER_SECONDS}s, it moves to the next one automatically.
+          We'll send it to the nearest rider first, then add another nearby rider every {AUTO_DISPATCH_STAGGER_SECONDS}s. Each keeps it for {OFFER_SECONDS}s, and the first to accept takes it.
           {!needsCrossBorderPath && vehicleTypeFilter === 'any' && ' Boda, car, van and truck are priced differently, so the fare follows whichever vehicle accepts — pick a vehicle type above to fix the price.'}
         </p>
       </div>
@@ -3570,24 +3635,40 @@ function WaitingForAcceptance({
   timer,
   isAutoDispatch,
   candidates = [],
-  activeRiderId,
+  activeRiderIds = [],
+  askedCount = 0,
   onCancel,
 }: {
   rider: MatchedRider;
   timer: number;
   isAutoDispatch?: boolean;
-  // The real nearby-rider pool mbg_sweep_auto_dispatch_cascade is cycling
-  // through (ADD_AUTO_DISPATCH_CASCADE.sql) — matchedRiders from the search
-  // that led here, not a decorative placeholder list.
+  // The real nearby-rider pool mbg_sweep_auto_dispatch_cascade shares the
+  // request with (FIX_AUTO_DISPATCH_STAGGERED_OFFERS.sql) — matchedRiders from
+  // the search that led here, not a decorative placeholder list.
   candidates?: MatchedRider[];
-  // mbg_rides.rider_id as last seen by polling — whichever of `candidates`
-  // currently has the live offer, so the orbit can light up the real one.
-  activeRiderId?: string | null;
+  // The riders holding the request right now, as last seen by polling — several
+  // at once, since each keeps it for OFFER_SECONDS while more are added. Lights
+  // up their avatars in the orbit.
+  activeRiderIds?: string[];
+  // How many riders have been asked so far in all.
+  askedCount?: number;
   onCancel: () => void;
 }) {
   const orbit = isAutoDispatch ? candidates.slice(0, 6) : [];
-  const activeId = activeRiderId ?? rider.rider_id;
-  const activeCandidate = orbit.find(c => c.rider_id === activeId) || orbit[0] || null;
+  const holdingIds = activeRiderIds;
+  // Holders we know by name (the orbit shows the nearest few; the server may
+  // have added riders beyond them).
+  const holding = orbit.filter(c => holdingIds.includes(c.rider_id));
+  const asked = Math.max(askedCount, holdingIds.length);
+  const firstName = (c: MatchedRider) => c.full_name.split(' ')[0];
+  const initials = (c: MatchedRider) => c.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+  const holdersLabel = holding.length === 0
+    ? `${holdingIds.length} nearby rider${holdingIds.length === 1 ? '' : 's'}`
+    : holdingIds.length === 1
+      ? firstName(holding[0])
+      : holdingIds.length === 2 && holding.length === 2
+        ? `${firstName(holding[0])} and ${firstName(holding[1])}`
+        : `${firstName(holding[0])} and ${holdingIds.length - 1} more`;
 
   return (
     <div className="min-h-[500px] bg-gradient-to-br from-orange-50 to-yellow-50 rounded-xl shadow-xl p-6 sm:p-8 flex flex-col items-center justify-center overflow-hidden">
@@ -3608,7 +3689,7 @@ function WaitingForAcceptance({
           const radius = 98;
           const x = Math.cos(angle) * radius;
           const y = Math.sin(angle) * radius;
-          const isActive = c.rider_id === activeId;
+          const isActive = holdingIds.includes(c.rider_id);
           return (
             <div
               key={c.rider_id}
@@ -3654,47 +3735,60 @@ function WaitingForAcceptance({
       </h2>
       <p className="text-slate-600 mb-6 text-center max-w-md">
         {isAutoDispatch
-          ? activeCandidate
-            ? `We're currently asking ${activeCandidate.full_name.split(' ')[0]} nearby — this switches automatically if they don't respond.`
-            : "We're offering it to nearby riders one at a time — this switches automatically if one doesn't respond."
+          ? holdingIds.length > 1
+            ? `We've sent your request to ${holdingIds.length} riders nearby — the first to accept takes it. Another rider joins every ${AUTO_DISPATCH_STAGGER_SECONDS}s.`
+            : holding.length === 1
+              ? `We're asking ${firstName(holding[0])} nearby — another rider joins every ${AUTO_DISPATCH_STAGGER_SECONDS}s, and the first to accept takes your ride.`
+              : `We're sending it to nearby riders — another joins every ${AUTO_DISPATCH_STAGGER_SECONDS}s, and the first to accept takes your ride.`
           : 'Your ride request has been sent. The rider will respond shortly.'}
       </p>
 
-      {/* Timer — a live countdown for a specific rider, or the real current
-          candidate (with a queue count) once it's the server's own cascade. */}
+      {/* Timer — a live countdown for a specific rider, or the riders holding
+          the request right now once it's the server's own shared request. */}
       {isAutoDispatch ? (
         <div className="bg-white rounded-xl p-5 mb-8 shadow-lg w-full max-w-md">
-          {activeCandidate ? (
+          {holdingIds.length > 0 ? (
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-500 to-yellow-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-                {activeCandidate.full_name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()}
+              <div className="flex -space-x-2 flex-shrink-0">
+                {(holding.length > 0 ? holding : [rider]).slice(0, 3).map(c => (
+                  <div
+                    key={c.rider_id}
+                    className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-500 to-yellow-500 border-2 border-white flex items-center justify-center text-white font-bold text-sm"
+                  >
+                    {initials(c)}
+                  </div>
+                ))}
               </div>
               <div className="flex-1 min-w-0 text-left">
-                <p className="font-semibold text-slate-800 truncate">Asking {activeCandidate.full_name.split(' ')[0]}…</p>
-                <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
-                  <span className="flex items-center gap-1">
-                    <Star size={12} className="text-yellow-500 fill-yellow-500" />
-                    {activeCandidate.rating}
-                  </span>
-                  {activeCandidate.distance_to_pickup_km != null && (
+                <p className="font-semibold text-slate-800 leading-snug">Asking {holdersLabel}…</p>
+                {holding.length === 1 ? (
+                  <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
                     <span className="flex items-center gap-1">
-                      <Navigation size={12} />
-                      {activeCandidate.distance_to_pickup_km.toFixed(1)} km away
+                      <Star size={12} className="text-yellow-500 fill-yellow-500" />
+                      {holding[0].rating}
                     </span>
-                  )}
-                </div>
+                    {holding[0].distance_to_pickup_km != null && (
+                      <span className="flex items-center gap-1">
+                        <Navigation size={12} />
+                        {holding[0].distance_to_pickup_km.toFixed(1)} km away
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500 mt-0.5">{holdingIds.length} can accept right now</p>
+                )}
               </div>
               <div className="w-2.5 h-2.5 rounded-full bg-orange-500 animate-ping flex-shrink-0" />
             </div>
           ) : (
             <div className="flex items-center gap-3 justify-center text-slate-600">
               <div className="w-3 h-3 rounded-full bg-orange-500 animate-ping" />
-              <span className="font-medium">Searching for the next available rider…</span>
+              <span className="font-medium">Looking for the next available rider…</span>
             </div>
           )}
-          {orbit.length > 1 && (
+          {asked > 1 && (
             <p className="text-xs text-slate-400 text-center mt-3 pt-3 border-t border-slate-100">
-              {orbit.length} nearby riders in the queue
+              {asked} nearby riders asked so far
             </p>
           )}
         </div>
@@ -3720,22 +3814,21 @@ function WaitingForAcceptance({
         </div>
       )}
 
-      {/* Loading Bar — in auto mode it fills over one rider's window and
-          starts over each time the cascade moves to the next rider (keyed on
-          who is being asked); otherwise a real fill over the single rider's
-          countdown. */}
+      {/* Loading Bar — in auto mode it fills until the next rider is added and
+          starts over each time one is (keyed on how many have been asked);
+          otherwise a real fill over the single rider's countdown. */}
       <div className="w-full max-w-md mb-8">
         <div className="h-2 bg-slate-200 rounded-full overflow-hidden">
           {isAutoDispatch ? (
             <div
-              key={activeId}
+              key={asked}
               className="h-full bg-gradient-to-r from-orange-500 to-yellow-500 rounded-full animate-offer-fill"
-              style={{ animationDuration: `${AUTO_DISPATCH_OFFER_SECONDS}s` }}
+              style={{ animationDuration: `${AUTO_DISPATCH_STAGGER_SECONDS}s` }}
             />
           ) : (
             <div
               className="h-full bg-gradient-to-r from-orange-500 to-yellow-500 transition-all duration-1000"
-              style={{ width: `${((DIRECT_OFFER_SECONDS - timer) / DIRECT_OFFER_SECONDS) * 100}%` }}
+              style={{ width: `${((OFFER_SECONDS - timer) / OFFER_SECONDS) * 100}%` }}
             />
           )}
         </div>

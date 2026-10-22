@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt, Map, Trash2, ChevronDown, History, Bell, Music, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
@@ -12,7 +12,7 @@ import RingtonePicker from './RingtonePicker';
 import CancelReasonDialog from './CancelReasonDialog';
 import { cancelRide, hideMyRides, RIDER_CANCEL_REASONS } from '../services/orderActions';
 import { usePlatformChargePct, platformCharge, customerTotal } from '../services/platformCharge';
-import { AUTO_DISPATCH_OFFER_SECONDS, DIRECT_OFFER_SECONDS } from '../services/offerWindows';
+import { OFFER_SECONDS } from '../services/offerWindows';
 
 function toLocation(name: string, lat: number | null, lng: number | null): Location | null {
   if (lat == null || lng == null) return null;
@@ -50,10 +50,13 @@ interface RideRow {
   parcel_weight_kg?: number | null;
   recipient_name?: string | null;
   recipient_phone?: string | null;
-  // "Just Send" rides are offered to one rider at a time, a few seconds each
-  // (offer_sent_at is when this rider was handed it).
+  // A "Just Send" request is shared with several riders at once; the first to
+  // accept takes it. Those reach the rider through mbg_my_ride_offers, which adds
+  // the rider profile it was offered to, the seconds left (measured on the
+  // server) and the fare/take-home for that rider's own vehicle.
   dispatch_mode?: 'direct' | 'auto' | null;
-  offer_sent_at?: string | null;
+  offer_rider_id?: string | null;
+  offer_seconds_left?: number | null;
   created_at: string;
 }
 
@@ -66,23 +69,27 @@ interface CustomerContact {
   phone: string | null;
 }
 
-// How long this rider has left to answer, so a short "Just Send" offer never
-// vanishes without warning. Timed from when this device first saw the offer
-// rather than from the server's timestamp, which a phone with a wrong clock
-// would misread; a new offer (another ride, or the same ride handed over again)
-// restarts it. Informational only — the server decides when the offer moves on.
+// How long this rider has left to answer, so an offer never vanishes without
+// warning. A shared "Just Send" offer carries the seconds left as the server
+// measured them, so a phone with a wrong clock still shows the right countdown;
+// a rider picked by hand has the full OFFER_SECONDS. Counted down locally from
+// the moment this offer first appears, and restarted for a new offer.
+// Informational only — the server decides when the offer ends.
 function OfferCountdown({ ride }: { ride: RideRow }) {
-  const windowSec = ride.dispatch_mode === 'auto' ? AUTO_DISPATCH_OFFER_SECONDS : DIRECT_OFFER_SECONDS;
-  const offerKey = `${ride.id}:${ride.offer_sent_at ?? ''}`;
-  const [left, setLeft] = useState(windowSec);
+  const offerKey = `${ride.id}:${ride.offer_rider_id ?? ''}`;
+  const startSec = Math.min(OFFER_SECONDS, Math.max(0, ride.offer_seconds_left ?? OFFER_SECONDS));
+  const [left, setLeft] = useState(Math.ceil(startSec));
 
   useEffect(() => {
-    const endsAt = Date.now() + windowSec * 1000;
+    const endsAt = Date.now() + startSec * 1000;
     const tick = () => setLeft(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
     tick();
     const id = setInterval(tick, 250);
     return () => clearInterval(id);
-  }, [offerKey, windowSec]);
+    // startSec is read once per offer (offerKey): the 4s refresh hands back a
+    // new seconds-left every time, which must not restart the countdown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offerKey]);
 
   return (
     <div className="mt-3" role="timer" aria-label={`${left} seconds left to respond`}>
@@ -90,10 +97,10 @@ function OfferCountdown({ ride }: { ride: RideRow }) {
         <div
           key={offerKey}
           className="h-full rounded-full bg-gradient-to-r from-orange-500 to-amber-400 animate-offer-drain"
-          style={{ animationDuration: `${windowSec}s` }}
+          style={{ animationDuration: `${startSec}s`, '--offer-from': startSec / OFFER_SECONDS } as CSSProperties}
         />
       </div>
-      <p className={`mt-1 text-right text-[11px] font-semibold ${left <= 3 ? 'text-red-600' : 'text-slate-500'}`}>
+      <p className={`mt-1 text-right text-[11px] font-semibold ${left <= 5 ? 'text-red-600' : 'text-slate-500'}`}>
         {left > 0 ? `${left}s left to respond` : 'Respond now'}
       </p>
     </div>
@@ -155,11 +162,20 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
     // one still sits unanswered, so this rider can genuinely end up with
     // several 'pending' rows at once. Fetch the list and take the most
     // recent instead of assuming there's ever only one.
-    const [{ data: pendingRows }, { data: activeRows }] = await Promise.all([
+    const [{ data: pendingRows }, { data: activeRows }, { data: offerRows, error: offerError }] = await Promise.all([
       supabase.from('mbg_rides').select('*').eq('rider_id', rider.id).eq('status', 'pending').order('created_at', { ascending: false }),
       supabase.from('mbg_rides').select('*').eq('rider_id', rider.id).in('status', ['accepted', 'in_progress']).order('created_at', { ascending: false }).limit(1),
+      supabase.rpc('mbg_my_ride_offers'),
     ]);
-    const pendingRow = pendingRows?.[0] || null;
+    // A shared "Just Send" request is open to several riders at once, so it
+    // reaches this rider as an offer (not through the ride's single rider_id,
+    // which only names the first rider asked). Keep the ones for THIS vehicle.
+    // If the offers function isn't there yet, fall back to the old rider_id path
+    // for those rides so nothing goes missing mid-rollout.
+    const offers = ((offerRows as RideRow[] | null) ?? []).filter(o => o.offer_rider_id === rider.id);
+    const handedToMe = (pendingRows ?? []).filter(r => offerError || r.dispatch_mode !== 'auto');
+    const pendingRow: RideRow | null = [...handedToMe, ...offers]
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0] || null;
     const activeRow = activeRows?.[0] || null;
 
     if (pendingRow && pendingRow.id !== lastChimedRideId.current) {
@@ -235,6 +251,13 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
         { event: '*', schema: 'public', table: 'mbg_rides', filter: `rider_id=eq.${riderRowId}` },
         () => load()
       )
+      // A shared request being offered to this rider, or ending for them
+      // (taken by someone else, cancelled, or run out).
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'mbg_ride_offers', filter: `rider_id=eq.${riderRowId}` },
+        () => load()
+      )
       .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [riderRowId, load]);
@@ -244,7 +267,12 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
     stopJobRingLoop();
     setActing(true);
     try {
-      const { data, error } = await supabase.rpc('mbg_respond_to_ride', { p_ride_id: pending.id, p_accept: accept });
+      // A shared request is claimed through its own accept (first rider to get
+      // there wins; it then runs the normal mbg_respond_to_ride); declining only
+      // drops this rider out, the request carries on with the others.
+      const { data, error } = pending.offer_rider_id
+        ? await supabase.rpc(accept ? 'mbg_accept_ride_offer' : 'mbg_decline_ride_offer', { p_ride_id: pending.id })
+        : await supabase.rpc('mbg_respond_to_ride', { p_ride_id: pending.id, p_accept: accept });
       if (error) throw error;
       if (!data?.success) throw new Error(data?.error || 'Could not respond');
       toast[accept ? 'success' : 'info'](accept ? 'Request accepted!' : 'Request declined');
@@ -253,10 +281,10 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
       }
       await load();
     } catch (e: any) {
-      // With a few seconds per offer, tapping a moment after it moved on to
-      // the next rider is routine, not a failure worth a red error.
-      if (/not offered to you|no longer pending/i.test(e?.message || '')) {
-        toast.info('Too slow — that request has moved on to another rider');
+      // A request shared with several riders is taken by whoever is first, so
+      // being a moment too late is routine, not a failure worth a red error.
+      if (/already taken|ran out|not offered to you|no longer pending|no longer available/i.test(e?.message || '')) {
+        toast.info('Too slow — that request was taken by another rider or has timed out');
         await load();
       } else {
         toast.error(e.message || 'Failed to respond');

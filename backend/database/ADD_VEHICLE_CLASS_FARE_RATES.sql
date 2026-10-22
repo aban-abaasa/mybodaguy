@@ -1237,7 +1237,7 @@ $$;
 --    heavy load is never offered to a vehicle that cannot carry it. Its cron schedule
 --    is unchanged.
 --
---    SUPERSEDED by FIX_AUTO_DISPATCH_7S_CASCADE.sql. This version is
+--    SUPERSEDED by FIX_AUTO_DISPATCH_STAGGERED_OFFERS.sql. This version is
 --    SECURITY DEFINER, so its COMMIT always fails and the cascade never runs.
 --    Re-running this section reinstates that bug — run the FIX file after it.
 -- ----------------------------------------------------------------------------
