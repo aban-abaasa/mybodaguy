@@ -11,6 +11,7 @@ import BookingConfirmPage, { BOOK_RETURN_CODE_KEY } from "./mybodaguy/components
 import { isBookingCode } from "./mybodaguy/services/eraBooking";
 import TicketVerifyPage from "./mybodaguy/components/TicketVerifyPage";
 import RiderCardVerifyPage from "./mybodaguy/components/RiderCardVerifyPage";
+import { RIDER_CARD_RETURN_KEY } from "./mybodaguy/components/RiderCardGatePanel";
 import ReceiptApprovePage, { RECEIPT_APPROVE_RETURN_KEY } from "./mybodaguy/components/ReceiptApprovePage";
 import SupportConsole from "./mybodaguy/pages/SupportConsole";
 import { captureReferralFromUrl } from "./mybodaguy/services/referralService";
@@ -110,6 +111,15 @@ if (!receiptApproveMatch && window.location.hash.includes('access_token')) {
   if (pendingReceipt) {
     sessionStorage.removeItem(RECEIPT_APPROVE_RETURN_KEY);
     window.location.replace(`/receipt-approve/${pendingReceipt}${window.location.hash}`);
+  }
+}
+
+// Same recovery for gate staff signing in on a rider's card page: return to the card they scanned.
+if (!riderCardMatch && window.location.hash.includes('access_token')) {
+  const pendingCard = sessionStorage.getItem(RIDER_CARD_RETURN_KEY);
+  if (pendingCard) {
+    sessionStorage.removeItem(RIDER_CARD_RETURN_KEY);
+    window.location.replace(`/rider-card/${pendingCard}${window.location.hash}`);
   }
 }
 

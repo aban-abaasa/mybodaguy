@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, Ban, CheckCircle, Clock, FileCheck, MapPin, Phone, Shield, ShieldCheck, Star, Wallet, XCircle } from 'lucide-react';
 import { FeesChip, InsuranceChip, PermitChip, RiderCardVisual, ToneChip, type CardVisualData } from './RiderIdCard';
+import RiderCardGatePanel from './RiderCardGatePanel';
+import RiderGateRecord from './RiderGateRecord';
 import { POLICY_STATE_META, coverTypeLabel } from '../services/insuranceService';
 import {
   formatUgx,
@@ -47,10 +49,13 @@ function Contact({ label, name, phone }: { label: string; name?: string | null; 
 // (mbg_verify_rider_card, GRANT'd to anon), so a suspended rider, an expired
 // driving permit or an unpaid fee shows up the moment it happens. Only
 // public-safe details come back: never the rider's phone, email, full permit
-// number or wallet.
+// number or wallet. Gate staff of a restricted zone who sign in also get a
+// panel to check the vehicle in or out (RiderCardGatePanel).
 export default function RiderCardVerifyPage({ code }: { code: string }) {
   const [proof, setProof] = useState<RiderCardProof | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // bumped when the gate on this page records something, so the public record below refreshes at once
+  const [recordKey, setRecordKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +140,13 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
               <p className="text-sm text-slate-600">{tone.sub}</p>
               {proof.card_number && <p className="mt-1 font-mono text-xs tracking-wider text-slate-400">{proof.card_number}</p>}
             </div>
+
+            {/* A rider who goes in by force keeps it on his record, publicly: shown to everyone, first, and hidden when there is nothing on it. */}
+            {state && <RiderGateRecord code={code} reloadKey={recordKey} />}
+
+            {/* Staff of a restricted zone (an estate, a campus, a hospital, a market…) check this vehicle in or out right here. Appears only
+                for a signed-in person whose role runs a gate; for everyone else the page is exactly the public check it always was. */}
+            {state && <RiderCardGatePanel code={code} onRecorded={() => setRecordKey((n) => n + 1)} />}
 
             {showDetails && (
               <>
