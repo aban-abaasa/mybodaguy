@@ -7,6 +7,7 @@
  * component's own in-memory state while actively booking). This re-derives
  * the same view from a ride row already in the database.
  */
+import RideZoneChargesNote from './RideZoneCharges';
 import { useEffect, useState } from 'react';
 import { X, MapPin, Navigation as NavigationIcon, Receipt } from 'lucide-react';
 import { toast } from 'sonner';
@@ -160,6 +161,9 @@ export default function RideTrackingModal({
               <span className="text-lg font-bold text-slate-800">UGX {Number(ride.fare || 0).toLocaleString()}</span>
             </div>
           </div>
+
+          {/* An entry fee at a restricted place on this trip, added to the ride and paid by the customer. */}
+          <RideZoneChargesNote rideId={ride.id} />
 
           {isLive && contact ? (
             <RideCommsBar

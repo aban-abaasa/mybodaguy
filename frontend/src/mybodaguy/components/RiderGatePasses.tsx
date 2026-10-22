@@ -11,6 +11,7 @@ import {
   ZONE_KIND_LABEL,
   gateNotInstalled,
   zoneAccessService,
+  type GateCustomerPays,
   type GateInside,
   type GateOverview,
   type GatePass,
@@ -113,7 +114,13 @@ function RequestCard({
       if (!check.success) { toast.error(check.error || 'Incorrect PIN'); setPin(''); return; }
       const result = await zoneAccessService.payFee(request.id);
       if (result.success) {
-        toast.success(entry ? `Paid. You can enter ${request.zone_name}.` : `Paid. You can leave ${request.zone_name}.`, {
+        // a fee fronted for a customer's ride: say what happens to the money
+        const note = result.passedOn
+          ? ' Your customer has paid it back to your wallet.'
+          : result.recoverFromCustomer
+            ? ` Collect ${formatUgx(request.balance_ugx)} from your customer.`
+            : '';
+        toast.success((entry ? `Paid. You can enter ${request.zone_name}.` : `Paid. You can leave ${request.zone_name}.`) + note, {
           action: onGoToWallet ? { label: 'View in wallet', onClick: onGoToWallet } : undefined,
         });
         setStep('idle'); setPin('');
@@ -153,6 +160,12 @@ function RequestCard({
           </p>
           {!entry && request.overstay_ugx > 0 && (
             <p className="mt-0.5 text-xs text-slate-500">Includes {formatUgx(request.overstay_ugx)} for staying past the time limit.</p>
+          )}
+          {entry && request.recover_from_customer && (
+            <p className="mt-1 rounded-lg bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800 ring-1 ring-inset ring-emerald-100">
+              You have a customer on this ride, so this is not yours to carry: pay the gate now and {formatUgx(request.balance_ugx)} is
+              taken from your customer's wallet and paid back to you straight after. On a cash ride, collect it from them.
+            </p>
           )}
         </div>
         <div className="text-right">
@@ -219,8 +232,26 @@ function RequestCard({
   );
 }
 
+// A fee the customer of the rider's ride pays: the gate takes it from them, so there is nothing for the rider to do.
+function CustomerPaysCard({ visit }: { visit: GateCustomerPays }) {
+  return (
+    <div className="classic-card flex items-start gap-3 !border-emerald-200 p-4">
+      <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-emerald-50 ring-1 ring-inset ring-emerald-100">
+        <ShieldCheck size={17} className="text-emerald-600" />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="font-classic-display text-base font-semibold leading-tight text-slate-800">Your customer pays the entry fee at {visit.zone_name}</p>
+        <p className="mt-0.5 text-xs text-slate-500">
+          {visit.plate_number} · {formatUgx(visit.fee_due_ugx)}. The gate takes it from your customer, not from you. Nothing to do.
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function InsideCard({ visit }: { visit: GateInside }) {
   const free = visit.access_basis === 'member';
+  const customerPaid = visit.payer === 'customer' || visit.access_basis === 'ride_pass';
   const limit = visit.max_stay_minutes;
   const over = limit != null && visit.minutes_inside > limit;
   return (
@@ -236,7 +267,11 @@ function InsideCard({ visit }: { visit: GateInside }) {
         </p>
         {free
           ? <p className="mt-0.5 text-xs text-emerald-700">Approved vehicle: you pay nothing here.</p>
-          : <p className="mt-0.5 text-xs text-slate-500">Paid {formatUgx(visit.fee_paid_ugx)}. The gate scans your card on the way out and checks nothing is left to pay.</p>}
+          : customerPaid
+            ? <p className="mt-0.5 text-xs text-emerald-700">Your customer paid the entry fee. The gate scans your card on the way out and checks nothing else is owed.</p>
+            : visit.passed_on_ugx > 0
+              ? <p className="mt-0.5 text-xs text-emerald-700">You paid {formatUgx(visit.fee_paid_ugx)} at the gate and your customer paid it back to your wallet.</p>
+              : <p className="mt-0.5 text-xs text-slate-500">Paid {formatUgx(visit.fee_paid_ugx)}. The gate scans your card on the way out and checks nothing is left to pay.</p>}
         {over && !free && visit.overstay_ugx === 0 && <p className="mt-0.5 text-xs text-amber-700">You are past the time limit; an overstay fee may be due when you leave.</p>}
       </div>
     </div>
@@ -296,7 +331,7 @@ export default function RiderGatePasses({ variant = 'page', userId, onPaid, onOp
 
   useEffect(() => { if (variant === 'page') loadBalance(); }, [variant, loadBalance]);
 
-  const { requests, inside, passes, recent } = overview;
+  const { requests, customer_pays: customerPays, inside, passes, recent } = overview;
 
   if (variant === 'tile') {
     // Only worth the space when a gate is waiting for you, or you are inside somewhere.
@@ -343,6 +378,8 @@ export default function RiderGatePasses({ variant = 'page', userId, onPaid, onOp
       {requests.map((request) => (
         <RequestCard key={request.id} request={request} userId={userId} balance={balance} onDone={done} onGoToWallet={onGoToWallet} />
       ))}
+
+      {customerPays.map((visit) => <CustomerPaysCard key={visit.id} visit={visit} />)}
 
       {inside.map((visit) => <InsideCard key={visit.id} visit={visit} />)}
 

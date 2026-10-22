@@ -1,3 +1,4 @@
+import RideZoneChargesNote from './RideZoneCharges';
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
 import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt, Map, Trash2, ChevronDown, History, Bell, Music, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -655,6 +656,9 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
                 ride={active}
                 live={riderRowId ? { riderId: riderRowId, phase: active.status === 'accepted' ? 'to_pickup' : 'to_dropoff' } : undefined}
               />
+
+              {/* Entry fee at a restricted place on this trip: the customer pays it, or is to pay it back. */}
+              <div className="mt-3 empty:hidden"><RideZoneChargesNote rideId={active.id} /></div>
 
               {activeCustomer && (
                 <RideCommsBar
