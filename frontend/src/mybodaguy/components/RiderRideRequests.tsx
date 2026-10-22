@@ -3,6 +3,7 @@ import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Um
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import RideCommsBar from './RideCommsBar';
+import CallController from './CallController';
 import DeliveryReceiptCard from './DeliveryReceiptCard';
 import RouteMap from './RouteMap';
 import LiveTrackingMap from './LiveTrackingMap';
@@ -59,6 +60,8 @@ interface RideRow {
   offer_seconds_left?: number | null;
   created_at: string;
 }
+
+const noop = () => {};
 
 const isPackageJob = (r: RideRow) => !!r.is_parcel || r.service_type === 'delivery';
 const requestLabel = (r: RideRow) => (r.is_parcel ? 'Parcel' : r.service_type === 'delivery' ? 'Delivery' : 'Ride');
@@ -534,6 +537,26 @@ export default function RiderRideRequests({ riderId, vehicleType, collapsed = fa
             </div>
           </div>
         </div>
+      )}
+
+      {/* Incoming calls must reach the rider on any dashboard tab. The call
+          listener normally lives in the active-ride card's RideCommsBar, but that
+          card isn't rendered while `collapsed` — and the dashboard opens on the
+          Overview tab, where a rider typically accepts a request from the popup
+          above. Without this, the customer's call finds nobody listening. Only one
+          controller is ever mounted at a time: this one while collapsed, the card's
+          own once the rider opens the Requests tab. */}
+      {collapsed && active && activeCustomer && (
+        <CallController
+          rideId={active.id}
+          selfUserId={riderId}
+          selfName={selfName}
+          peerUserId={activeCustomer.userId}
+          peerName={activeCustomer.name}
+          peerPhone={activeCustomer.phone}
+          outgoingRequest={null}
+          onOutgoingConsumed={noop}
+        />
       )}
 
       {!collapsed && (
