@@ -24,6 +24,8 @@ import { usePlatformChargePct, customerTotal } from '../services/platformCharge'
 import { AUTO_DISPATCH_STAGGER_SECONDS, OFFER_SECONDS } from '../services/offerWindows';
 import { productService, type Product } from '../services/productService';
 import type { ImportStore } from '../services/journeyService';
+import ZoneChargeNotice from './ZoneChargeNotice';
+import { zoneAccessService } from '../services/zoneAccessService';
 import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
@@ -1716,6 +1718,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
       setRideId(data.ride_id);
 
+      // Records that the customer was shown any entry fee on this trip (see ZoneChargeNotice): the gate then charges the
+      // customer for it instead of leaving the rider to face it alone. A failure here never affects the booking.
+      zoneAccessService.ackRideCharges(data.ride_id, vehicleTypeFilter === 'any' ? null : vehicleTypeFilter);
+
       // Flips this ride into the server-owned cascade (mbg_sweep_auto_dispatch_cascade,
       // swept every second) instead of the plain single-rider offer just created above.
       if (opts?.auto) {
@@ -3182,6 +3188,17 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           </p>
         )}
 
+        {/* Some places charge vehicles to enter. Say so before the customer books: it is added to their trip, they pay it,
+            not their rider. (Nothing shows unless the trip really starts or ends in such a place.) */}
+        {routeReady && !needsCrossBorderPath && (
+          <ZoneChargeNotice
+            pickup={selectedPickup?.coordinates ?? null}
+            dropoff={selectedDropoff?.coordinates ?? null}
+            vehicleType={vehicleTypeFilter}
+            paymentMethod={paymentMethod}
+          />
+        )}
+
         <button
           onClick={handleSearchRiders}
           disabled={searching || autoDispatching || !routeReady}
@@ -3315,6 +3332,16 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
             </div>
 
             <VipDemandInsight riders={matchedRiders} />
+
+            <div className="mb-3 empty:hidden">
+              <ZoneChargeNotice
+                compact
+                pickup={selectedPickup?.coordinates ?? null}
+                dropoff={selectedDropoff?.coordinates ?? null}
+                vehicleType={vehicleTypeFilter}
+                paymentMethod={paymentMethod}
+              />
+            </div>
 
             {displayedRiders.length === 0 ? (
               <div className="text-center py-8">

@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Bike, Settings, Map as MapIcon, ShoppingBag, User, Package, Bell, Car, Truck, Gift,
-  Home, LayoutGrid, X, Star, ArrowRight, IdCard, Vote, Shield, type LucideIcon,
+  Home, LayoutGrid, X, Star, ArrowRight, IdCard, Vote, Shield, ScanLine, type LucideIcon,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
@@ -11,6 +11,7 @@ import ProfileModal from '../components/ProfileModal';
 import MobileBottomTabs from '../components/common/MobileBottomTabs';
 import RiderICANEarnings from '../components/RiderICANEarnings';
 import RiderMyCard from '../components/RiderMyCard';
+import RiderGatePasses from '../components/RiderGatePasses';
 import IcanCoinCard from '../components/IcanCoinCard';
 import RewardsPointsCard from '../components/RewardsPointsCard';
 import RiderEarningsCard, { buildWeekEarnings, type DayEarning } from '../components/RiderEarningsCard';
@@ -35,7 +36,7 @@ interface RiderDashboardProps {
   onGoToWallet?: () => void;
 }
 
-type TabType = 'overview' | 'requests' | 'card' | 'insurance' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards' | 'vote';
+type TabType = 'overview' | 'requests' | 'card' | 'gates' | 'insurance' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards' | 'vote';
 
 // emoji drives the desktop tab strip; icon drives the phone section bar and
 // menu sheet. 'requests' and 'vote' are deliberately not in NAV_TABS — they
@@ -45,6 +46,7 @@ const TAB_META: Record<TabType, { label: string; emoji: string; icon: LucideIcon
   overview:     { label: 'Overview',   emoji: '🏠', icon: Home },
   requests:     { label: 'Requests',   emoji: '🔔', icon: Bell },
   card:         { label: 'My Card',    emoji: '💳', icon: IdCard },
+  gates:        { label: 'Gate Passes', emoji: '🚧', icon: ScanLine },
   insurance:    { label: 'Insurance', emoji: '🛡️', icon: Shield },
   mode:         { label: 'Work Mode',  emoji: '⚙️', icon: Settings },
   locations:    { label: 'Areas',      emoji: '📍', icon: MapIcon },
@@ -53,7 +55,7 @@ const TAB_META: Record<TabType, { label: string; emoji: string; icon: LucideIcon
   rewards:      { label: 'Rewards',    emoji: '🎁', icon: Gift },
   vote:         { label: 'Vote',       emoji: '🗳️', icon: Vote },
 };
-const NAV_TABS: TabType[] = ['overview', 'card', 'insurance', 'mode', 'locations', 'partnerships', 'deliveries', 'rewards'];
+const NAV_TABS: TabType[] = ['overview', 'card', 'gates', 'insurance', 'mode', 'locations', 'partnerships', 'deliveries', 'rewards'];
 
 // Phone bottom tab bar — the four things a rider reaches for mid-shift. The
 // rest stay in the header Menu sheet.
@@ -766,6 +768,9 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                 there is something to do (a card to pay for or show, or one to request). */}
             <RiderMyCard variant="tile" userId={user?.id} onOpen={() => setActiveTab('card')} />
 
+            {/* Restricted-zone gates — only shows while a gate is waiting for you to approve a fee, or you are inside one. */}
+            <RiderGatePasses variant="tile" userId={user?.id} onOpen={() => setActiveTab('gates')} />
+
             {/* Earnings — today as the headline, the week as the shape of it */}
             <RiderEarningsCard week={weekForCard} loading={weekForCard === null} />
 
@@ -901,6 +906,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
 
         {activeTab === 'card' && (
           <RiderMyCard variant="page" userId={user?.id} onPaid={() => setWalletRefresh(n => n + 1)} onGoToWallet={onGoToWallet} onOpenInsurance={() => setActiveTab('insurance')} />
+        )}
+
+        {activeTab === 'gates' && (
+          <RiderGatePasses variant="page" userId={user?.id} onPaid={() => setWalletRefresh(n => n + 1)} onGoToWallet={onGoToWallet} />
         )}
 
         {activeTab === 'insurance' && (
