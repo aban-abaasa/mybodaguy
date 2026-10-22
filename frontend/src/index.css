@@ -189,16 +189,17 @@ textarea:-webkit-autofill:active {
   animation: fadeIn 0.3s ease-in-out;
 }
 
-/* One offer's time window, drawn as a bar. The duration is set inline from
-   services/offerWindows.ts so the bar always matches the server's timing.
-   offer-fill: the customer's "Matching you with a rider" bar, filling over one
-   rider's turn. offer-drain: the rider's incoming-request bar, emptying. */
+/* A time window drawn as a bar; the duration is set inline from
+   services/offerWindows.ts so the bar matches the server's timing.
+   offer-fill: the customer's "Matching you with a rider" bar, filling until the
+   next rider is added. offer-drain: the rider's incoming-request bar, emptying
+   from --offer-from (the share of the window still left when it appeared). */
 @keyframes offer-fill {
   from { transform: scaleX(0); }
   to { transform: scaleX(1); }
 }
 @keyframes offer-drain {
-  from { transform: scaleX(1); }
+  from { transform: scaleX(var(--offer-from, 1)); }
   to { transform: scaleX(0); }
 }
 .animate-offer-fill,
