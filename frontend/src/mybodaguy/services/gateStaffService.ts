@@ -81,6 +81,49 @@ export interface GateScanResult {
   warnings?: string[];
 }
 
+// What the public rider-card page shows about a rider who went in by force or left without paying. Never who recorded it, the
+// private note or the amount.
+export type IncidentKind = 'forced_entry' | 'left_without_clearing';
+
+export interface PublicIncident {
+  kind: IncidentKind;
+  zone_name: string;
+  organisation: string | null;
+  status: 'open' | 'settled';
+  // YYYY-MM-DD, Kampala time
+  date: string;
+}
+
+export interface GateRecord {
+  found: boolean;
+  forced_entries: number;
+  left_without_clearing: number;
+  open: number;
+  incidents: PublicIncident[];
+}
+
+// The same line as the business that recorded it sees it: with the private note, who recorded it and what they may do with it.
+export interface StaffIncident {
+  id: string;
+  kind: IncidentKind;
+  status: 'open' | 'settled' | 'withdrawn';
+  zone_name: string;
+  organisation: string | null;
+  owed_ugx: number;
+  note: string | null;
+  reported_at: string;
+  reported_by: string | null;
+  resolution_note: string | null;
+  can_settle: boolean;
+  can_withdraw: boolean;
+}
+
+export interface ReportResult {
+  incident: StaffIncident;
+  already_recorded?: boolean;
+  recorded?: number;
+}
+
 export interface GateCall<T> {
   data: T | null;
   error: string | null;
@@ -124,4 +167,23 @@ export const gateStaffService = {
   collectCash: (visitId: string) => call<{ visit: GateVisitView }>('mbg_zone_gate_collect_cash', { p_visit_id: visitId }),
 
   withdraw: (visitId: string) => call<Record<string, never>>('mbg_zone_gate_cancel', { p_visit_id: visitId }),
+
+  // ── a rider who goes in by force keeps it on his record, publicly ──
+  // (ICAN/supabase/migrations/20261112100000_zone_forced_entry_record.sql, ZONE_FORCED_ENTRY_RECORD_PASTE_INTO_SUPABASE.sql)
+
+  // Public: anyone with the card's code, signed in or not.
+  getRecord: (code: string) => call<GateRecord>('mbg_rider_gate_record', { p_code: code }),
+
+  // The lines on this card that the signed-in person's business may act on (empty for anyone else).
+  async staffIncidents(code: string): Promise<GateCall<StaffIncident[]>> {
+    const res = await call<{ incidents: StaffIncident[] }>('mbg_zone_rider_incidents', { p_code: code });
+    return { data: res.data ? res.data.incidents ?? [] : null, error: res.error, notInstalled: res.notInstalled };
+  },
+
+  report: (zoneId: string, code: string, kind: IncidentKind, note = '') =>
+    call<ReportResult>('mbg_zone_report_incident', { p_zone_id: zoneId, p_code: code, p_kind: kind, p_note: note.trim() || null }),
+
+  // 'settled': what was owed was collected (stays on the record, marked settled). 'withdrawn': recorded in error (a manager; leaves the record).
+  resolve: (incidentId: string, action: 'settled' | 'withdrawn', note = '') =>
+    call<{ incident: StaffIncident }>('mbg_zone_incident_resolve', { p_incident_id: incidentId, p_action: action, p_note: note.trim() || null }),
 };

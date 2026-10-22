@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle, Ban, CheckCircle, Clock, FileCheck, MapPin, Phone, Shield, ShieldCheck, Star, Wallet, XCircle } from 'lucide-react';
 import { FeesChip, InsuranceChip, PermitChip, RiderCardVisual, ToneChip, type CardVisualData } from './RiderIdCard';
 import RiderCardGatePanel from './RiderCardGatePanel';
+import RiderGateRecord from './RiderGateRecord';
 import { POLICY_STATE_META, coverTypeLabel } from '../services/insuranceService';
 import {
   formatUgx,
@@ -53,6 +54,8 @@ function Contact({ label, name, phone }: { label: string; name?: string | null; 
 export default function RiderCardVerifyPage({ code }: { code: string }) {
   const [proof, setProof] = useState<RiderCardProof | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // bumped when the gate on this page records something, so the public record below refreshes at once
+  const [recordKey, setRecordKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -138,9 +141,12 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
               {proof.card_number && <p className="mt-1 font-mono text-xs tracking-wider text-slate-400">{proof.card_number}</p>}
             </div>
 
+            {/* A rider who goes in by force keeps it on his record, publicly: shown to everyone, first, and hidden when there is nothing on it. */}
+            {state && <RiderGateRecord code={code} reloadKey={recordKey} />}
+
             {/* Staff of a restricted zone (an estate, a campus, a hospital, a market…) check this vehicle in or out right here. Appears only
                 for a signed-in person whose role runs a gate; for everyone else the page is exactly the public check it always was. */}
-            {state && <RiderCardGatePanel code={code} />}
+            {state && <RiderCardGatePanel code={code} onRecorded={() => setRecordKey((n) => n + 1)} />}
 
             {showDetails && (
               <>

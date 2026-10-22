@@ -8,6 +8,7 @@ import {
   type GateScanResult,
   type GateVisitView,
   type GateZone,
+  type IncidentKind,
 } from '../services/gateStaffService';
 
 // sessionStorage key used to find our way back to this exact /rider-card/<code> page after bouncing out to Google (or an
@@ -72,7 +73,7 @@ const RESULT_TITLE: Record<string, { tone: Tone; title: string }> = {
 // CMMS role may run the gate of a restricted zone (the database decides, not this file). They scan the card with an ordinary phone
 // camera, land here, and see what will happen — approved: free; not approved: the fee, and who pays it (the rider, or the customer on
 // the ride); inside: check out, which only clears when everything is paid — then tap once.
-export default function RiderCardGatePanel({ code }: { code: string }) {
+export default function RiderCardGatePanel({ code, onRecorded }: { code: string; onRecorded?: () => void }) {
   const [userId, setUserId] = useState<string | null | undefined>(undefined); // undefined = still checking
   const [email, setEmail] = useState('');
   const [zones, setZones] = useState<GateZone[] | null>(null);
@@ -89,6 +90,10 @@ export default function RiderCardGatePanel({ code }: { code: string }) {
   const [actionError, setActionError] = useState<string | null>(null);
   // the fee being waited on: asked for at the way in, or owed at the way out
   const [follow, setFollow] = useState<GateVisitView | null>(null);
+  // reporting a vehicle that went in by force, or left without paying (goes on its public record)
+  const [reporting, setReporting] = useState(false);
+  const [reportNote, setReportNote] = useState('');
+  const [reported, setReported] = useState<string | null>(null);
   const [signInEmail, setSignInEmail] = useState('');
   const [signInNotice, setSignInNotice] = useState<string | null>(null);
   const [signInError, setSignInError] = useState<string | null>(null);
@@ -229,6 +234,20 @@ export default function RiderCardGatePanel({ code }: { code: string }) {
     setRefresh((n) => n + 1);
   };
 
+  const report = async (kind: IncidentKind) => {
+    if (!zone) return;
+    setBusy(true); setActionError(null);
+    const res = await gateStaffService.report(zone.id, code, kind, reportNote);
+    setBusy(false);
+    if (!res.data) { setActionError(res.error || 'Could not record it'); return; }
+    setReporting(false); setReportNote(''); setFollow(null); setResult(null);
+    setReported(res.data.already_recorded
+      ? 'Already recorded a moment ago, so it was not added twice.'
+      : 'It is now on this rider\'s public record for everyone who checks the card, and the rider has been told.');
+    setRefresh((n) => n + 1);
+    onRecorded?.();
+  };
+
   const signOut = async () => { await supabase.auth.signOut(); setResult(null); setFollow(null); };
 
   // ── still checking who is looking ──
@@ -298,6 +317,12 @@ export default function RiderCardGatePanel({ code }: { code: string }) {
       : peek.action === 'out'
         ? { dir: 'out', icon: <LogOut size={18} />, cls: 'bg-sky-700', label: 'Check out' }
         : null;
+
+  // what can be reported against this card here: it went in without paying / checking in, or it was inside, owing money, and left
+  const reportKind: IncidentKind | null = !peek?.found ? null
+    : peek.outcome === 'inside' ? ((peek.visit?.balance_ugx ?? 0) > 0 ? 'left_without_clearing' : null)
+    : peek.outcome === 'pay' || peek.outcome === 'awaiting' || peek.outcome === 'refused' ? 'forced_entry'
+    : null;
 
   const resultTitle = result ? RESULT_TITLE[result.verdict] ?? { tone: 'info' as Tone, title: result.verdict.toUpperCase() } : null;
 
@@ -423,6 +448,48 @@ export default function RiderCardGatePanel({ code }: { code: string }) {
         <button type="button" onClick={() => { setLocked(false); setResult(null); }} className="text-xs text-slate-500 underline">
           Not done? Show the buttons again
         </button>
+      )}
+
+      {/* it went in by force / left without paying: that goes on its public record */}
+      {reportKind && !reporting && (
+        <button type="button" onClick={() => { setReporting(true); setReported(null); }}
+          className="w-full text-center text-xs font-semibold text-red-700 underline">
+          {reportKind === 'forced_entry' ? 'It went in by force? Report it' : `It already left without paying ${formatUgx(peek?.visit?.balance_ugx ?? 0)}? Report it`}
+        </button>
+      )}
+      {reportKind && reporting && (
+        <div className="space-y-2 rounded-xl border border-red-300 bg-red-50 p-3.5 text-red-900">
+          <p className="flex items-start gap-1.5 text-sm font-bold">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+            {reportKind === 'forced_entry' ? 'Record that this vehicle went in by force?' : 'Record that this vehicle left without paying?'}
+          </p>
+          <p className="text-xs">
+            It goes on {peek?.rider?.plate_number || 'this rider'}&apos;s <strong>public record</strong>, with the date and {zone.name}, for everyone who checks the card at any
+            gate. The rider is told. Paying settles it, but it stays. Only report what you saw yourself.
+            {reportKind === 'left_without_clearing' ? ' The vehicle is also marked as having left.' : ''}
+          </p>
+          <label className="block text-xs">
+            Note for your business (not public)
+            <textarea value={reportNote} onChange={(e) => setReportNote(e.target.value)} maxLength={300} rows={2} placeholder="What happened"
+              className="mt-1 w-full rounded-xl border border-red-300 bg-white px-3 py-2 text-sm text-slate-800" />
+          </label>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => report(reportKind)} disabled={busy}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-red-700 px-3 py-2.5 text-sm font-bold text-white disabled:opacity-60">
+              {busy ? <Loader2 size={16} className="animate-spin" /> : null} Record it
+            </button>
+            <button type="button" onClick={() => setReporting(false)} disabled={busy}
+              className="flex-1 rounded-xl border border-red-300 bg-white px-3 py-2.5 text-sm font-semibold text-red-900 disabled:opacity-60">
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {reported && (
+        <div role="status" className={`space-y-1 rounded-xl border p-3.5 ${TONE.bad}`}>
+          <p className="text-sm font-bold tracking-wide">RECORDED ON THE PUBLIC RECORD</p>
+          <p className="text-sm">{reported}</p>
+        </div>
       )}
 
       {actionError && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900">{actionError}</p>}
