@@ -24,3 +24,12 @@ Customer-side: `mbg_zone_charges_for_trip(...)` (the warning), `mbg_ack_ride_zon
 booked), `mbg_ride_zone_charges(ride)` (for the ride screens). It also needs `ICAN/backend/ADD_RIDE_EARNING_CREDIT_FUNCTION.sql`.
 Screen: `frontend/src/mybodaguy/components/RiderGatePasses.tsx` (tab on the rider dashboard and an Overview tile that appears
 only while a gate is waiting for the rider).
+
+**The gate runs from the public rider-card page.** `/rider-card/<code>` (`RiderCardVerifyPage.tsx`) now carries `RiderCardGatePanel.tsx`.
+Staff of a zone scan the card with a phone camera, sign in once (Google or e-mail link; `main.tsx` returns them to the card after the
+redirect) and the panel previews the scan (approved: free; not approved: the fee and who pays; inside: check out), then runs it with one
+tap, follows a requested fee until the rider approves it in Gate Passes (or the gate takes cash), and warns first when the plate typed
+does not match the card. Nobody else sees it: it appears only when `mbg_my_gate_zones()` returns a zone, which needs the Transport
+**gate** action on the person's CMMS role. Service: `services/gateStaffService.ts`. SQL (in ICAN): `20261111100000_zone_gate_from_card_page.sql`
+/ `ZONE_GATE_FROM_CARD_PAGE_PASTE_INTO_SUPABASE.sql` adds `mbg_my_gate_zones()` and `mbg_zone_gate_peek(zone, code)`; run it after the
+restricted-zones SQL. Without it the page is unchanged and the panel stays hidden.
