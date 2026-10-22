@@ -379,7 +379,8 @@ export default function CallController({
   if (phase === 'idle') return null;
 
   return (
-    <div className="fixed inset-0 z-[60] bg-black/80 flex items-center justify-center p-4">
+    // Above RideChatModal (z-[1050]) so an incoming call still breaks through an open chat.
+    <div className="fixed inset-0 z-[1100] bg-black/80 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
         {phase === 'incoming' && (
           <div className="p-8 text-center">
