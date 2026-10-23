@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import * as React from 'react';
-import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Bike, Package, Tag, Car, Truck, Plane, ShieldCheck, Sparkles, ArrowRight, ArrowUpDown, ChevronDown, SlidersHorizontal } from 'lucide-react';
+import { MapPin, Search, Crown, Home, DollarSign, Star, Navigation, Phone, X, Clock, CheckCircle, XCircle, ArrowLeft, Zap, Fuel, Umbrella, Backpack, Bike, Package, Tag, Car, Truck, Plane, ShieldCheck, Sparkles, ArrowRight, ArrowUpDown, ChevronDown, SlidersHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
 import { searchLocations, Location } from '../data/mockLocations';
 import { supabase } from '../services/supabaseClient';
@@ -45,6 +45,7 @@ interface MatchedRider {
   vehicle_type: string;
   power_type: 'electric' | 'fuel';
   has_umbrella: boolean;
+  has_delivery_bag?: boolean;
   plate_number: string;
   vehicle_color: string;
   mode: 'normal' | 'vip' | 'discount' | 'return';
@@ -585,6 +586,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     ? { p_cargo_class: cargoClass, ...(Number(cargoWeight) > 0 ? { p_cargo_weight_kg: Number(cargoWeight) } : {}) }
     : {};
   const [umbrellaRequired, setUmbrellaRequired] = useState(false);
+  // A delivery can ask for a rider who carries a delivery bag (mbg_riders.has_delivery_bag),
+  // for safe delivery. Only a boda can carry one, so it only applies to Any / Boda.
+  const [deliveryBagRequired, setDeliveryBagRequired] = useState(false);
+  const bagRequested = serviceType === 'delivery' && (vehicleTypeFilter === 'any' || vehicleTypeFilter === 'motorcycle') && deliveryBagRequired;
   // "Any Rider" (open marketplace, the previous-only behaviour) vs "From a
   // Company" — scopes matching to one transport_company's own driver
   // roster (CREATE_BODAGOERA_BUSINESS_DRIVER_ROSTER.sql) instead of every
@@ -674,6 +679,15 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       setUmbrellaRequired(false);
     }
   }, [vehicleTypeFilter]);
+
+  // The delivery-bag requirement only exists for a delivery on a boda — clear it
+  // when the customer switches to a ride or to Car/Van/Truck so it can't stay
+  // silently attached to the next search.
+  useEffect(() => {
+    if (serviceType !== 'delivery' || (vehicleTypeFilter !== 'any' && vehicleTypeFilter !== 'motorcycle')) {
+      setDeliveryBagRequired(false);
+    }
+  }, [serviceType, vehicleTypeFilter]);
 
   // Customer's own registered areas — merged into the location suggestions
   const [customerAreas, setCustomerAreas] = useState<Location[]>([]);
@@ -1189,6 +1203,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       vehicle_type: w.vehicle_type ?? known?.vehicle_type ?? 'motorcycle',
       power_type: w.power_type === 'electric' ? 'electric' : 'fuel',
       has_umbrella: !!w.has_umbrella,
+      has_delivery_bag: !!w.has_delivery_bag,
       plate_number: w.plate_number ?? '',
       vehicle_color: w.vehicle_color ?? '',
       mode: (['normal', 'vip', 'discount', 'return'].includes(w.mode) ? w.mode : 'normal') as MatchedRider['mode'],
@@ -1530,6 +1545,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           p_dropoff_area: selectedDropoff.area,
           p_power_type: powerFilter === 'any' ? null : powerFilter,
           p_require_umbrella: umbrellaRequired,
+          p_require_delivery_bag: bagRequested,
           p_exclude_rider_ids: [],
           p_limit: 10,
           p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
@@ -1550,7 +1566,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       if (riders.length === 0) {
         toast.error(isFreightRide && Number(cargoWeight) > 0
           ? `No available ${vehicleTypeFilter} can carry ${Number(cargoWeight).toLocaleString()} kg right now`
-          : 'No available riders match your filters right now');
+          : bagRequested
+            ? 'No rider with a delivery bag is available right now — try again shortly, or turn the delivery bag option off'
+            : 'No available riders match your filters right now');
       } else {
         toast.success(`Found ${riders.length} available riders near you!`);
       }
@@ -1595,6 +1613,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         p_dropoff_area: selectedDropoff.area,
         p_power_type: powerFilter === 'any' ? null : powerFilter,
         p_require_umbrella: umbrellaRequired,
+        p_require_delivery_bag: bagRequested,
         p_exclude_rider_ids: [],
         p_limit: 5,
         p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
@@ -1606,7 +1625,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       setMatchedRiders(riders);
 
       if (riders.length === 0) {
-        toast.error('No available riders match right now — try again shortly');
+        toast.error(bagRequested
+          ? 'No rider with a delivery bag is available right now — try again shortly, or turn the delivery bag option off'
+          : 'No available riders match right now — try again shortly');
         return;
       }
 
@@ -1684,6 +1705,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         p_dropoff_lng: selectedDropoff!.coordinates.lng,
         p_power_type_requested: powerFilter === 'any' ? null : powerFilter,
         p_umbrella_requested: umbrellaRequired,
+        p_delivery_bag_requested: bagRequested,
         p_order_notes: orderNotes,
         ...cargoArgs,
       };
@@ -2896,6 +2918,30 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               </div>
             )}
 
+            {/* Delivery bag — a delivery can insist on a rider who carries a bag, so
+                the goods travel protected. Matched against the rider's own
+                "Delivery Bag" switch (mbg_find_available_riders p_require_delivery_bag). */}
+            {isDelivery && (vehicleTypeFilter === 'any' || vehicleTypeFilter === 'motorcycle') && (
+              <button
+                type="button"
+                onClick={() => setDeliveryBagRequired(!deliveryBagRequired)}
+                aria-pressed={deliveryBagRequired}
+                className={`w-full flex items-center gap-3 rounded-xl border-2 px-3 py-2.5 text-left transition-all ${
+                  deliveryBagRequired ? 'border-amber-500 bg-amber-50 text-amber-800' : 'border-slate-200 text-slate-500'
+                }`}
+              >
+                <Backpack size={18} className="shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs sm:text-sm font-semibold">
+                    {deliveryBagRequired ? 'Rider with a delivery bag' : 'Ask for a rider with a delivery bag'}
+                  </span>
+                  <span className="block text-[11px] font-normal opacity-80">
+                    {deliveryBagRequired ? 'Only riders who carry a bag will be offered your delivery' : 'For safe delivery — keeps your goods protected on the way'}
+                  </span>
+                </span>
+              </button>
+            )}
+
             {/* Fare style — filters matched riders by their real pricing mode */}
             <details className="group">
               <summary className="flex cursor-pointer list-none items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 [&::-webkit-details-marker]:hidden">
@@ -3603,6 +3649,11 @@ function RiderCard({
             {rider.has_umbrella && (
               <span className="inline-flex items-center gap-1 px-2 py-1 bg-sky-100 text-sky-700 text-xs font-medium rounded-full">
                 <Umbrella size={12} /> Rain cover
+              </span>
+            )}
+            {rider.has_delivery_bag && (
+              <span className="inline-flex items-center gap-1 px-2 py-1 bg-amber-100 text-amber-700 text-xs font-medium rounded-full">
+                <Backpack size={12} /> Delivery bag
               </span>
             )}
           </div>

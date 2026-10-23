@@ -1,6 +1,6 @@
 import RideZoneChargesNote from './RideZoneCharges';
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react';
-import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, RefreshCw, Banknote, Wallet, Receipt, Map, Trash2, ChevronDown, History, Bell, Music, Volume2 } from 'lucide-react';
+import { MapPin, Star, Phone, Check, X, Navigation, Package, Bike, Zap, Fuel, Umbrella, Backpack, RefreshCw, Banknote, Wallet, Receipt, Map, Trash2, ChevronDown, History, Bell, Music, Volume2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import RideCommsBar from './RideCommsBar';
@@ -40,6 +40,8 @@ interface RideRow {
   duration_minutes: number | null;
   power_type_requested: string | null;
   umbrella_requested: boolean;
+  // The customer wants a rider who carries a delivery bag, for safe delivery.
+  delivery_bag_requested?: boolean;
   order_notes: string | null;
   // A store delivery: how it is paid and when the customer needs it by.
   max_delivery_hours?: number | null;
@@ -874,7 +876,7 @@ function RideSummary({ ride, live, hidePrice = false }: { ride: RideRow; live?: 
       </ol>
 
       {/* Trip facts */}
-      {(ride.distance_km != null || ride.duration_minutes != null || ride.power_type_requested || ride.umbrella_requested || ride.cargo_weight_kg != null) && (
+      {(ride.distance_km != null || ride.duration_minutes != null || ride.power_type_requested || ride.umbrella_requested || ride.delivery_bag_requested || ride.cargo_weight_kg != null) && (
         <div className="flex flex-wrap items-center gap-2">
           {ride.distance_km != null && (
             <span className="rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
@@ -906,6 +908,11 @@ function RideSummary({ ride, live, hidePrice = false }: { ride: RideRow; live?: 
           {ride.umbrella_requested && (
             <span className="flex items-center gap-1 rounded-full bg-sky-100 px-2.5 py-1 text-xs font-semibold text-sky-700">
               <Umbrella size={12} /> Rain cover
+            </span>
+          )}
+          {ride.delivery_bag_requested && (
+            <span className="flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+              <Backpack size={12} /> Delivery bag required
             </span>
           )}
         </div>
