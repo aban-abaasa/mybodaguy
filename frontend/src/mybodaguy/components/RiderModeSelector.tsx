@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Crown, DollarSign, Home, TrendingUp, TrendingDown, Info, Tag, Zap, Fuel, Umbrella } from 'lucide-react';
+import { Crown, DollarSign, Home, TrendingUp, TrendingDown, Info, Tag, Zap, Fuel, Umbrella, Backpack } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 
@@ -23,11 +23,12 @@ export default function RiderModeSelector({ riderId, vehicleType, currentMode = 
   const [returnDiscount, setReturnDiscount] = useState(30); // 0-50% discount when going home
   const [powerType, setPowerType] = useState<PowerType>('fuel');
   const [hasUmbrella, setHasUmbrella] = useState(false);
+  const [hasDeliveryBag, setHasDeliveryBag] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
 
   // Scoped by vehicleType, not just riderId — a person can hold more than
-  // one mbg_riders row now (multi-vehicle); mode/power/umbrella settings
+  // one mbg_riders row now (multi-vehicle); mode/power/umbrella/bag settings
   // belong to whichever vehicle is currently active, not all of them.
   useEffect(() => {
     if (!vehicleType) {
@@ -37,7 +38,7 @@ export default function RiderModeSelector({ riderId, vehicleType, currentMode = 
     const loadRider = async () => {
       const { data, error } = await supabase
         .from('mbg_riders')
-        .select('mode, vip_surcharge_pct, discount_pct, return_discount_pct, power_type, has_umbrella')
+        .select('mode, vip_surcharge_pct, discount_pct, return_discount_pct, power_type, has_umbrella, has_delivery_bag')
         .eq('user_id', riderId)
         .eq('vehicle_type', vehicleType)
         .maybeSingle();
@@ -49,6 +50,7 @@ export default function RiderModeSelector({ riderId, vehicleType, currentMode = 
         setReturnDiscount(Number(data.return_discount_pct ?? 30));
         setPowerType((data.power_type as PowerType) || 'fuel');
         setHasUmbrella(!!data.has_umbrella);
+        setHasDeliveryBag(!!data.has_delivery_bag);
       }
       setLoaded(true);
     };
@@ -144,6 +146,18 @@ export default function RiderModeSelector({ riderId, vehicleType, currentMode = 
     } catch (error: any) {
       setHasUmbrella(hasUmbrella);
       toast.error(error?.message || 'Failed to update rain cover setting');
+    }
+  };
+
+  const toggleDeliveryBag = async () => {
+    const next = !hasDeliveryBag;
+    setHasDeliveryBag(next);
+    try {
+      await persistRiderSettings({ has_delivery_bag: next, updated_at: new Date().toISOString() });
+      toast.success(next ? 'Delivery bag enabled' : 'Delivery bag disabled');
+    } catch (error: any) {
+      setHasDeliveryBag(hasDeliveryBag);
+      toast.error(error?.message || 'Failed to update delivery bag setting');
     }
   };
 
@@ -327,8 +341,8 @@ export default function RiderModeSelector({ riderId, vehicleType, currentMode = 
         </div>
       </div>
 
-      {/* My Vehicle — power type / rain cover only apply to boda vehicles
-          (motorcycle/bicycle/tuktuk); a car/van/truck has neither concept. */}
+      {/* My Vehicle — power type / rain cover / delivery bag only apply to boda vehicles
+          (motorcycle/bicycle/tuktuk); a car/van/truck has none of these concepts. */}
       {isBodaVehicle && (
         <div className="mt-3 sm:mt-4 md:mt-6 p-2.5 xs:p-3 sm:p-4 rounded-lg border-2 border-slate-200 bg-slate-50">
           <h5 className="font-semibold text-[10px] xs:text-xs sm:text-sm text-slate-800 mb-2">My Vehicle</h5>
@@ -357,9 +371,21 @@ export default function RiderModeSelector({ riderId, vehicleType, currentMode = 
               <Umbrella size={14} />
               {hasUmbrella ? 'Rain Cover: Yes' : 'Rain Cover: No'}
             </button>
+            <button
+              onClick={toggleDeliveryBag}
+              disabled={!loaded}
+              className={`col-span-2 flex items-center justify-center gap-1.5 py-2 xs:py-2.5 rounded-lg text-[10px] xs:text-xs sm:text-sm font-semibold border-2 transition-all ${
+                hasDeliveryBag
+                  ? 'border-amber-500 bg-amber-50 text-amber-700'
+                  : 'border-slate-300 bg-white text-slate-500'
+              }`}
+            >
+              <Backpack size={14} />
+              {hasDeliveryBag ? 'Delivery Bag: Yes' : 'Delivery Bag: No'}
+            </button>
           </div>
           <p className="text-[9px] xs:text-xs text-slate-500 mt-2">
-            Customers can filter for electric bikes or rain cover — keep this accurate so you only get matched to requests you can actually fulfil.
+            Customers can filter for electric bikes, rain cover or a delivery bag (for safe delivery) — keep this accurate so you only get matched to requests you can actually fulfil.
           </p>
         </div>
       )}
