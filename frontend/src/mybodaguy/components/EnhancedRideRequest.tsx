@@ -590,6 +590,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // for safe delivery. Only a boda can carry one, so it only applies to Any / Boda.
   const [deliveryBagRequired, setDeliveryBagRequired] = useState(false);
   const bagRequested = serviceType === 'delivery' && (vehicleTypeFilter === 'any' || vehicleTypeFilter === 'motorcycle') && deliveryBagRequired;
+  // Whatever the customer picks, a delivery lists riders who carry a delivery bag first
+  // (nearest first within them), then everyone else — so the goods go with a bag when one is free.
+  const preferBagRiders = serviceType === 'delivery';
   // "Any Rider" (open marketplace, the previous-only behaviour) vs "From a
   // Company" — scopes matching to one transport_company's own driver
   // roster (CREATE_BODAGOERA_BUSINESS_DRIVER_ROSTER.sql) instead of every
@@ -1546,6 +1549,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
           p_power_type: powerFilter === 'any' ? null : powerFilter,
           p_require_umbrella: umbrellaRequired,
           p_require_delivery_bag: bagRequested,
+          p_prefer_delivery_bag: preferBagRiders,
           p_exclude_rider_ids: [],
           p_limit: 10,
           p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
@@ -1614,6 +1618,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         p_power_type: powerFilter === 'any' ? null : powerFilter,
         p_require_umbrella: umbrellaRequired,
         p_require_delivery_bag: bagRequested,
+        p_prefer_delivery_bag: preferBagRiders,
         p_exclude_rider_ids: [],
         p_limit: 5,
         p_vehicle_types: vehicleTypeFilter === 'any' ? null : [vehicleTypeFilter],
@@ -2918,9 +2923,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
               </div>
             )}
 
-            {/* Delivery bag — a delivery can insist on a rider who carries a bag, so
-                the goods travel protected. Matched against the rider's own
-                "Delivery Bag" switch (mbg_find_available_riders p_require_delivery_bag). */}
+            {/* Delivery bag — riders who carry a bag are always listed first for a
+                delivery (p_prefer_delivery_bag); this switch goes further and hides
+                everyone else (p_require_delivery_bag), matched against the rider's
+                own "Delivery Bag" switch. */}
             {isDelivery && (vehicleTypeFilter === 'any' || vehicleTypeFilter === 'motorcycle') && (
               <button
                 type="button"
@@ -2933,10 +2939,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                 <Backpack size={18} className="shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="block text-xs sm:text-sm font-semibold">
-                    {deliveryBagRequired ? 'Rider with a delivery bag' : 'Ask for a rider with a delivery bag'}
+                    {deliveryBagRequired ? 'Only riders with a delivery bag' : 'Only show riders with a delivery bag'}
                   </span>
                   <span className="block text-[11px] font-normal opacity-80">
-                    {deliveryBagRequired ? 'Only riders who carry a bag will be offered your delivery' : 'For safe delivery — keeps your goods protected on the way'}
+                    {deliveryBagRequired ? 'Riders without a bag will not be offered your delivery' : 'Riders with a bag are already shown first — switch on to hide the rest'}
                   </span>
                 </span>
               </button>

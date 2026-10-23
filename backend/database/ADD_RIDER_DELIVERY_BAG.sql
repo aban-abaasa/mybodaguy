@@ -10,14 +10,20 @@
 --
 --   * mbg_find_available_riders(…, p_require_delivery_bag) leaves out riders without a bag
 --     and tells the app which of the others carry one.
+--   * mbg_find_available_riders(…, p_prefer_delivery_bag) lists riders who carry a bag BEFORE
+--     the others (nearest first inside each group). The app passes it for every delivery, so a
+--     delivery is offered to bag riders first without the customer asking; the others still
+--     follow, so nobody is left without a rider when no bag rider is free. The "Just Send"
+--     sweep passes it for deliveries too, so it adds bag riders to the shared request first.
 --   * mbg_request_ride(…, p_delivery_bag_requested) refuses a rider without a bag, so a
 --     stale list on the customer's screen can't book one, and stores the request on the ride.
 --   * The "Just Send" sweep keeps the requirement on every rider it adds to the shared request.
 --   * The rider's own request card reads delivery_bag_requested straight from the ride row
 --     (mbg_my_ride_offers returns the whole row), so it needs no function change.
 --
--- Nothing is required of existing riders: everyone starts at "no bag", and a request that
--- doesn't ask for a bag matches exactly as before.
+-- Nothing is required of existing riders: everyone starts at "no bag", and a ride (not a
+-- delivery) is ranked exactly as before.
+-- Safe to run again, including after an earlier version of this file.
 -- ============================================================================
 
 ALTER TABLE public.mbg_riders
@@ -29,6 +35,7 @@ ALTER TABLE public.mbg_rides
 -- ----------------------------------------------------------------------------
 -- 1. mbg_find_available_riders — same as ADD_VEHICLE_CLASS_FARE_RATES.sql section 6
 --    except it takes p_require_delivery_bag (only riders who declared a bag) and
+--    p_prefer_delivery_bag (bag riders ranked first), and
 --    returns each rider's has_delivery_bag as a last column, so the ordering by
 --    column number is unchanged.
 -- ----------------------------------------------------------------------------
@@ -60,7 +67,8 @@ CREATE OR REPLACE FUNCTION public.mbg_find_available_riders(
   p_business_profile_id UUID DEFAULT NULL,
   p_cargo_weight_kg NUMERIC DEFAULT NULL,
   p_cargo_class TEXT DEFAULT NULL,
-  p_require_delivery_bag BOOLEAN DEFAULT false
+  p_require_delivery_bag BOOLEAN DEFAULT false,
+  p_prefer_delivery_bag BOOLEAN DEFAULT false
 )
 RETURNS TABLE (
   rider_id UUID,
@@ -153,15 +161,17 @@ BEGIN
     AND (p_business_profile_id IS NULL OR r.business_profile_id = p_business_profile_id)
     -- Only vehicles that can actually carry the declared load.
     AND (COALESCE(p_cargo_weight_kg, 0) <= 0 OR public.mbg_effective_capacity_kg(r) >= p_cargo_weight_kg)
-  -- Nearest rider first (real GPS/home distance); "knows this destination"
+  -- For a delivery, riders who carry a delivery bag come first. Then, as before,
+  -- nearest rider first (real GPS/home distance); "knows this destination"
   -- (column 14) and admin-verified store driver (column 19) only break ties
   -- among comparably-close riders, then rating.
-  ORDER BY dist.km ASC NULLS LAST, 14 DESC, 19 DESC, r.rating DESC
+  ORDER BY (COALESCE(p_prefer_delivery_bag, false) AND r.has_delivery_bag) DESC,
+           dist.km ASC NULLS LAST, 14 DESC, 19 DESC, r.rating DESC
   LIMIT p_limit;
 END;
 $$;
 GRANT EXECUTE ON FUNCTION public.mbg_find_available_riders(
-  NUMERIC, NUMERIC, NUMERIC, NUMERIC, TEXT, TEXT, BOOLEAN, UUID[], INT, TEXT[], UUID, NUMERIC, TEXT, BOOLEAN
+  NUMERIC, NUMERIC, NUMERIC, NUMERIC, TEXT, TEXT, BOOLEAN, UUID[], INT, TEXT[], UUID, NUMERIC, TEXT, BOOLEAN, BOOLEAN
 ) TO authenticated;
 
 
@@ -616,7 +626,9 @@ BEGIN
         v_ride.pickup_lat, v_ride.pickup_lng, v_ride.dropoff_lat, v_ride.dropoff_lng,
         NULL, v_ride.power_type_requested, COALESCE(v_ride.umbrella_requested, false),
         v_offered || v_busy, 1, v_ride.dispatch_vehicle_types, v_ride.dispatch_business_profile_id,
-        v_ride.cargo_weight_kg, v_ride.cargo_class, COALESCE(v_ride.delivery_bag_requested, false)
+        v_ride.cargo_weight_kg, v_ride.cargo_class, COALESCE(v_ride.delivery_bag_requested, false),
+        -- A delivery goes to riders with a bag first; the nearest of them, then the rest.
+        v_ride.service_type = 'delivery'
       ) AS far
       LIMIT 1;
 
