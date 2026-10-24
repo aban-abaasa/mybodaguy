@@ -176,7 +176,7 @@ function WorkingTimeToggle({ userId, vehicleType, children }: { userId: string; 
   };
 
   return (
-    <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-4 text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40 min-[360px]:p-5">
+    <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-3.5 text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40 min-[360px]:p-5">
       <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full border border-[#c4a052]/25" />
       <span aria-hidden className="pointer-events-none absolute -right-5 -top-5 h-28 w-28 rounded-full border border-[#c4a052]/20" />
       <span
@@ -186,16 +186,16 @@ function WorkingTimeToggle({ userId, vehicleType, children }: { userId: string; 
         }`}
       />
 
-      <div className="relative flex items-center justify-between gap-4">
+      <div className="relative flex items-center justify-between gap-3 min-[360px]:gap-4">
         <div className="min-w-0">
-          <p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]">
+          <p className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.2em] text-[#e6c980] min-[360px]:text-[10px] min-[360px]:tracking-[0.24em]">
             <span className={`h-1.5 w-1.5 rounded-full ${isAvailable ? 'animate-pulse bg-emerald-400' : 'bg-white/40'}`} />
             Working time
           </p>
-          <p className="mt-1 font-classic-display text-[26px] font-bold leading-tight">
+          <p className="mt-1 font-classic-display text-[22px] font-bold leading-tight min-[360px]:text-[26px]">
             {isAvailable ? "You're Online" : "You're Offline"}
           </p>
-          <p className="mt-1 text-[13px] text-white/70">
+          <p className="mt-1 text-xs text-white/70 min-[360px]:text-[13px]">
             {isAvailable ? 'Customers can request you right now' : 'Switch on to start receiving requests'}
           </p>
         </div>
@@ -206,13 +206,13 @@ function WorkingTimeToggle({ userId, vehicleType, children }: { userId: string; 
           aria-label="Working status"
           onClick={toggle}
           disabled={!loaded || saving}
-          className={`relative h-10 w-[68px] flex-shrink-0 rounded-full ring-1 ring-inset transition-colors active:scale-95 disabled:opacity-60 ${
+          className={`relative h-9 w-[60px] flex-shrink-0 rounded-full ring-1 ring-inset transition-colors active:scale-95 disabled:opacity-60 min-[360px]:h-10 min-[360px]:w-[68px] ${
             isAvailable ? 'bg-emerald-500 ring-emerald-300/60' : 'bg-white/15 ring-[#c4a052]/50'
           }`}
         >
           <span
-            className={`absolute left-1 top-1 h-8 w-8 rounded-full bg-[#fffdf7] shadow-md transition-transform ${
-              isAvailable ? 'translate-x-7' : 'translate-x-0'
+            className={`absolute left-1 top-1 h-7 w-7 rounded-full bg-[#fffdf7] shadow-md transition-transform min-[360px]:h-8 min-[360px]:w-8 ${
+              isAvailable ? 'translate-x-6 min-[360px]:translate-x-7' : 'translate-x-0'
             }`}
           />
         </button>
@@ -601,6 +601,32 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
       ? 'Tap to continue your current job'
       : 'Accept real requests near you';
 
+  const requestsCard = (
+    <button
+      type="button"
+      onClick={() => setActiveTab('requests')}
+      className={`classic-card flex w-full items-center gap-3 p-3.5 text-left transition-all hover:border-orange-300 active:scale-[0.99] min-[360px]:gap-4 min-[360px]:p-4 ${
+        pendingCount > 0 ? '!border-orange-400 ring-2 ring-orange-200/70' : ''
+      }`}
+    >
+      <span className="relative grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-orange-50 ring-1 ring-inset ring-orange-100 min-[360px]:h-12 min-[360px]:w-12">
+        <Bell size={19} className={`text-orange-500 ${pendingCount > 0 ? 'animate-[wiggle_1.2s_ease-in-out_infinite]' : ''}`} />
+        {pendingCount > 0 && (
+          <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-orange-500 px-1 text-[9px] font-bold text-white ring-2 ring-white dark:ring-slate-800 min-[360px]:h-5 min-[360px]:min-w-[20px] min-[360px]:text-[10px]">
+            {pendingCount}
+          </span>
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-classic-display text-base font-semibold leading-tight text-slate-800 min-[360px]:text-lg">{requestsTitle}</span>
+        <span className="mt-0.5 block text-xs text-slate-500">{requestsCaption}</span>
+      </span>
+      <span className="grid h-7 w-7 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-orange-500 to-amber-400 text-white shadow-md shadow-orange-500/30 min-[360px]:h-8 min-[360px]:w-8">
+        <ArrowRight size={14} />
+      </span>
+    </button>
+  );
+
   return (
     <div className="min-h-screen classic-page">
       {/* Content without brand header - that lives in UnifiedDashboard. This
@@ -656,19 +682,23 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
           the safe-area inset is added so it holds on phones with a home bar. */}
       <div className="container mx-auto px-4 pb-[calc(7rem_+_env(safe-area-inset-bottom,0px))] pt-5">
         {activeTab === 'overview' && (
-          <div className="space-y-6">
+          <div className="space-y-4 min-[360px]:space-y-6">
             {/* Greeting — live insights from this rider's own work: how today
                 compares with yesterday, the best day of the week, total jobs,
                 the hour requests come in most and where from. */}
             <div>
               <div className="flex items-start justify-between gap-3">
                 <h2 className="min-w-0 font-classic-display leading-tight">
-                  <span className="block text-[18px] font-medium text-slate-500">{greeting},</span>
-                  <span className="block break-words text-[30px] font-bold tracking-tight text-slate-900">{riderName}</span>
+                  <span className="block text-base font-medium text-slate-500 min-[360px]:text-[18px]">{greeting},</span>
+                  <span className="block break-words text-[26px] font-bold tracking-tight text-slate-900 min-[360px]:text-[30px]">{riderName}</span>
                 </h2>
                 {insightSlides.length > 0 && (
-                  <span className="mt-1.5 flex flex-shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-100">
-                    <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" /> Live
+                  <span
+                    aria-label="Live"
+                    className="mt-1.5 flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-100 min-[360px]:gap-1.5 min-[360px]:px-2 min-[360px]:text-[10px]"
+                  >
+                    <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                    <span className="max-[339px]:hidden">Live</span>
                   </span>
                 )}
               </div>
@@ -680,6 +710,8 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                 </div>
               )}
             </div>
+
+            {pendingCount > 0 && requestsCard}
 
             {/* Working time — the one switch that matters — with the vehicle
                 this account was approved for (or a switcher when they hold
@@ -737,32 +769,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
               })()}
             </WorkingTimeToggle>
 
-            {/* Requests — was its own nav tab; lives here as a card so it
-                doesn't take permanent tab space but stays one tap away. The
-                copy and the badge follow what's actually waiting right now. */}
-            <button
-              type="button"
-              onClick={() => setActiveTab('requests')}
-              className={`classic-card flex w-full items-center gap-4 p-4 text-left transition-all hover:border-orange-300 active:scale-[0.99] ${
-                pendingCount > 0 ? '!border-orange-400 ring-2 ring-orange-200/70' : ''
-              }`}
-            >
-              <span className="relative grid h-12 w-12 flex-shrink-0 place-items-center rounded-full bg-orange-50 ring-1 ring-inset ring-orange-100">
-                <Bell size={21} className="text-orange-500" />
-                {pendingCount > 0 && (
-                  <span className="absolute -right-1 -top-1 grid h-5 min-w-[20px] place-items-center rounded-full bg-orange-500 px-1 text-[10px] font-bold text-white ring-2 ring-white dark:ring-slate-800">
-                    {pendingCount}
-                  </span>
-                )}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block font-classic-display text-lg font-semibold leading-tight text-slate-800">{requestsTitle}</span>
-                <span className="mt-0.5 block text-xs text-slate-500">{requestsCaption}</span>
-              </span>
-              <span className="grid h-8 w-8 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br from-orange-500 to-amber-400 text-white shadow-md shadow-orange-500/30">
-                <ArrowRight size={15} />
-              </span>
-            </button>
+            {pendingCount === 0 && requestsCard}
 
             {/* ID card — a compact entry that opens the My Card tab. It only shows when
                 there is something to do (a card to pay for or show, or one to request). */}
@@ -775,47 +782,47 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
             <RiderEarningsCard week={weekForCard} loading={weekForCard === null} />
 
             {/* Standing — rides done, rating, and the work mode (tap to cycle) */}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="classic-card p-3.5">
-                <span className="grid h-8 w-8 place-items-center rounded-full bg-sky-50 text-sky-600 ring-1 ring-inset ring-black/5">
-                  <Bike size={15} />
+            <div className="grid grid-cols-3 gap-2 min-[360px]:gap-3">
+              <div className="classic-card p-2.5 min-[360px]:p-3.5">
+                <span className="grid h-7 w-7 place-items-center rounded-full bg-sky-50 text-sky-600 ring-1 ring-inset ring-black/5 min-[360px]:h-8 min-[360px]:w-8">
+                  <Bike size={14} />
                 </span>
-                <p className="classic-eyebrow mt-2.5 !tracking-[0.14em]">Rides done</p>
-                <p className="mt-1 font-classic-display text-[22px] font-bold leading-none tabular-nums text-slate-900">
+                <p className="classic-eyebrow mt-2 !text-[9px] !tracking-[0.1em] min-[360px]:mt-2.5 min-[360px]:!text-[10px] min-[360px]:!tracking-[0.14em]">Rides</p>
+                <p className="mt-1 font-classic-display text-xl font-bold leading-none tabular-nums text-slate-900 min-[360px]:text-[22px]">
                   {riderStatsLoading ? '…' : (riderStats?.ridesDone ?? 0).toLocaleString()}
                 </p>
               </div>
-              <div className="classic-card p-3.5">
-                <span className="grid h-8 w-8 place-items-center rounded-full bg-amber-50 text-amber-600 ring-1 ring-inset ring-black/5">
-                  <Star size={15} />
+              <div className="classic-card p-2.5 min-[360px]:p-3.5">
+                <span className="grid h-7 w-7 place-items-center rounded-full bg-amber-50 text-amber-600 ring-1 ring-inset ring-black/5 min-[360px]:h-8 min-[360px]:w-8">
+                  <Star size={14} />
                 </span>
-                <p className="classic-eyebrow mt-2.5 !tracking-[0.14em]">Rating</p>
-                <p className="mt-1 font-classic-display text-[22px] font-bold leading-none tabular-nums text-slate-900">
+                <p className="classic-eyebrow mt-2 !text-[9px] !tracking-[0.1em] min-[360px]:mt-2.5 min-[360px]:!text-[10px] min-[360px]:!tracking-[0.14em]">Rating</p>
+                <p className="mt-1 font-classic-display text-xl font-bold leading-none tabular-nums text-slate-900 min-[360px]:text-[22px]">
                   {riderStatsLoading ? '…' : rating > 0 ? rating.toFixed(1) : '—'}
                 </p>
-                <div className="mt-1.5">
-                  {rating > 0 ? <RatingStars rating={rating} /> : <span className="text-[10px] text-slate-400">No ratings yet</span>}
+                <div className="mt-1.5 max-[339px]:hidden">
+                  {rating > 0 ? <RatingStars rating={rating} /> : <span className="text-[9px] text-slate-400 min-[360px]:text-[10px]">No ratings yet</span>}
                 </div>
               </div>
               <button
                 type="button"
                 onClick={cycleMode}
                 disabled={cyclingMode || !activeVehicleType}
-                className="classic-card p-3.5 text-left transition-all hover:border-orange-300 active:scale-[0.97] disabled:opacity-60"
+                className="classic-card p-2.5 text-left transition-all hover:border-orange-300 active:scale-[0.97] disabled:opacity-60 min-[360px]:p-3.5"
               >
-                <span className="grid h-8 w-8 place-items-center rounded-full bg-violet-50 text-violet-600 ring-1 ring-inset ring-black/5">
-                  <Settings size={15} />
+                <span className="grid h-7 w-7 place-items-center rounded-full bg-violet-50 text-violet-600 ring-1 ring-inset ring-black/5 min-[360px]:h-8 min-[360px]:w-8">
+                  <Settings size={14} />
                 </span>
-                <p className="classic-eyebrow mt-2.5 !tracking-[0.14em]">Mode</p>
-                <p className="mt-1 truncate font-classic-display text-[19px] font-bold leading-none text-slate-900">
+                <p className="classic-eyebrow mt-2 !text-[9px] !tracking-[0.1em] min-[360px]:mt-2.5 min-[360px]:!text-[10px] min-[360px]:!tracking-[0.14em]">Mode</p>
+                <p className="mt-1 truncate font-classic-display text-base font-bold leading-none text-slate-900 min-[360px]:text-[19px]">
                   {riderStatsLoading || cyclingMode ? '…' : (riderStats?.mode || 'normal').replace(/^\w/, c => c.toUpperCase())}
                 </p>
-                <p className="mt-1.5 text-[10px] text-slate-400">Tap to change</p>
+                <p className="mt-1.5 text-[9px] text-slate-400 min-[360px]:text-[10px]">Tap to change</p>
               </button>
             </div>
 
             {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2 min-[360px]:gap-3">
               <IcanCoinCard key={walletRefresh} variant="premium" userId={user?.id} onGoToWallet={onGoToWallet} />
               <RewardsPointsCard variant="premium" userId={user?.id} onOpen={() => setActiveTab('rewards')} />
             </div>
@@ -829,10 +836,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
               <button
                 type="button"
                 onClick={() => setActiveTab('vote')}
-                className="classic-card flex w-full items-center gap-3 !border-orange-300 p-4 text-left transition-all active:scale-[0.99]"
+                className="classic-card flex w-full items-center gap-3 !border-orange-300 p-3.5 text-left transition-all active:scale-[0.99] min-[360px]:p-4"
               >
-                <span className="grid h-11 w-11 flex-shrink-0 place-items-center rounded-2xl bg-orange-50 text-orange-600 ring-1 ring-inset ring-black/5">
-                  <Vote size={20} />
+                <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-2xl bg-orange-50 text-orange-600 ring-1 ring-inset ring-black/5 min-[360px]:h-11 min-[360px]:w-11">
+                  <Vote size={19} />
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block font-classic-display text-[16px] font-semibold leading-tight text-slate-800">
@@ -847,7 +854,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
             {/* Quick actions */}
             <div className="space-y-3">
               <SectionHeading>Quick actions</SectionHeading>
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+              <div className="grid grid-cols-2 gap-2.5 min-[360px]:gap-3 lg:grid-cols-5">
                 {([
                   { label: 'Work Mode',  desc: 'VIP, Normal, Discount or Return', icon: Settings,    tile: 'bg-violet-50 text-violet-600',   tab: 'mode' },
                   { label: 'Areas',      desc: 'Mark places you know well',       icon: MapIcon,     tile: 'bg-sky-50 text-sky-600',         tab: 'locations' },
@@ -859,19 +866,19 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                     key={c.tab}
                     type="button"
                     onClick={() => setActiveTab(c.tab)}
-                    className={`classic-card relative flex min-h-[128px] flex-col justify-between gap-3 p-4 text-left transition-all hover:border-orange-300 active:scale-[0.98] ${c.tab === 'vote' ? 'col-span-2 lg:col-span-1' : ''}`}
+                    className={`classic-card relative flex min-h-[108px] flex-col justify-between gap-2.5 p-3.5 text-left transition-all hover:border-orange-300 active:scale-[0.98] min-[360px]:min-h-[128px] min-[360px]:gap-3 min-[360px]:p-4 ${c.tab === 'vote' ? 'col-span-2 lg:col-span-1' : ''}`}
                   >
                     {c.tab === 'vote' && voteAttention.needsMyVote > 0 && (
-                      <span className="absolute right-3 top-3 grid h-6 min-w-[24px] place-items-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white">
+                      <span className="absolute right-2.5 top-2.5 grid h-5 min-w-[20px] place-items-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white min-[360px]:right-3 min-[360px]:top-3 min-[360px]:h-6 min-[360px]:min-w-[24px] min-[360px]:px-1.5 min-[360px]:text-[11px]">
                         {voteAttention.needsMyVote}
                       </span>
                     )}
-                    <span className={`grid h-11 w-11 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${c.tile}`}>
-                      <c.icon size={20} />
+                    <span className={`grid h-10 w-10 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 min-[360px]:h-11 min-[360px]:w-11 ${c.tile}`}>
+                      <c.icon size={19} />
                     </span>
                     <span>
-                      <span className="block text-[15px] font-semibold leading-tight text-slate-800">{c.label}</span>
-                      <span className="mt-1 block text-xs leading-snug text-slate-500">{c.desc}</span>
+                      <span className="block text-sm font-semibold leading-tight text-slate-800 min-[360px]:text-[15px]">{c.label}</span>
+                      <span className="mt-1 line-clamp-2 block text-[11px] leading-snug text-slate-500 min-[360px]:text-xs">{c.desc}</span>
                     </span>
                   </button>
                 ))}
@@ -1027,6 +1034,15 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
           </div>
         </div>
       )}
+
+      {/* The bottom tabs are bare icons with no bar behind them, so cards
+          scrolling underneath used to show through (labels sat on top of card
+          text). A page-coloured fade behind them keeps both readable. */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-[55] h-20 bg-gradient-to-t from-[#f3e9d2] via-[#f3e9d2]/90 to-transparent dark:from-[#0f172a] dark:via-[#0f172a]/90 sm:hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
+      />
 
       <MobileBottomTabs
         tabs={BOTTOM_TAB_IDS.map(id => ({ id, label: BOTTOM_TAB_LABELS[id] ?? TAB_META[id].label, icon: TAB_META[id].icon }))}

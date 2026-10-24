@@ -81,13 +81,13 @@ export default function RiderEarningsCard({ week, loading }: Props) {
           </p>
         </div>
         {deltaPct !== null && (
-          <span className={`mt-1 inline-flex flex-shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${
+          <span className={`mt-1 inline-flex flex-shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset min-[360px]:px-2.5 min-[360px]:py-1 min-[360px]:text-[11px] ${
             deltaPct >= 0
               ? 'bg-emerald-50 text-emerald-700 ring-emerald-100'
               : 'bg-amber-50 text-amber-700 ring-amber-100'
           }`}>
-            {deltaPct >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
-            {deltaPct >= 0 ? '+' : ''}{deltaPct}% vs yesterday
+            {deltaPct >= 0 ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
+            {deltaPct >= 0 ? '+' : ''}{deltaPct}%<span className="max-[359px]:hidden"> vs yesterday</span>
           </span>
         )}
       </div>

@@ -542,8 +542,14 @@ textarea:-webkit-autofill:active {
 }
 .animate-sheet-up { animation: sheet-up 0.3s cubic-bezier(0.2, 0.8, 0.2, 1); }
 .animate-fade-soft { animation: fade-soft 0.2s ease-out; }
+/* Bell on the rider's "new requests waiting" card: a short ring, then rest. */
+@keyframes wiggle {
+  0%, 60%, 100% { transform: rotate(0); }
+  10%, 30%, 50% { transform: rotate(-12deg); }
+  20%, 40%       { transform: rotate(12deg); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .animate-sheet-up, .animate-fade-soft { animation: none; }
+  .animate-sheet-up, .animate-fade-soft, [class*="animate-[wiggle"] { animation: none; }
 }
 
 .landing-mobile-safe {
