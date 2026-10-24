@@ -22,6 +22,12 @@ export interface Product {
   created_at: string;
   sku: string | null;
   tax_rate: number;
+  /** The selling store's customer rating (1-5) and how many customers rated it; null / 0 until someone has. */
+  store_rating_avg?: number | null;
+  store_rating_count?: number;
+  /** How many customers subscribe to the store, and whether the signed-in customer is one of them. */
+  store_followers?: number;
+  store_followed?: boolean;
 }
 
 export interface ProductInput {
@@ -170,13 +176,62 @@ async function resolveCategoryId(categoryName: string): Promise<string | null> {
   return created?.id ?? null;
 }
 
+// Customers' ratings and subscriptions decide which store's products come first: fn_ranked_products_page
+// (ICAN/supabase/migrations/20261118100000_business_ratings_subscriptions_ranking.sql) returns the ids of ONE page in
+// display order, with the store's stars and followers. The products are then loaded exactly as before and kept in that
+// order. Resolves null when the function is not installed on this project (or the call fails), so the caller falls back
+// to "newest first" and the storefront keeps working either way.
+async function getRankedProductsPage(q: ProductPageQuery, pageSize: number, from: number): Promise<ProductPage | null> {
+  if (pageSize > 99) return null; // the function returns at most 100 rows, and one extra tells us whether more exist
+  const term = (q.search ?? '').trim();
+  const { data: ranked, error } = await supabase.rpc('fn_ranked_products_page', {
+    p_supermarket_id: q.supermarketId || null,
+    p_exclude_store_ids: q.excludeStoreIds?.length ? q.excludeStoreIds : null,
+    p_search: term || null,
+    p_category: q.category || null,
+    p_offset: from,
+    p_limit: pageSize + 1,
+  });
+  if (error || !Array.isArray(ranked)) return null;
+  const hasMore = ranked.length > pageSize;
+  const pageRanked: any[] = hasMore ? ranked.slice(0, pageSize) : ranked;
+  if (pageRanked.length === 0) return { products: [], hasMore: false };
+
+  const ids = pageRanked.map(r => r.product_id as string);
+  const { data: rows, error: rowsError } = await supabase
+    .from('products')
+    .select(`${PRODUCT_COLUMNS}, categories(name)`)
+    .in('id', ids);
+  if (rowsError || !rows) return null;
+  const byId = new Map<string, any>(rows.map((r: any) => [r.id, r]));
+  const stock = await fetchStockFor(ids);
+
+  const products: Product[] = [];
+  for (const r of pageRanked) {
+    const row = byId.get(r.product_id);
+    if (!row) continue;
+    products.push({
+      ...mapProductRow(row, stock),
+      store_rating_avg: r.rating_avg != null ? Number(r.rating_avg) : null,
+      store_rating_count: Number(r.rating_count) || 0,
+      store_followers: Number(r.subscriber_count) || 0,
+      store_followed: r.is_subscribed === true,
+    });
+  }
+  return { products, hasMore };
+}
+
 export const productService = {
   // One page of active products, filtered on the server (store, search,
-  // category). The storefront scrolls through these instead of loading a
-  // whole catalog; the page is fetched with one extra row to learn if more exist.
+  // category) and ordered by store rating and subscriptions (see
+  // getRankedProductsPage), or newest first where that is not installed. The
+  // storefront scrolls through these instead of loading a whole catalog; the
+  // page is fetched with one extra row to learn if more exist.
   async getProductsPage(q: ProductPageQuery): Promise<ProductPage> {
     const pageSize = q.pageSize ?? PRODUCT_PAGE_SIZE;
     const from = q.page * pageSize;
+    const ranked = await getRankedProductsPage(q, pageSize, from);
+    if (ranked) return ranked;
     const byCategory = !!q.category && q.category !== 'Other';
     const term = cleanSearchTerm(q.search ?? '');
     // In the all-stores view, products of deactivated stores stay hidden.
