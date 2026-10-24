@@ -19,7 +19,7 @@ type Accounts = Awaited<ReturnType<typeof getMyBusinessAccounts>>;
  * business, on any IcanEra site), the businesses they have an account with,
  * and a shop to start a new plan.
  */
-export default function InstallmentsHub({ customerName, customerPhone }: Props) {
+export default function InstallmentsHub(_props: Props) {
   const [view, setView] = useState<'plans' | 'shop'>('plans');
   const [plans, setPlans] = useState<InstallmentPlan[] | null>(null);
   const [accounts, setAccounts] = useState<Accounts>([]);
@@ -60,7 +60,7 @@ export default function InstallmentsHub({ customerName, customerPhone }: Props) 
         ))}
       </div>
 
-      {view === 'shop' && <InstallmentShop customerName={customerName} customerPhone={customerPhone} onCreated={(code, notice) => setOpen({ code, notice })} />}
+      {view === 'shop' && <InstallmentShop />}
 
       {view === 'plans' && (
         <>
