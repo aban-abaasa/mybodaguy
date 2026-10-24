@@ -23,15 +23,26 @@ CREATE OR REPLACE FUNCTION public.get_store_public_website(
   p_business_profile_id UUID DEFAULT NULL
 ) RETURNS UUID
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
+  -- A business can have more than one company profile: the one its owner created
+  -- (linked by pichin_business_profile_id, carries the owner's email) and others
+  -- auto-created for the store (linked by business_profile_id / supermarket_id, e.g.
+  -- "Makerere kikoni" for ALLEN'S BOUTIQUE). Pick the one that is really the
+  -- business's own: named after the business or the store first, then the
+  -- owner-created one, then most recent.
   SELECT cp.id
   FROM public.business_profiles bp
-  JOIN public.cmms_company_profiles cp ON cp.business_profile_id = bp.id
+  JOIN public.cmms_company_profiles cp
+    ON cp.business_profile_id = bp.id OR cp.pichin_business_profile_id = bp.id
+  LEFT JOIN public.supermarkets st ON st.id = p_supermarket_id
   WHERE (p_business_profile_id IS NOT NULL AND bp.id = p_business_profile_id)
      OR (p_supermarket_id IS NOT NULL AND (
           bp.supermarket_id = p_supermarket_id
           OR EXISTS (SELECT 1 FROM public.supermarkets s
                      WHERE s.id = p_supermarket_id AND s.pichin_business_profile_id = bp.id)))
   ORDER BY (p_business_profile_id IS NOT NULL AND bp.id = p_business_profile_id) DESC,
+           (lower(btrim(cp.company_name)) IN (lower(btrim(bp.business_name)), lower(btrim(st.name)))) DESC,
+           (cp.pichin_business_profile_id = bp.id) DESC,
+           (cp.owner_email IS NOT NULL) DESC,
            cp.updated_at DESC NULLS LAST
   LIMIT 1;
 $$;
