@@ -9,7 +9,7 @@
  * pages, so it survives any search, category or store change.
  */
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Minus, Plus, Image as ImageIcon, ShoppingCart, Search, Store, X, Loader2 } from 'lucide-react';
+import { Minus, Plus, Image as ImageIcon, ShoppingCart, Search, Store, X, Loader2, Star } from 'lucide-react';
 import { productService, Product, SupermarketProfile } from '../services/productService';
 
 export interface CartLine {
@@ -52,6 +52,22 @@ interface CardProps {
   onQty: (product: Product, qty: number) => void;
 }
 
+// "★ 4.8 (20) · Following": how customers rate the selling store, and whether this customer subscribes to it.
+function StoreBadge({ product: p }: { product: Product }) {
+  const rated = (p.store_rating_count ?? 0) > 0 && p.store_rating_avg != null;
+  if (!rated && !p.store_followed) return null;
+  return (
+    <p className="flex items-center gap-1 text-[11px] text-slate-500">
+      {rated && (
+        <span className="flex items-center gap-0.5" aria-label={`Store rated ${p.store_rating_avg!.toFixed(1)} out of 5 by ${p.store_rating_count} customers`}>
+          <Star size={11} className="fill-amber-400 text-amber-400" /> {p.store_rating_avg!.toFixed(1)} <span className="text-slate-400">({p.store_rating_count})</span>
+        </span>
+      )}
+      {p.store_followed && <span className="rounded bg-orange-100 px-1 font-semibold text-orange-700">Following</span>}
+    </p>
+  );
+}
+
 // One product in the full-page grid. Memoised so typing a quantity or loading
 // the next page doesn't re-render every card already on screen.
 const FullCard = memo(function FullCard({ product: p, qty, price, money, storeName, onQty }: CardProps) {
@@ -73,6 +89,7 @@ const FullCard = memo(function FullCard({ product: p, qty, price, money, storeNa
       <div className="pt-1.5">
         <p className="text-[13px] font-semibold text-slate-800 leading-tight line-clamp-2">{p.name}</p>
         {storeName && <p className="truncate text-[11px] text-slate-400">{storeName}</p>}
+        <StoreBadge product={p} />
         <p className="text-sm text-orange-600 font-bold">{money(price)}</p>
         {p.stock_qty <= 0 ? (
           <p className="mt-1 text-xs font-medium text-red-500">Out of stock</p>
@@ -117,6 +134,7 @@ const CompactCard = memo(function CompactCard({ product: p, qty, price, money, o
       </div>
       <div className="p-2">
         <p className="text-xs font-semibold text-slate-800 truncate">{p.name}</p>
+        <StoreBadge product={p} />
         <p className="text-xs text-orange-600 font-bold">{money(price)}</p>
         {p.tax_rate > 0 && <p className="text-[9px] text-slate-400">incl. {p.tax_rate}% tax</p>}
         {p.stock_qty <= 0 ? (
