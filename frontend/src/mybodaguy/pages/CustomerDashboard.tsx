@@ -128,7 +128,7 @@ function RideListItem({
           <p className="text-sm font-semibold text-slate-800 line-clamp-2 break-words">{ride.pickup_location}</p>
           <p className="text-xs text-slate-400 line-clamp-2 break-words">to {ride.dropoff_location}</p>
           <div className="mt-1.5 flex items-center gap-2">
-            <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full font-semibold capitalize ${
+            <span className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-semibold capitalize min-[360px]:text-[11px] min-[360px]:px-2 ${
               contact ? 'bg-emerald-100 text-emerald-700' : statusColor(ride.status)
             }`}>
               <span className={`h-1.5 w-1.5 rounded-full bg-current ${contact ? 'animate-pulse' : ''}`} />
@@ -568,6 +568,51 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
   const ActiveTabIcon = activeTabMeta.icon;
   const greeting = greetingForHour(new Date().getHours());
 
+  // ── Smart Overview arrangement ──────────────────────────────────────────
+  // What needs the customer's attention right now (a running order, an
+  // installment plan waiting on them) floats to the top; everything else keeps
+  // a stable, predictable place below. Quick actions re-rank by what this
+  // customer actually does: the more deliveries than rides they have, the
+  // earlier Delivery sits, and a tile with something waiting jumps the queue.
+  const runningRides = rides.filter(r => isCancellableRideStatus(r.status));
+  const liveRide = runningRides.find(r => ['accepted', 'in_progress'].includes(r.status)) ?? runningRides[0] ?? null;
+  const liveRideContact = liveRide ? activeRideContacts[liveRide.id] : undefined;
+  const deliveryCount = rides.filter(r => r.service_type === 'delivery').length;
+  const prefersDelivery = deliveryCount > 0 && deliveryCount >= rides.length - deliveryCount;
+  const quickActions = ([
+    { label: 'Delivery',        desc: 'From a store or a normal pickup', icon: Package,       tile: 'bg-sky-50 text-sky-600',         tab: 'delivery' as TabType,     badge: 0,                  score: prefersDelivery ? 60 : 30 },
+    { label: 'Scan & Checkout', desc: 'POS · Pay with ICAN',             icon: ScanLine,      tile: 'bg-emerald-50 text-emerald-600', tab: 'shop' as TabType,        badge: 0,                  score: 40 },
+    { label: 'My Orders',       desc: runningRides.length > 0 ? `${runningRides.length} running now` : 'Track rides & deliveries', icon: ClipboardList, tile: 'bg-orange-50 text-orange-600', tab: 'orders' as TabType, badge: runningRides.length, score: runningRides.length > 0 ? 90 : 50 },
+    { label: 'Installments',    desc: installmentAlerts > 0 ? `${installmentAlerts} need${installmentAlerts === 1 ? 's' : ''} you` : 'Pay over time, then collect or deliver', icon: CalendarClock, tile: 'bg-violet-50 text-violet-600', tab: 'installments' as TabType, badge: installmentAlerts, score: installmentAlerts > 0 ? 100 : 20 },
+    { label: 'Rewards',         desc: 'Earn & redeem points',            icon: Gift,          tile: 'bg-amber-50 text-amber-600',     tab: 'rewards' as TabType,     badge: 0,                  score: 10 },
+  ]).sort((a, b) => b.score - a.score);
+
+  const bookHero = (
+    <button type="button" onClick={() => setActiveTab('book-ride')}
+      className="group relative w-full overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-3.5 min-[360px]:p-5 text-left text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40 transition-transform active:scale-[0.99]">
+      <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full border border-[#c4a052]/25" />
+      <span aria-hidden className="pointer-events-none absolute -right-5 -top-5 h-28 w-28 rounded-full border border-[#c4a052]/20" />
+      <span aria-hidden className="pointer-events-none absolute -bottom-14 -left-10 h-40 w-40 rounded-full bg-orange-500/20 blur-2xl" />
+      <div className="relative flex items-center justify-between gap-3 min-[360px]:gap-4">
+        <div className="min-w-0">
+          <p className="text-[9px] font-semibold uppercase tracking-[0.2em] text-[#e6c980] min-[360px]:text-[10px] min-[360px]:tracking-[0.24em]">Get moving</p>
+          <p className="mt-1 font-classic-display text-[22px] font-bold leading-tight min-[360px]:text-[26px]">Book a Ride</p>
+          <p className="mt-1 text-xs text-white/70 min-[360px]:text-[13px]">
+            {nearby && nearby.count > 0
+              ? <>{nearby.count} {nearby.count === 1 ? 'rider' : 'riders'} near you{nearby.eta_min != null ? <> · nearest ~{nearby.eta_min} min</> : null}</>
+              : 'Boda, car, van or truck'}
+          </p>
+          <span className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-orange-950/30">
+            Book now <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
+          </span>
+        </div>
+        <span className="grid h-14 w-14 flex-shrink-0 place-items-center rounded-full bg-white/5 ring-1 ring-[#c4a052]/50 min-[360px]:h-20 min-[360px]:w-20">
+          <Bike size={32} strokeWidth={1.4} className="text-[#e6c980]" />
+        </span>
+      </div>
+    </button>
+  );
+
   return (
     <div className="min-h-screen classic-page">
 
@@ -661,19 +706,23 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
 
         {/* Overview */}
         {activeTab === 'overview' && (
-          <div className="space-y-6">
+          <div className="space-y-4 min-[360px]:space-y-6">
             {/* Greeting — live traffic/peak-time/location insights update as
                 rides come in (realtime) and every 45s for the rider/stock
                 hotspots, cycling through an animated slider one at a time */}
             <div>
               <div className="flex items-start justify-between gap-3">
                 <h2 className="min-w-0 font-classic-display leading-tight">
-                  <span className="block text-[18px] font-medium text-slate-500">{greeting},</span>
-                  <span className="block break-words text-[30px] font-bold tracking-tight text-slate-900">{customerName}</span>
+                  <span className="block text-base font-medium text-slate-500 min-[360px]:text-[18px]">{greeting},</span>
+                  <span className="block break-words text-[26px] font-bold tracking-tight text-slate-900 min-[360px]:text-[30px]">{customerName}</span>
                 </h2>
                 {insightSlides.length > 0 && (
-                  <span className="mt-1.5 flex flex-shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-100">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block" /> Live
+                  <span
+                    aria-label="Live"
+                    className="mt-1.5 flex flex-shrink-0 items-center gap-1 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-600 ring-1 ring-inset ring-emerald-100 min-[360px]:gap-1.5 min-[360px]:px-2 min-[360px]:text-[10px]"
+                  >
+                    <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                    <span className="max-[339px]:hidden">Live</span>
                   </span>
                 )}
               </div>
@@ -698,8 +747,73 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
               )}
             </div>
 
+            {/* Needs you now — only renders when something is actually waiting,
+                so a quiet account sees a short, calm page. */}
+            {(liveRide || installmentAlerts > 0) && (
+              <div className="space-y-2.5">
+                {liveRide && (
+                  <div className="classic-card !border-orange-300 p-3.5 ring-2 ring-orange-200/60 min-[360px]:p-4">
+                    <div className="flex items-center gap-3">
+                      <span className="relative grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-orange-50 ring-1 ring-inset ring-orange-100 min-[360px]:h-11 min-[360px]:w-11">
+                        {liveRide.service_type === 'delivery' ? <Package size={18} className="text-blue-500" /> : <Bike size={18} className="text-orange-500" />}
+                        <span className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500 ring-2 ring-white dark:ring-slate-800" />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="classic-eyebrow !text-[9px] !tracking-[0.16em] min-[360px]:!text-[10px]">
+                          {liveRide.status === 'pending'
+                            ? 'Finding you a rider'
+                            : liveRide.status === 'accepted'
+                              ? (liveRideContact ? `${liveRideContact.name} is on the way` : 'Rider is on the way')
+                              : liveRide.service_type === 'delivery' ? 'Delivery in progress' : 'Trip in progress'}
+                        </p>
+                        <p className="mt-0.5 truncate text-sm font-semibold text-slate-800">to {liveRide.dropoff_location}</p>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTrackedRide(liveRide)}
+                        className="flex-1 rounded-full bg-gradient-to-r from-orange-500 to-amber-400 py-2 text-xs font-bold text-white shadow-md shadow-orange-500/25 transition-transform active:scale-[0.98]"
+                      >
+                        Track live
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveTab('orders')}
+                        className="rounded-full border border-orange-200 px-3.5 py-2 text-xs font-semibold text-orange-600 transition-colors hover:bg-orange-50"
+                      >
+                        {runningRides.length > 1 ? `All ${runningRides.length}` : 'Orders'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {installmentAlerts > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('installments')}
+                    className="classic-card flex w-full items-center gap-3 !border-violet-300 p-3.5 text-left transition-all active:scale-[0.99] min-[360px]:p-4"
+                  >
+                    <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-violet-50 text-violet-600 ring-1 ring-inset ring-violet-100">
+                      <CalendarClock size={18} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-classic-display text-base font-semibold leading-tight text-slate-800">
+                        {installmentAlerts === 1 ? 'An installment plan needs you' : `${installmentAlerts} installment plans need you`}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-slate-500">Deposit due, overdue or ready to collect</span>
+                    </span>
+                    <ArrowRight size={16} className="flex-shrink-0 text-violet-500" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* Book a Ride hero is the main action, so it now sits directly under
+                the greeting; wallet and rewards follow as the at-a-glance row. */}
+            {bookHero}
+
             {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-2 min-[360px]:gap-3">
               <IcanCoinCard variant="premium" userId={user?.id} onGoToWallet={goToWallet} />
               <RewardsPointsCard variant="premium" userId={user?.id} onOpen={() => setActiveTab('rewards')} />
             </div>
@@ -707,44 +821,23 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             {/* Quick actions — Book a Ride gets the hero treatment (it's the
                 thing most people open the app to do), the rest sit in a 2-up grid */}
             <div className="space-y-3">
-              <SectionHeading>Quick actions</SectionHeading>
+              <SectionHeading>For you</SectionHeading>
 
-              <button type="button" onClick={() => setActiveTab('book-ride')}
-                className="group relative w-full overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-4 min-[360px]:p-5 text-left text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40 transition-transform active:scale-[0.99]">
-                <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full border border-[#c4a052]/25" />
-                <span aria-hidden className="pointer-events-none absolute -right-5 -top-5 h-28 w-28 rounded-full border border-[#c4a052]/20" />
-                <span aria-hidden className="pointer-events-none absolute -bottom-14 -left-10 h-40 w-40 rounded-full bg-orange-500/20 blur-2xl" />
-                <div className="relative flex items-center justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]">Get moving</p>
-                    <p className="mt-1 font-classic-display text-[26px] font-bold leading-tight">Book a Ride</p>
-                    <p className="mt-1 text-[13px] text-white/70">Boda, car, van or truck</p>
-                    <span className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-400 px-4 py-2 text-xs font-bold text-white shadow-lg shadow-orange-950/30">
-                      Book now <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
-                    </span>
-                  </div>
-                  <span className="grid h-16 w-16 flex-shrink-0 place-items-center rounded-full bg-white/5 ring-1 ring-[#c4a052]/50 min-[360px]:h-20 min-[360px]:w-20">
-                    <Bike size={36} strokeWidth={1.4} className="text-[#e6c980]" />
-                  </span>
-                </div>
-              </button>
-
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-                {[
-                  { label: 'Delivery',        desc: 'From a store or a normal pickup', icon: Package,       tile: 'bg-sky-50 text-sky-600',         tab: 'delivery' as TabType },
-                  { label: 'Scan & Checkout', desc: 'POS · Pay with ICAN',             icon: ScanLine,      tile: 'bg-emerald-50 text-emerald-600', tab: 'shop' as TabType },
-                  { label: 'My Orders',       desc: 'Track rides & deliveries',        icon: ClipboardList, tile: 'bg-orange-50 text-orange-600',   tab: 'orders' as TabType },
-                  { label: 'Installments', desc: 'Pay over time, then collect or deliver', icon: CalendarClock, tile: 'bg-violet-50 text-violet-600', tab: 'installments' as TabType },
-                  { label: 'Rewards',         desc: 'Earn & redeem points',            icon: Gift,          tile: 'bg-amber-50 text-amber-600',     tab: 'rewards' as TabType },
-                ].map(c => (
+              <div className="grid grid-cols-2 gap-2.5 min-[360px]:gap-3 lg:grid-cols-5">
+                {quickActions.map(c => (
                   <button key={c.tab} type="button" onClick={() => setActiveTab(c.tab)}
-                    className="classic-card flex min-h-[128px] flex-col justify-between gap-3 p-4 text-left transition-all active:scale-[0.98] hover:border-orange-300">
-                    <span className={`grid h-11 w-11 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${c.tile}`}>
-                      <c.icon size={20} />
+                    className="classic-card relative flex min-h-[108px] flex-col justify-between gap-2.5 p-3.5 text-left transition-all hover:border-orange-300 active:scale-[0.98] min-[360px]:min-h-[128px] min-[360px]:gap-3 min-[360px]:p-4">
+                    {c.badge > 0 && (
+                      <span className="absolute right-2.5 top-2.5 grid h-5 min-w-[20px] place-items-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white min-[360px]:right-3 min-[360px]:top-3 min-[360px]:h-6 min-[360px]:min-w-[24px] min-[360px]:px-1.5 min-[360px]:text-[11px]">
+                        {c.badge > 99 ? '99+' : c.badge}
+                      </span>
+                    )}
+                    <span className={`grid h-10 w-10 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 min-[360px]:h-11 min-[360px]:w-11 ${c.tile}`}>
+                      <c.icon size={19} />
                     </span>
                     <span>
-                      <span className="block text-[15px] font-semibold leading-tight text-slate-800">{c.label}</span>
-                      <span className="mt-1 block text-xs leading-snug text-slate-500">{c.desc}</span>
+                      <span className="block text-sm font-semibold leading-tight text-slate-800 min-[360px]:text-[15px]">{c.label}</span>
+                      <span className="mt-1 line-clamp-2 block text-[11px] leading-snug text-slate-500 min-[360px]:text-xs">{c.desc}</span>
                     </span>
                   </button>
                 ))}
@@ -757,7 +850,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                 type="button"
                 onClick={() => setRecentRidesOpen(o => !o)}
                 aria-expanded={recentRidesOpen}
-                className="w-full flex items-center justify-between gap-3 p-4"
+                className="w-full flex items-center justify-between gap-3 p-3.5 min-[360px]:p-4"
               >
                 <span className="flex items-center gap-3">
                   <span className="grid h-10 w-10 place-items-center rounded-full bg-orange-50 ring-1 ring-inset ring-orange-100">

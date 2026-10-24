@@ -442,16 +442,44 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
       <div className="container mx-auto px-4 pt-5 pb-28">
         {/* Tab Content */}
         {activeTab === 'overview' && (
-          <div className="space-y-6">
+          <div className="space-y-4 min-[360px]:space-y-6">
             {/* Greeting */}
             <div>
               <h2 className="font-classic-display leading-tight">
-                <span className="block text-[18px] font-medium text-slate-500">{greeting},</span>
-                <span className="block break-words text-[30px] font-bold tracking-tight text-slate-900">{displayName}</span>
+                <span className="block text-base font-medium text-slate-500 min-[360px]:text-[18px]">{greeting},</span>
+                <span className="block break-words text-[26px] font-bold tracking-tight text-slate-900 min-[360px]:text-[30px]">{displayName}</span>
               </h2>
               <p className="mt-1 text-sm text-slate-500">Here's your chairperson dashboard overview.</p>
               <div className="landing-classic-divider mt-4" />
             </div>
+
+            {/* Needs you now — a vote on your own seat, or ballots waiting, is the
+                one thing on this page that can't wait, so it sits above the stats. */}
+            {(voteAttention.againstMe > 0 || voteAttention.needsMyVote > 0) && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('vote')}
+                className="classic-card flex w-full items-center gap-3 !border-orange-300 p-3.5 text-left ring-2 ring-orange-200/60 transition-all active:scale-[0.99] min-[360px]:p-4"
+              >
+                <span className="relative grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-orange-50 text-orange-600 ring-1 ring-inset ring-orange-100">
+                  <Vote size={18} />
+                  <span className="absolute -right-1 -top-1 grid h-4 min-w-[16px] place-items-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white ring-2 ring-white dark:ring-slate-800 min-[360px]:h-5 min-[360px]:min-w-[20px] min-[360px]:text-[10px]">
+                    {voteAttention.againstMe + voteAttention.needsMyVote}
+                  </span>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-classic-display text-base font-semibold leading-tight text-slate-800">
+                    {voteAttention.againstMe > 0 ? 'A vote is open on your seat' : 'Your ballot is needed'}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-slate-500">
+                    {voteAttention.needsMyVote > 0
+                      ? `${voteAttention.needsMyVote} vote${voteAttention.needsMyVote === 1 ? '' : 's'} waiting on you`
+                      : 'Tap to respond'}
+                  </span>
+                </span>
+                <ChevronRight size={16} className="flex-shrink-0 text-[#c4a052]" />
+              </button>
+            )}
 
             {/* Standing at a glance */}
             <LedgerStats
@@ -466,7 +494,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
 
             <div className="space-y-3">
               <SectionHeading>At a glance</SectionHeading>
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2.5 min-[360px]:gap-3 lg:grid-cols-4">
                 <StatTile icon={DollarSign} tone="bg-orange-50 text-orange-600" label="Commission" value={`${stats.totalCommission.toFixed(1)}%`} caption="Average rate" />
                 <StatTile icon={Bike} tone="bg-emerald-50 text-emerald-600" label="Rides" value={stats.monthlyRides} caption="Monthly" />
                 <StatTile icon={TrendingUp} tone="bg-sky-50 text-sky-600" label="Active" value={stats.activeSubordinates} caption={`${activePct} of your chairpersons`} />
@@ -492,18 +520,26 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                     icon: Vote, tile: 'bg-rose-50 text-rose-600', tab: 'vote' as TabType, show: true,
                   },
                   { label: 'Commission', desc: 'Track earnings', icon: DollarSign, tile: 'bg-amber-50 text-amber-600', tab: 'commission' as TabType, show: true },
-                ].filter(a => a.show).map(a => (
+                ].filter(a => a.show)
+                  .map(a => ({ ...a, count: a.tab === 'vote' ? voteAttention.againstMe + voteAttention.needsMyVote : 0 }))
+                  .sort((x, y) => Number(y.count > 0) - Number(x.count > 0))
+                  .map(a => (
                   <button
                     key={a.tab}
                     type="button"
                     onClick={() => setActiveTab(a.tab)}
-                    className="classic-card group flex w-full items-center gap-3 p-4 text-left transition-all active:scale-[0.99] hover:border-orange-300"
+                    className="classic-card group flex w-full items-center gap-3 p-3.5 text-left transition-all active:scale-[0.99] hover:border-orange-300 min-[360px]:p-4"
                   >
-                    <span className={`grid h-11 w-11 flex-shrink-0 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${a.tile}`}>
-                      <a.icon size={20} />
+                    <span className={`relative grid h-10 w-10 flex-shrink-0 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 min-[360px]:h-11 min-[360px]:w-11 ${a.tile}`}>
+                      <a.icon size={19} />
+                      {a.count > 0 && (
+                        <span className="absolute -right-1.5 -top-1.5 grid h-4 min-w-[16px] place-items-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white ring-2 ring-white dark:ring-slate-800 min-[360px]:h-5 min-[360px]:min-w-[20px] min-[360px]:text-[10px]">
+                          {a.count}
+                        </span>
+                      )}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block font-classic-display text-[17px] font-semibold leading-tight text-slate-800">{a.label}</span>
+                      <span className="block font-classic-display text-base font-semibold leading-tight text-slate-800 min-[360px]:text-[17px]">{a.label}</span>
                       <span className="mt-0.5 block text-xs text-slate-500">{a.desc}</span>
                     </span>
                     <ChevronRight size={18} className="flex-shrink-0 text-[#c4a052] transition-transform group-hover:translate-x-0.5" />
@@ -575,10 +611,10 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                       </h4>
                       <p className="mt-0.5 text-xs text-slate-500 truncate">{subordinate.email}</p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#fbf3dc] px-2 py-0.5 text-[10px] font-semibold text-[#7a5a12] ring-1 ring-inset ring-[#c4a052]/40">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#fbf3dc] px-1.5 py-0.5 text-[9px] min-[360px]:px-2 min-[360px]:text-[10px] font-semibold text-[#7a5a12] ring-1 ring-inset ring-[#c4a052]/40">
                           <User size={10} /> {formatRole(subordinate.role)}
                         </span>
-                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] min-[360px]:px-2 min-[360px]:text-[10px] font-medium text-slate-600">
                           <MapPin size={10} /> {subordinate.region_name}
                         </span>
                       </div>
@@ -703,10 +739,10 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                       </h4>
                       <p className="mt-0.5 text-xs text-slate-500 truncate">{rider.email}</p>
                       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-[#fbf3dc] px-2 py-0.5 text-[10px] font-semibold capitalize text-[#7a5a12] ring-1 ring-inset ring-[#c4a052]/40">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-[#fbf3dc] px-1.5 py-0.5 text-[9px] min-[360px]:px-2 min-[360px]:text-[10px] font-semibold capitalize text-[#7a5a12] ring-1 ring-inset ring-[#c4a052]/40">
                           <Bike size={10} /> {rider.vehicle_type}
                         </span>
-                        <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium uppercase text-slate-600">
+                        <span className="inline-flex items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] min-[360px]:px-2 min-[360px]:text-[10px] font-medium uppercase text-slate-600">
                           {rider.plate_number}
                         </span>
                         {riderCards[rider.id] && (
@@ -1006,10 +1042,10 @@ function LedgerStats({ items }: { items: { label: string; value: React.ReactNode
       style={{ gridTemplateColumns: `repeat(${items.length}, minmax(0, 1fr))` }}
     >
       {items.map(item => (
-        <div key={item.label} className="min-w-0 px-2 py-4 text-center">
-          <item.icon size={16} className="mx-auto text-orange-500" />
-          <p className="mt-2 truncate font-classic-display text-[22px] font-bold leading-none text-slate-900 sm:text-[26px]">{item.value}</p>
-          <p className="classic-eyebrow mt-2 truncate !tracking-[0.14em]">{item.label}</p>
+        <div key={item.label} className="min-w-0 px-1.5 py-3 text-center min-[360px]:px-2 min-[360px]:py-4">
+          <item.icon size={15} className="mx-auto text-orange-500" />
+          <p className="mt-1.5 truncate font-classic-display text-xl font-bold leading-none text-slate-900 min-[360px]:mt-2 min-[360px]:text-[22px] sm:text-[26px]">{item.value}</p>
+          <p className="classic-eyebrow mt-1.5 truncate !text-[9px] !tracking-[0.1em] min-[360px]:mt-2 min-[360px]:!text-[10px] min-[360px]:!tracking-[0.14em]">{item.label}</p>
         </div>
       ))}
     </div>
@@ -1024,13 +1060,13 @@ function StatTile({ icon: Icon, tone, label, value, caption }: {
   caption: string;
 }) {
   return (
-    <div className="classic-card p-4">
-      <span className={`grid h-10 w-10 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 ${tone}`}>
-        <Icon size={18} />
+    <div className="classic-card p-3.5 min-[360px]:p-4">
+      <span className={`grid h-9 w-9 place-items-center rounded-2xl ring-1 ring-inset ring-black/5 min-[360px]:h-10 min-[360px]:w-10 ${tone}`}>
+        <Icon size={17} />
       </span>
-      <p className="mt-3 font-classic-display text-[28px] font-bold leading-none text-slate-900">{value}</p>
-      <p className="mt-1.5 text-[13px] font-semibold text-slate-700">{label}</p>
-      <p className="text-xs text-slate-400">{caption}</p>
+      <p className="mt-2.5 font-classic-display text-2xl font-bold leading-none text-slate-900 min-[360px]:mt-3 min-[360px]:text-[28px]">{value}</p>
+      <p className="mt-1.5 text-xs font-semibold text-slate-700 min-[360px]:text-[13px]">{label}</p>
+      <p className="line-clamp-2 text-[11px] text-slate-400 min-[360px]:text-xs">{caption}</p>
     </div>
   );
 }

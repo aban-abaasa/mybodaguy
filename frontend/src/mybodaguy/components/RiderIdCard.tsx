@@ -35,7 +35,7 @@ const TONE_CLASS: Record<Tone, string> = {
 // Small coloured status pill shared by the card, the chairperson's list and the public page.
 export function ToneChip({ tone, children }: { tone: Tone; children: React.ReactNode }) {
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${TONE_CLASS[tone]}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold ring-1 ring-inset min-[360px]:px-2 min-[360px]:text-[10px] ${TONE_CLASS[tone]}`}>
       {children}
     </span>
   );
