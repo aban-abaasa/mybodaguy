@@ -3,6 +3,7 @@ import { AlertTriangle, Ban, CheckCircle, Clock, FileCheck, MapPin, Phone, Shiel
 import { FeesChip, InsuranceChip, PermitChip, RiderCardVisual, ToneChip, type CardVisualData } from './RiderIdCard';
 import RiderCardGatePanel from './RiderCardGatePanel';
 import RiderGateRecord from './RiderGateRecord';
+import RiderCardRidePanel from './RiderCardRidePanel';
 import { POLICY_STATE_META, coverTypeLabel } from '../services/insuranceService';
 import {
   formatUgx,
@@ -147,6 +148,9 @@ export default function RiderCardVerifyPage({ code }: { code: string }) {
             {/* Staff of a restricted zone (an estate, a campus, a hospital, a market…) check this vehicle in or out right here. Appears only
                 for a signed-in person whose role runs a gate; for everyone else the page is exactly the public check it always was. */}
             {state && <RiderCardGatePanel code={code} onRecorded={() => setRecordKey((n) => n + 1)} />}
+
+            {/* Anyone who scanned the card can ask this rider for a ride, account or not. Only a genuine, active card offers it. */}
+            {state === 'valid' && <RiderCardRidePanel code={code} riderName={proof.full_name ?? ''} />}
 
             {showDetails && (
               <>

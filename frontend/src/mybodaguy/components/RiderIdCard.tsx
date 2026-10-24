@@ -313,9 +313,9 @@ export function CardBack({
           </div>
         )}
         <div className="rc-fine">
-          <strong>{active ? 'Scan to verify' : status === 'expired' ? 'Card expired' : 'QR locked'}</strong>
+          <strong>{active ? 'Scan to verify or ride' : status === 'expired' ? 'Card expired' : 'QR locked'}</strong>
           {active
-            ? 'Rider details, permit, fees and insurance, live.'
+            ? 'Check this rider live, or book a ride with them. No account needed.'
             : status === 'expired'
               ? `Renew for ${data.fee_ican ?? 2} ICAN to unlock this card's QR code.`
               : `Pay ${data.fee_ican ?? 2} ICAN to unlock this card's QR code.`}
