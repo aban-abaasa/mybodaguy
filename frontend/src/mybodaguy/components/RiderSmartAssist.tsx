@@ -21,12 +21,6 @@ import {
  * Everything runs while the dashboard is open; there is no server-side push.
  */
 
-// Fired whenever the rider goes online/offline, so the dashboard's two switches
-// (this card and the Working time card) always agree.
-export const AVAILABILITY_EVENT = 'mbg:availability';
-export const announceAvailability = (userId: string, vehicleType: string, online: boolean) =>
-  window.dispatchEvent(new CustomEvent(AVAILABILITY_EVENT, { detail: { userId, vehicleType, online } }));
-
 const SNAPSHOT_REFRESH_MS = 10 * 60 * 1000;
 const TICK_MS = 5 * 60 * 1000;
 
@@ -255,19 +249,6 @@ export function useRiderSmartAssist({ userId, riderId, vehicleType, mode, pendin
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotspots, now, nudgeVersion, storeKey]);
 
-  // The other switch (Working time card) flipped availability: follow it.
-  useEffect(() => {
-    const onChange = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      if (!d || d.userId !== userId || d.vehicleType !== vehicleType) return;
-      setRow(r => (r ? { ...r, isAvailable: !!d.online } : r));
-      markOnline(!!d.online);
-    };
-    window.addEventListener(AVAILABILITY_EVENT, onChange);
-    return () => window.removeEventListener(AVAILABILITY_EVENT, onChange);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, vehicleType, storeKey]);
-
   const setOnline = useCallback(async (next: boolean) => {
     if (!userId || !vehicleType || togglingOnline) return;
     setTogglingOnline(true);
@@ -285,7 +266,6 @@ export function useRiderSmartAssist({ userId, riderId, vehicleType, mode, pendin
       toast.error(error.message || 'Failed to update working status');
       return;
     }
-    announceAvailability(userId, vehicleType, next);
     toast.success(next ? "You're online — customers can now request rides" : "You're offline — no new requests will come in");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, vehicleType, togglingOnline, storeKey]);
@@ -411,6 +391,7 @@ export function useRiderSmartAssist({ userId, riderId, vehicleType, mode, pendin
     mode, rec, auto, setAuto, switching, setMode,
     rates: { vip: row?.vip ?? 10, discount: row?.discount ?? 10, ret: row?.ret ?? 30 },
     isOnline: !!row?.isAvailable,
+    rowLoaded: row !== null,
     setOnline, togglingOnline, onlineSince,
     areas, areasLoaded,
     hotspots: dueHotspots, snooze, addHotspot, addingKey,

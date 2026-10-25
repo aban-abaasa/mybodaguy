@@ -6,7 +6,7 @@ import {
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
-import { useRiderSmartAssist, WorkModeCard, MyAreasCard, AVAILABILITY_EVENT, announceAvailability } from '../components/RiderSmartAssist';
+import { useRiderSmartAssist, WorkModeCard, MyAreasCard } from '../components/RiderSmartAssist';
 import type { WorkMode } from '../utils/riderSmarts';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
@@ -17,7 +17,7 @@ import RiderGatePasses from '../components/RiderGatePasses';
 import IcanCoinCard from '../components/IcanCoinCard';
 import RewardsPointsCard from '../components/RewardsPointsCard';
 import RiderEarningsCard, { buildWeekEarnings, type DayEarning } from '../components/RiderEarningsCard';
-import { SectionHeading, greetingForHour } from '../components/ClassicBits';
+import { SectionHeading } from '../components/ClassicBits';
 import RewardsHub from '../components/RewardsHub';
 import RiderCover from '../components/cover/RiderCover';
 import LeadershipVote, { useLeadershipAttention } from '../components/LeadershipVote';
@@ -131,109 +131,6 @@ function useLiveLocationPing(userId: string | undefined) {
     const interval = setInterval(ping, 60000);
     return () => clearInterval(interval);
   }, [userId]);
-}
-
-// On/off slider for the rider's working time — toggles mbg_riders.is_available,
-// the same flag the matching engine (mbg_find_available_riders) filters on.
-// Scoped by vehicleType, not just userId — a person can hold more than one
-// mbg_riders row now (multi-vehicle), and only the ACTIVE one should ever
-// flip online; the inactive one(s) must stay offline regardless (enforced
-// server-side too, by mbg_switch_active_vehicle).
-function WorkingTimeToggle({ userId, vehicleType, children }: { userId: string; vehicleType: string | null; children?: React.ReactNode }) {
-  const [isAvailable, setIsAvailable] = useState(false);
-  const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  // The Work mode card has its own on/off switch — follow it.
-  useEffect(() => {
-    const onChange = (e: Event) => {
-      const d = (e as CustomEvent).detail;
-      if (d?.userId === userId && d?.vehicleType === vehicleType) setIsAvailable(!!d.online);
-    };
-    window.addEventListener(AVAILABILITY_EVENT, onChange);
-    return () => window.removeEventListener(AVAILABILITY_EVENT, onChange);
-  }, [userId, vehicleType]);
-
-  useEffect(() => {
-    if (!userId || !vehicleType) return;
-    supabase
-      .from('mbg_riders')
-      .select('is_available')
-      .eq('user_id', userId)
-      .eq('vehicle_type', vehicleType)
-      .maybeSingle()
-      .then(({ data }) => {
-        setIsAvailable(!!data?.is_available);
-        setLoaded(true);
-      });
-  }, [userId, vehicleType]);
-
-  const toggle = async () => {
-    if (!vehicleType) return;
-    const next = !isAvailable;
-    setIsAvailable(next);
-    setSaving(true);
-    const { error } = await supabase
-      .from('mbg_riders')
-      .update({ is_available: next, updated_at: new Date().toISOString() })
-      .eq('user_id', userId)
-      .eq('vehicle_type', vehicleType);
-    setSaving(false);
-    if (error) {
-      setIsAvailable(!next);
-      toast.error(error.message || 'Failed to update working status');
-    } else {
-      announceAvailability(userId, vehicleType, next);
-      toast.success(next ? "You're online — customers can now request rides" : "You're offline — no new requests will come in");
-    }
-  };
-
-  return (
-    <div className="relative overflow-hidden rounded-[22px] bg-gradient-to-br from-[#231b12] via-[#2f2415] to-[#4a3418] p-3.5 text-white shadow-[0_18px_34px_-16px_rgba(0,0,0,0.65)] ring-1 ring-inset ring-[#c4a052]/40 min-[360px]:p-5">
-      <span aria-hidden className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full border border-[#c4a052]/25" />
-      <span aria-hidden className="pointer-events-none absolute -right-5 -top-5 h-28 w-28 rounded-full border border-[#c4a052]/20" />
-      <span
-        aria-hidden
-        className={`pointer-events-none absolute -bottom-14 -left-10 h-40 w-40 rounded-full blur-2xl transition-colors duration-700 ${
-          isAvailable ? 'bg-emerald-500/30' : 'bg-orange-500/20'
-        }`}
-      />
-
-      <div className="relative flex items-center justify-between gap-3 min-[360px]:gap-4">
-        <div className="min-w-0">
-          <p className="flex items-center gap-2 text-[9px] font-semibold uppercase tracking-[0.2em] text-[#e6c980] min-[360px]:text-[10px] min-[360px]:tracking-[0.24em]">
-            <span className={`h-1.5 w-1.5 rounded-full ${isAvailable ? 'animate-pulse bg-emerald-400' : 'bg-white/40'}`} />
-            Working time
-          </p>
-          <p className="mt-1 font-classic-display text-[22px] font-bold leading-tight min-[360px]:text-[26px]">
-            {isAvailable ? "You're Online" : "You're Offline"}
-          </p>
-          <p className="mt-1 text-xs text-white/70 min-[360px]:text-[13px]">
-            {isAvailable ? 'Customers can request you right now' : 'Switch on to start receiving requests'}
-          </p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isAvailable}
-          aria-label="Working status"
-          onClick={toggle}
-          disabled={!loaded || saving}
-          className={`relative h-9 w-[60px] flex-shrink-0 rounded-full ring-1 ring-inset transition-colors active:scale-95 disabled:opacity-60 min-[360px]:h-10 min-[360px]:w-[68px] ${
-            isAvailable ? 'bg-emerald-500 ring-emerald-300/60' : 'bg-white/15 ring-[#c4a052]/50'
-          }`}
-        >
-          <span
-            className={`absolute left-1 top-1 h-7 w-7 rounded-full bg-[#fffdf7] shadow-md transition-transform min-[360px]:h-8 min-[360px]:w-8 ${
-              isAvailable ? 'translate-x-6 min-[360px]:translate-x-7' : 'translate-x-0'
-            }`}
-          />
-        </button>
-      </div>
-
-      {children && <div className="relative mt-4 border-t border-[#c4a052]/25 pt-4">{children}</div>}
-    </div>
-  );
 }
 
 // Compact "UGX 45k" style formatting for the greeting's insight slides.
@@ -474,6 +371,12 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
     useRiderActivity(activeRiderId, riderStats?.operatorType === 'escort');
   const [switchingVehicle, setSwitchingVehicle] = useState(false);
   const [riderName, setRiderName] = useState('You');
+  // Re-evaluated every few minutes so the hello and the smart line follow the clock.
+  const [smartNow, setSmartNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setSmartNow(Date.now()), 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
   // Work-mode + My-areas cards: demand-driven mode suggestions / Auto, and
   // nudges to add an area customers keep asking for.
   const smartAssist = useRiderSmartAssist({
@@ -602,11 +505,56 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
     }
   };
 
+  // Smart greeting: the time of day sets the hello, and one line says the
+  // single thing most worth knowing right now (first match wins).
+  const greetHour = new Date(smartNow).getHours();
+  const greet = greetHour < 5 ? { text: 'Working late', emoji: '🌙' }
+    : greetHour < 12 ? { text: 'Good morning', emoji: '🌅' }
+    : greetHour < 17 ? { text: 'Good afternoon', emoji: '☀️' }
+    : greetHour < 21 ? { text: 'Good evening', emoji: '🌆' }
+    : { text: 'Good night', emoji: '🌙' };
+
+  const smartLine = ((): { emoji: string; text: React.ReactNode; tone: string; onClick?: () => void } => {
+    const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    if (pendingCount > 0) {
+      return { emoji: '🔔', tone: 'bg-orange-50 text-orange-800 ring-orange-200', onClick: () => setActiveTab('requests'),
+        text: <><strong>{plural(pendingCount, 'request')}</strong> waiting for you — tap to review</> };
+    }
+    if (activeCount > 0) {
+      return { emoji: '🏍️', tone: 'bg-emerald-50 text-emerald-800 ring-emerald-200', text: <>You're on a job — ride safe.</> };
+    }
+    if (!smartAssist.rowLoaded) {
+      return { emoji: '👋', tone: 'bg-slate-50 text-slate-600 ring-slate-200', text: <>Here's how your day is going.</> };
+    }
+    if (!smartAssist.isOnline) {
+      if (smartAssist.waiting > 0) {
+        return { emoji: '⚡', tone: 'bg-orange-50 text-orange-800 ring-orange-200',
+          text: <><strong>{plural(smartAssist.waiting, 'request')}</strong> nearby right now — go online to catch {smartAssist.waiting === 1 ? 'it' : 'them'}</> };
+      }
+      if (smartAssist.rec?.mode === 'vip' && smartAssist.rec.confidence >= 0.4) {
+        return { emoji: '📈', tone: 'bg-amber-50 text-amber-800 ring-amber-200', text: <>{smartAssist.rec.reason} Go online to catch it.</> };
+      }
+      return { emoji: '😴', tone: 'bg-slate-50 text-slate-600 ring-slate-200', text: <>You're offline — slide on whenever you're ready.</> };
+    }
+    const today = week?.[6];
+    const yesterday = week?.[5];
+    if (today && yesterday && yesterday.amount > 0 && today.amount > yesterday.amount) {
+      return { emoji: '📈', tone: 'bg-emerald-50 text-emerald-800 ring-emerald-200',
+        text: <>Today is <strong>{Math.round((today.amount / yesterday.amount) * 100) - 100}% ahead</strong> of yesterday</> };
+    }
+    const done = riderStats?.ridesDone ?? 0;
+    const nextMilestone = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000].find(m => m > done);
+    if (done > 0 && nextMilestone && nextMilestone - done <= 5) {
+      return { emoji: '🎯', tone: 'bg-violet-50 text-violet-800 ring-violet-200',
+        text: <><strong>{plural(nextMilestone - done, 'ride')}</strong> to your {nextMilestone}th</> };
+    }
+    return { emoji: '🟢', tone: 'bg-emerald-50 text-emerald-800 ring-emerald-200', text: <>You're online — customers can request you now.</> };
+  })();
+
   const switchTab = (id: TabType) => { setActiveTab(id); setShowMobileMenu(false); };
 
   const activeTabMeta = TAB_META[activeTab];
   const ActiveTabIcon = activeTabMeta.icon;
-  const greeting = greetingForHour(new Date().getHours());
   const isEscort = riderStats?.operatorType === 'escort';
   const rating = riderStats?.rating ?? 0;
   // The week only loads once there's a vehicle row to query by; an account
@@ -720,7 +668,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
             <div>
               <div className="flex items-start justify-between gap-3">
                 <h2 className="min-w-0 font-classic-display leading-tight">
-                  <span className="block text-base font-medium text-slate-500 min-[360px]:text-[18px]">{greeting},</span>
+                  <span className="block text-base font-medium text-slate-500 min-[360px]:text-[18px]"><span aria-hidden className="mr-1.5">{greet.emoji}</span>{greet.text},</span>
                   <span className="block break-words text-[26px] font-bold tracking-tight text-slate-900 min-[360px]:text-[30px]">{riderName}</span>
                 </h2>
                 {insightSlides.length > 0 && (
@@ -733,45 +681,40 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                   </span>
                 )}
               </div>
-              <p className="mt-1 text-sm text-slate-500">Here's how your day is going.</p>
-              <div className="landing-classic-divider mt-4" />
-              {insightSlides.length > 0 && (
-                <div className="mt-3">
-                  <InsightSlider slides={insightSlides} />
-                </div>
-              )}
-            </div>
-
-            {pendingCount > 0 && requestsCard}
-
-            {/* Working time — the one switch that matters — with the vehicle
-                this account was approved for (or a switcher when they hold
-                more than one; see ADD_MULTI_VEHICLE_SUPPORT.sql) tucked
-                underneath. */}
-            <WorkingTimeToggle userId={user.id} vehicleType={activeVehicleType}>
+              {(() => {
+                const inner = (
+                  <>
+                    <span className="text-base leading-none" aria-hidden>{smartLine.emoji}</span>
+                    <span className="min-w-0 flex-1 text-[13px] leading-snug">{smartLine.text}</span>
+                    {smartLine.onClick && <ArrowRight size={15} className="flex-shrink-0 opacity-60" />}
+                  </>
+                );
+                const cls = `mt-3 flex w-full items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left ring-1 ring-inset ${smartLine.tone}`;
+                return smartLine.onClick
+                  ? <button type="button" onClick={smartLine.onClick} className={`${cls} transition-transform active:scale-[0.99]`}>{inner}</button>
+                  : <div className={cls}>{inner}</div>;
+              })()}
               {riderStats?.vehicleType && (() => {
                 const meta = VEHICLE_TYPE_META[riderStats.vehicleType] || { label: riderStats.vehicleType, icon: Bike, use: '' };
                 const Icon = meta.icon;
                 const detail = `${meta.use}${riderStats.operatorType === 'cargo' ? ' · Cargo operator' : ''}`;
 
+                // One vehicle: a quiet line. More than one (see
+                // ADD_MULTI_VEHICLE_SUPPORT.sql): a switcher, and only the
+                // active one can go online.
                 if (allVehicles.length <= 1) {
                   return (
-                    <div className="flex items-center gap-3">
-                      <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-white/10 text-[#e6c980] ring-1 ring-[#c4a052]/50">
-                        <Icon size={18} />
-                      </span>
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold">Driving as {meta.label}</p>
-                        <p className="text-xs text-white/60">{detail}</p>
-                      </div>
+                    <div className="mt-2.5 flex items-center gap-2 text-xs text-slate-500">
+                      <Icon size={14} className="flex-shrink-0 text-orange-500" />
+                      <span className="min-w-0 truncate"><strong className="font-semibold text-slate-700">Driving as {meta.label}</strong>{detail && ` · ${detail}`}</span>
                     </div>
                   );
                 }
 
                 return (
-                  <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#e6c980]">Driving as</p>
-                    <div className="mt-2 grid gap-2" style={{ gridTemplateColumns: `repeat(${allVehicles.length}, minmax(0, 1fr))` }}>
+                  <div className="mt-2.5">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-400">Driving as</p>
+                    <div className="mt-1.5 grid gap-2" style={{ gridTemplateColumns: `repeat(${allVehicles.length}, minmax(0, 1fr))` }}>
                       {allVehicles.map((v) => {
                         const vMeta = VEHICLE_TYPE_META[v.vehicleType] || { label: v.vehicleType, icon: Bike, use: '' };
                         const VIcon = vMeta.icon;
@@ -785,8 +728,8 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                             aria-pressed={isActive}
                             className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 ${
                               isActive
-                                ? 'bg-gradient-to-r from-orange-500 to-amber-400 text-white shadow-md shadow-orange-950/30'
-                                : 'bg-white/10 text-white/70 ring-1 ring-inset ring-white/15'
+                                ? 'bg-gradient-to-r from-orange-500 to-amber-400 text-white shadow-md shadow-orange-500/30'
+                                : 'bg-white text-slate-600 ring-1 ring-inset ring-slate-200'
                             }`}
                           >
                             <VIcon size={14} /> {vMeta.label}
@@ -794,11 +737,19 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                         );
                       })}
                     </div>
-                    <p className="mt-2 text-xs text-white/60">{detail}</p>
+                    <p className="mt-1.5 text-xs text-slate-500">{detail}</p>
                   </div>
                 );
               })()}
-            </WorkingTimeToggle>
+              <div className="landing-classic-divider mt-4" />
+              {insightSlides.length > 0 && (
+                <div className="mt-3">
+                  <InsightSlider slides={insightSlides} />
+                </div>
+              )}
+            </div>
+
+            {pendingCount > 0 && requestsCard}
 
             {pendingCount === 0 && requestsCard}
 
