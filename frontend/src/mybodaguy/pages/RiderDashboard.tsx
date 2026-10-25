@@ -696,6 +696,13 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
       <div className="container mx-auto px-4 pb-[calc(7rem_+_env(safe-area-inset-bottom,0px))] pt-5">
         {activeTab === 'overview' && (
           <div className="space-y-4 min-[360px]:space-y-6">
+            {/* Work mode + My areas — switch mode in one tap (or let Auto follow
+                demand) and keep the places you know current. First thing on the page. */}
+            <div className="grid grid-cols-1 gap-2.5 min-[360px]:gap-3 md:grid-cols-2">
+              <WorkModeCard assist={smartAssist} onOpenSettings={() => setActiveTab('mode')} />
+              <MyAreasCard assist={smartAssist} onOpenAreas={() => setActiveTab('locations')} />
+            </div>
+
             {/* Greeting — live insights from this rider's own work: how today
                 compares with yesterday, the best day of the week, total jobs,
                 the hour requests come in most and where from. */}
@@ -832,13 +839,6 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                 </p>
                 <p className="mt-1.5 text-[9px] text-slate-400 min-[360px]:text-[10px]">Tap to change</p>
               </button>
-            </div>
-
-            {/* Work mode + My areas — switch mode in one tap (or let Auto follow
-                demand) and keep the places you know current. */}
-            <div className="grid grid-cols-1 gap-2.5 min-[360px]:gap-3 md:grid-cols-2">
-              <WorkModeCard assist={smartAssist} onOpenSettings={() => setActiveTab('mode')} />
-              <MyAreasCard assist={smartAssist} onOpenAreas={() => setActiveTab('locations')} />
             </div>
 
             {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
