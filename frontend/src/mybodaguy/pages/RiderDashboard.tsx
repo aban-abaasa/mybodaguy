@@ -6,7 +6,7 @@ import {
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
-import { useRiderSmartAssist, WorkModeCard, MyAreasCard } from '../components/RiderSmartAssist';
+import { useRiderSmartAssist, WorkModeCard, MyAreasCard, AVAILABILITY_EVENT, announceAvailability } from '../components/RiderSmartAssist';
 import type { WorkMode } from '../utils/riderSmarts';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
@@ -144,6 +144,16 @@ function WorkingTimeToggle({ userId, vehicleType, children }: { userId: string; 
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // The Work mode card has its own on/off switch — follow it.
+  useEffect(() => {
+    const onChange = (e: Event) => {
+      const d = (e as CustomEvent).detail;
+      if (d?.userId === userId && d?.vehicleType === vehicleType) setIsAvailable(!!d.online);
+    };
+    window.addEventListener(AVAILABILITY_EVENT, onChange);
+    return () => window.removeEventListener(AVAILABILITY_EVENT, onChange);
+  }, [userId, vehicleType]);
+
   useEffect(() => {
     if (!userId || !vehicleType) return;
     supabase
@@ -173,6 +183,7 @@ function WorkingTimeToggle({ userId, vehicleType, children }: { userId: string; 
       setIsAvailable(!next);
       toast.error(error.message || 'Failed to update working status');
     } else {
+      announceAvailability(userId, vehicleType, next);
       toast.success(next ? "You're online — customers can now request rides" : "You're offline — no new requests will come in");
     }
   };
