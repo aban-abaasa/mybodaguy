@@ -6,6 +6,8 @@ import {
 import { toast } from 'sonner';
 import RiderLocationManager from '../components/RiderLocationManager';
 import RiderModeSelector from '../components/RiderModeSelector';
+import { useRiderSmartAssist, WorkModeCard, MyAreasCard } from '../components/RiderSmartAssist';
+import type { WorkMode } from '../utils/riderSmarts';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import ProfileModal from '../components/ProfileModal';
 import MobileBottomTabs from '../components/common/MobileBottomTabs';
@@ -461,6 +463,17 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
     useRiderActivity(activeRiderId, riderStats?.operatorType === 'escort');
   const [switchingVehicle, setSwitchingVehicle] = useState(false);
   const [riderName, setRiderName] = useState('You');
+  // Work-mode + My-areas cards: demand-driven mode suggestions / Auto, and
+  // nudges to add an area customers keep asking for.
+  const smartAssist = useRiderSmartAssist({
+    userId: user?.id,
+    riderId: activeRiderId,
+    vehicleType: activeVehicleType,
+    mode: riderStats && activeVehicleType ? ((riderStats.mode || 'normal') as WorkMode) : null,
+    pendingCount,
+    activeCount,
+    onModeChanged: reloadRiderStats,
+  });
 
   useLiveLocationPing(user?.id);
 
@@ -821,6 +834,13 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
               </button>
             </div>
 
+            {/* Work mode + My areas — switch mode in one tap (or let Auto follow
+                demand) and keep the places you know current. */}
+            <div className="grid grid-cols-1 gap-2.5 min-[360px]:gap-3 md:grid-cols-2">
+              <WorkModeCard assist={smartAssist} onOpenSettings={() => setActiveTab('mode')} />
+              <MyAreasCard assist={smartAssist} onOpenAreas={() => setActiveTab('locations')} />
+            </div>
+
             {/* Wallet + Rewards — both currencies at a glance, one tap to either */}
             <div className="grid grid-cols-2 gap-2 min-[360px]:gap-3">
               <IcanCoinCard key={walletRefresh} variant="premium" userId={user?.id} onGoToWallet={onGoToWallet} />
@@ -854,10 +874,8 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
             {/* Quick actions */}
             <div className="space-y-3">
               <SectionHeading>Quick actions</SectionHeading>
-              <div className="grid grid-cols-2 gap-2.5 min-[360px]:gap-3 lg:grid-cols-5">
+              <div className="grid grid-cols-2 gap-2.5 min-[360px]:gap-3 lg:grid-cols-3">
                 {([
-                  { label: 'Work Mode',  desc: 'VIP, Normal, Discount or Return', icon: Settings,    tile: 'bg-violet-50 text-violet-600',   tab: 'mode' },
-                  { label: 'Areas',      desc: 'Mark places you know well',       icon: MapIcon,     tile: 'bg-sky-50 text-sky-600',         tab: 'locations' },
                   { label: 'Markets',    desc: 'Work for businesses',             icon: ShoppingBag, tile: 'bg-orange-50 text-orange-600',   tab: 'partnerships' },
                   { label: 'Deliveries', desc: 'Supermarket delivery jobs',       icon: Package,     tile: 'bg-emerald-50 text-emerald-600', tab: 'deliveries' },
                   { label: 'Vote',       desc: 'Choose your chairpersons',        icon: Vote,        tile: 'bg-rose-50 text-rose-600',       tab: 'vote' },
