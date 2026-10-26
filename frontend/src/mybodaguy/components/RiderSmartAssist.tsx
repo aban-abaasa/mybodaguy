@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Crown, DollarSign, Tag, Home, MapPin, Flame, ChevronRight, Sparkles, Plus, type LucideIcon } from 'lucide-react';
+import { Crown, DollarSign, Tag, Home, MapPin, Flame, ChevronRight, Sparkles, Plus, Power, type LucideIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import { reverseGeocode } from '../services/geocodeService';
@@ -108,17 +108,32 @@ export function useRiderSmartAssist({ userId, riderId, vehicleType, mode, pendin
   const [addingKey, setAddingKey] = useState<string | null>(null);
   // Bumped whenever a nudge is snoozed/dismissed so the card re-derives.
   const [nudgeVersion, setNudgeVersion] = useState(0);
+  const [onlineSince, setOnlineSince] = useState(0);
+  const [togglingOnline, setTogglingOnline] = useState(false);
 
   const autoSetRef = useRef<WorkMode | null>(null);
   const prevModeRef = useRef<WorkMode | null>(null);
   const prevVehicleRef = useRef<string | null>(null);
   const busyRef = useRef(false);
 
-  const state = () => readStore<{ auto: boolean; lastAutoAt: number; overrideUntil: number; nudges: Record<string, number> }>(
-    storeKey, { auto: false, lastAutoAt: 0, overrideUntil: 0, nudges: {} });
+  const state = () => readStore<{ auto: boolean; lastAutoAt: number; overrideUntil: number; nudges: Record<string, number>; onlineSince: number }>(
+    storeKey, { auto: false, lastAutoAt: 0, overrideUntil: 0, nudges: {}, onlineSince: 0 });
   const patchState = (patch: Partial<ReturnType<typeof state>>) => writeStore(storeKey, { ...state(), ...patch });
 
-  useEffect(() => { if (storeKey) setAutoState(state().auto); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [storeKey]);
+  useEffect(() => {
+    if (!storeKey) return;
+    const s = state();
+    setAutoState(s.auto);
+    setOnlineSince(s.onlineSince || 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeKey]);
+
+  const markOnline = (online: boolean) => {
+    // Keep the original start when something else (the other switch) confirms we're already online.
+    const since = online ? state().onlineSince || Date.now() : 0;
+    patchState({ onlineSince: since });
+    setOnlineSince(since);
+  };
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), TICK_MS);
@@ -134,6 +149,7 @@ export function useRiderSmartAssist({ userId, riderId, vehicleType, mode, pendin
       .eq('vehicle_type', vehicleType)
       .maybeSingle();
     if (!data) return;
+    if (!data.is_available && state().onlineSince) markOnline(false);
     setRow({
       lat: data.current_lat != null ? Number(data.current_lat) : null,
       lng: data.current_lng != null ? Number(data.current_lng) : null,
@@ -232,6 +248,27 @@ export function useRiderSmartAssist({ userId, riderId, vehicleType, mode, pendin
     return hotspots.find(h => h.level === 'hot' && (nudges[`toast:${h.key}`] ?? 0) <= now && (nudges[`card:${h.key}`] ?? 0) <= now);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hotspots, now, nudgeVersion, storeKey]);
+
+  const setOnline = useCallback(async (next: boolean) => {
+    if (!userId || !vehicleType || togglingOnline) return;
+    setTogglingOnline(true);
+    setRow(r => (r ? { ...r, isAvailable: next } : r));
+    markOnline(next);
+    const { error } = await supabase
+      .from('mbg_riders')
+      .update({ is_available: next, updated_at: new Date().toISOString() })
+      .eq('user_id', userId)
+      .eq('vehicle_type', vehicleType);
+    setTogglingOnline(false);
+    if (error) {
+      setRow(r => (r ? { ...r, isAvailable: !next } : r));
+      markOnline(!next);
+      toast.error(error.message || 'Failed to update working status');
+      return;
+    }
+    toast.success(next ? "You're online — customers can now request rides" : "You're offline — no new requests will come in");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId, vehicleType, togglingOnline, storeKey]);
 
   const setMode = useCallback(async (next: WorkMode, source: 'manual' | 'suggestion' | 'auto') => {
     if (!userId || !vehicleType || busyRef.current) return false;
@@ -354,6 +391,8 @@ export function useRiderSmartAssist({ userId, riderId, vehicleType, mode, pendin
     mode, rec, auto, setAuto, switching, setMode,
     rates: { vip: row?.vip ?? 10, discount: row?.discount ?? 10, ret: row?.ret ?? 30 },
     isOnline: !!row?.isAvailable,
+    rowLoaded: row !== null,
+    setOnline, togglingOnline, onlineSince,
     areas, areasLoaded,
     hotspots: dueHotspots, snooze, addHotspot, addingKey,
     hasLiveDemand: snapshot !== null,
@@ -378,6 +417,62 @@ function effectLabel(mode: WorkMode, rates: RiderSmartAssist['rates']): string {
   if (mode === 'discount') return `−${rates.discount}% off`;
   if (mode === 'return') return `−${rates.ret}% off`;
   return 'Standard fares';
+}
+
+function formatOnlineFor(ms: number): string {
+  const mins = Math.max(0, Math.floor(ms / 60000));
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min`;
+  return `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
+}
+
+// The inline on/off: a full-width pill the rider slides (or taps). Online it glows
+// green with a radar ripple round the knob and counts how long they've been out;
+// offline it rests dark with an invitation to start.
+function OnlineSwitch({ assist }: { assist: RiderSmartAssist }) {
+  const { isOnline, setOnline, togglingOnline, onlineSince, mode } = assist;
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!isOnline || !onlineSince) return;
+    const t = setInterval(() => tick(n => n + 1), 30000);
+    return () => clearInterval(t);
+  }, [isOnline, onlineSince]);
+
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={isOnline}
+      aria-label="Working status"
+      disabled={togglingOnline || !mode}
+      onClick={() => setOnline(!isOnline)}
+      className={`relative mt-3 flex h-[52px] w-full items-center overflow-hidden rounded-full p-1 text-left ring-1 ring-inset transition-colors duration-500 active:scale-[0.99] disabled:opacity-70 ${
+        isOnline
+          ? 'bg-gradient-to-r from-emerald-500 to-teal-400 ring-emerald-300/70 shadow-[0_8px_20px_-10px_rgba(16,185,129,0.8)]'
+          : 'bg-gradient-to-r from-[#2a2118] to-[#3b2c1a] ring-[#c4a052]/40'
+      }`}
+    >
+      <span
+        aria-hidden
+        className={`absolute top-1 z-10 grid h-11 w-11 place-items-center rounded-full bg-[#fffdf7] shadow-md transition-[left] duration-500 ease-out ${
+          isOnline ? 'left-[calc(100%-2.75rem)]' : 'left-1'
+        }`}
+      >
+        {isOnline && <span className="absolute inset-0 animate-ping rounded-full bg-white/70" />}
+        <Power size={18} className={`relative ${isOnline ? 'text-emerald-600' : 'text-slate-500'}`} />
+      </span>
+      <span className={`flex min-w-0 flex-1 flex-col leading-tight text-white transition-[padding] duration-500 ${isOnline ? 'pl-3 pr-14' : 'pl-14 pr-3'}`}>
+        <span className="truncate font-classic-display text-base font-bold min-[360px]:text-lg">
+          {togglingOnline ? '…' : isOnline ? "You're online" : "You're offline"}
+        </span>
+        <span className="truncate text-[11px] text-white/75 min-[360px]:text-xs">
+          {isOnline
+            ? onlineSince ? `Taking requests · online ${formatOnlineFor(Date.now() - onlineSince)}` : 'Customers can request you now'
+            : 'Tap to go online and start earning'}
+        </span>
+      </span>
+    </button>
+  );
 }
 
 export function WorkModeCard({ assist, onOpenSettings }: { assist: RiderSmartAssist; onOpenSettings: () => void }) {
@@ -418,7 +513,9 @@ export function WorkModeCard({ assist, onOpenSettings }: { assist: RiderSmartAss
         </button>
       </div>
 
-      <div className="mt-3 grid grid-cols-4 gap-1.5 min-[360px]:gap-2">
+      <OnlineSwitch assist={assist} />
+
+      <div className={`mt-3 grid grid-cols-4 gap-1.5 transition-opacity min-[360px]:gap-2 ${isOnline ? '' : 'opacity-70'}`}>
         {MODE_ORDER.map(id => {
           const meta = MODE_META[id];
           const Icon = meta.icon;
