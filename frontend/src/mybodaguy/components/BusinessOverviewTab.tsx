@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, Circle, Star, TrendingUp, Car, Users, Activity, Wallet } from 'lucide-react';
 import { supabase } from '../../services/supabaseClient';
+import ClassicSection from './common/ClassicSection';
 import { formatMoney } from '../services/money';
 import {
   businessService,
@@ -23,12 +24,13 @@ interface OverviewBusiness {
 
 function Kpi({ icon: Icon, label, value, hint }: { icon: typeof Car; label: string; value: string; hint?: string }) {
   return (
-    <div className="bg-white border border-slate-100 rounded-xl p-3.5">
-      <div className="flex items-center gap-1.5 text-xs text-slate-500">
-        <Icon size={14} className="text-orange-500" /> {label}
+    <div className="classic-card !rounded-2xl p-3.5">
+      <div className="flex items-center gap-1.5">
+        <Icon size={13} className="text-[#a17c28]" />
+        <span className="classic-eyebrow !tracking-[0.14em] truncate">{label}</span>
       </div>
-      <p className="text-lg font-bold text-slate-800 mt-1 truncate">{value}</p>
-      {hint && <p className="text-[11px] text-slate-400 mt-0.5">{hint}</p>}
+      <p className="mt-1.5 truncate font-classic-display text-xl font-bold leading-none tabular-nums text-slate-900">{value}</p>
+      {hint && <p className="mt-1 truncate text-[11px] text-slate-400">{hint}</p>}
     </div>
   );
 }
@@ -48,7 +50,7 @@ function RevenueBars({ trend }: { trend: BusinessOverview['trend'] }) {
   return (
     <div>
       <div className="flex flex-wrap items-baseline justify-between gap-x-2 mb-1 min-h-[20px]">
-        <p className="text-xs text-slate-500">Gross fares per day, last 14 days</p>
+        <p className="text-xs text-slate-500">Fares per day</p>
         <p className="text-xs font-medium text-slate-700">
           {shown
             ? `${dayLabel(shown.day)} · ${formatMoney(Number(shown.revenue))} · ${shown.completed} ride${shown.completed === 1 ? '' : 's'}`
@@ -65,7 +67,7 @@ function RevenueBars({ trend }: { trend: BusinessOverview['trend'] }) {
               {h > 0 && (
                 <path
                   d={`M${x},${H} V${H - h + 4} Q${x},${H - h} ${x + 4},${H - h} H${x + barW - 4} Q${x + barW},${H - h} ${x + barW},${H - h + 4} V${H} Z`}
-                  fill="#ea580c"
+                  fill="#a17c28"
                   opacity={active == null || active === i ? 1 : 0.45}
                 />
               )}
@@ -96,13 +98,12 @@ function RevenueBars({ trend }: { trend: BusinessOverview['trend'] }) {
 
 export default function BusinessOverviewTab({
   business,
-  registration,
   state,
   onGo,
   onPickLogo,
 }: {
   business: OverviewBusiness;
-  registration: BusinessRegistration | undefined;
+  registration?: BusinessRegistration | undefined;
   state: AccessState;
   onGo: (tab: BusinessTab) => void;
   onPickLogo: () => void;
@@ -139,14 +140,14 @@ export default function BusinessOverviewTab({
   const teamWord = isEscort ? 'escort' : 'driver';
   const gated = state !== 'unsupported'; // registration + approval steps only exist once the gate is installed
   const steps: { done: boolean; label: string; action?: { label: string; run: () => void } }[] = [
-    { done: !!business.avatar_url, label: 'Add your logo', action: { label: 'Upload', run: onPickLogo } },
-    { done: !!business.description?.trim() && !!business.home_city?.trim(), label: 'Describe your business and home city', action: { label: 'Edit profile', run: () => onGo('profile') } },
+    { done: !!business.avatar_url, label: 'Logo', action: { label: 'Upload', run: onPickLogo } },
+    { done: !!business.description?.trim() && !!business.home_city?.trim(), label: 'Describe your business', action: { label: 'Edit profile', run: () => onGo('profile') } },
     ...(gated ? [
-      { done: state !== 'incomplete', label: 'Submit your registration details', action: { label: 'Add details', run: () => onGo('profile') } },
-      { done: state === 'approved', label: 'Get approved by the BodaGoEra team' },
+      { done: state !== 'incomplete', label: 'Registration details', action: { label: 'Add details', run: () => onGo('profile') } },
+      { done: state === 'approved', label: 'Approval' },
     ] : []),
-    { done: pricingSet, label: 'Set your pricing', action: { label: 'Set pricing', run: () => onGo('pricing') } },
-    { done: (overview?.team_total ?? 0) > 0, label: `Add your first ${teamWord}`, action: live ? { label: `Add ${teamWord}`, run: () => onGo('roster') } : undefined },
+    { done: pricingSet, label: 'Pricing', action: { label: 'Set pricing', run: () => onGo('pricing') } },
+    { done: (overview?.team_total ?? 0) > 0, label: `First ${teamWord}`, action: live ? { label: `Add ${teamWord}`, run: () => onGo('roster') } : undefined },
   ];
   const doneCount = steps.filter((s) => s.done).length;
   const pct = Math.round((doneCount / steps.length) * 100);
@@ -157,72 +158,67 @@ export default function BusinessOverviewTab({
       : null;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       {pct < 100 && (
-        <section className="bg-slate-50 rounded-xl p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h4 className="font-semibold text-slate-800 text-sm">Get your business ready</h4>
-            <span className="text-xs font-medium text-slate-500">{doneCount} of {steps.length}</span>
+        <ClassicSection
+          title="Get ready"
+          summary={`${doneCount} of ${steps.length} done`}
+          defaultOpen
+          right={<span className="text-xs font-semibold text-[#8a6a1f]">{pct}%</span>}
+        >
+          <div className="mb-3 h-1.5 rounded-full bg-[#f1e7cc]" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+            <div className="h-1.5 rounded-full bg-[#c4a052] transition-all" style={{ width: `${pct}%` }} />
           </div>
-          <div className="h-1.5 rounded-full bg-slate-200 mb-3" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-            <div className="h-1.5 rounded-full bg-orange-500 transition-all" style={{ width: `${pct}%` }} />
-          </div>
-          <ul className="space-y-1.5">
-            {steps.map((s) => (
-              <li key={s.label} className="flex items-center gap-2 text-sm">
-                {s.done ? <CheckCircle2 size={16} className="text-emerald-500 shrink-0" /> : <Circle size={16} className="text-slate-300 shrink-0" />}
-                <span className={s.done ? 'text-slate-400 line-through' : 'text-slate-700'}>{s.label}</span>
-                {!s.done && s.action && (
-                  <button onClick={s.action.run} className="ml-auto text-xs font-semibold text-orange-600 hover:text-orange-700 shrink-0">
-                    {s.action.label}
+          <ul className="space-y-2">
+            {steps.map((st) => (
+              <li key={st.label} className="flex items-center gap-2.5 text-sm">
+                {st.done ? <CheckCircle2 size={17} className="shrink-0 text-emerald-500" /> : <Circle size={17} className="shrink-0 text-slate-300" />}
+                <span className={st.done ? 'text-slate-400' : 'text-slate-700'}>{st.label}</span>
+                {!st.done && st.action && (
+                  <button onClick={st.action.run} className="ml-auto shrink-0 text-xs font-semibold text-[#8a6a1f] hover:text-[#6b4f12]">
+                    {st.action.label}
                   </button>
                 )}
               </li>
             ))}
           </ul>
-        </section>
+        </ClassicSection>
       )}
 
       {!live ? (
-        <p className="text-sm text-slate-400 text-center py-4">
-          Your earnings, rides and team figures appear here once your business is approved.
-        </p>
+        <p className="py-4 text-center text-sm text-slate-400">Figures appear once you are approved.</p>
       ) : loading ? (
-        <p className="text-sm text-slate-400 py-4">Loading figures…</p>
+        <p className="py-4 text-sm text-slate-400">Loading…</p>
       ) : overviewError === 'not_installed' ? null : overviewError || !overview ? (
-        <p className="text-sm text-red-600 py-2">Could not load figures: {overviewError}</p>
+        <p className="py-2 text-sm text-red-600">Could not load figures: {overviewError}</p>
       ) : (
         <>
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-            <Kpi icon={Wallet} label="Fares, 30 days" value={formatMoney(Number(overview.revenue_30d))} hint={`${formatMoney(Number(overview.revenue_all))} all time`} />
-            <Kpi icon={Car} label="Completed, 30 days" value={String(overview.completed_30d)} hint={completionRate != null ? `${completionRate}% completion` : 'No finished jobs yet'} />
-            <Kpi icon={Activity} label="Active right now" value={String(overview.active_now)} hint={`${overview.rides_30d} requested in 30 days`} />
-            <Kpi icon={Users} label={isEscort ? 'Escorts online' : 'Drivers online'} value={`${overview.team_online} / ${overview.team_total}`} hint={`${overview.team_verified} verified by BodaGoEra`} />
-            <Kpi icon={Star} label="Team rating" value={overview.avg_rating != null ? Number(overview.avg_rating).toFixed(1) : '—'} hint={overview.avg_rating != null ? 'Average across your team' : 'No ratings yet'} />
-            <Kpi icon={TrendingUp} label="Cancelled, 30 days" value={String(overview.cancelled_30d)} />
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+            <Kpi icon={Wallet} label="Fares · 30 days" value={formatMoney(Number(overview.revenue_30d))} hint={`${formatMoney(Number(overview.revenue_all))} total`} />
+            <Kpi icon={Car} label="Completed" value={String(overview.completed_30d)} hint={completionRate != null ? `${completionRate}% completion` : '30 days'} />
+            <Kpi icon={Activity} label="Active now" value={String(overview.active_now)} hint={`${overview.rides_30d} requested`} />
+            <Kpi icon={Users} label={isEscort ? 'Escorts online' : 'Drivers online'} value={`${overview.team_online} / ${overview.team_total}`} hint={overview.team_verified ? `${overview.team_verified} verified` : undefined} />
+            <Kpi icon={Star} label="Rating" value={overview.avg_rating != null ? Number(overview.avg_rating).toFixed(1) : '—'} />
+            <Kpi icon={TrendingUp} label="Cancelled" value={String(overview.cancelled_30d)} hint="30 days" />
           </div>
 
-          <section className="bg-white border border-slate-100 rounded-xl p-4">
+          <ClassicSection title="Last 14 days" summary={formatMoney(overview.trend.reduce((sum, d) => sum + Number(d.revenue), 0))}>
             <RevenueBars trend={overview.trend} />
-          </section>
+          </ClassicSection>
 
           {overview.top.length > 0 && (
-            <section className="bg-white border border-slate-100 rounded-xl p-4">
-              <h4 className="font-semibold text-slate-800 text-sm mb-2">Top {isEscort ? 'escorts' : 'drivers'}, last 30 days</h4>
-              <ol className="space-y-1.5">
+            <ClassicSection title={`Top ${isEscort ? 'escorts' : 'drivers'}`} summary={overview.top[0].name}>
+              <ol className="space-y-2">
                 {overview.top.map((t, i) => (
                   <li key={`${t.name}-${i}`} className="flex items-center justify-between gap-2 text-sm">
-                    <span className="text-slate-700 truncate">{i + 1}. {t.name}</span>
-                    <span className="text-xs text-slate-500 shrink-0">{t.rides} job{t.rides === 1 ? '' : 's'} · {formatMoney(Number(t.revenue))}</span>
+                    <span className="truncate text-slate-700">{i + 1}. {t.name}</span>
+                    <span className="shrink-0 text-xs text-slate-500">{t.rides} · {formatMoney(Number(t.revenue))}</span>
                   </li>
                 ))}
               </ol>
-            </section>
+            </ClassicSection>
           )}
         </>
-      )}
-      {registration?.operating_hours && (
-        <p className="text-xs text-slate-400">Listed hours: {registration.operating_hours}</p>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { X, Truck, ShieldCheck, ClipboardCheck } from 'lucide-react';
+import { X, Truck, ShieldCheck } from 'lucide-react';
+import { ClassicField } from './common/classicForm';
 import { supabase } from '../../services/supabaseClient';
 import { businessService, validateRegistration, type BusinessCategory, type RegistrationInput } from '../services/businessService';
 import { RegistrationFields, emptyRegistration } from './BusinessRegistrationFields';
@@ -13,20 +14,10 @@ interface BusinessRegistrationModalProps {
   onCreated: (businessProfileId: string, registrationError?: string) => void;
 }
 
-const CATEGORY_META: Record<BusinessCategory, { label: string; icon: typeof Truck; blurb: string }> = {
-  transport_company: {
-    label: 'Transport Company',
-    icon: Truck,
-    blurb: 'Run a fleet of drivers, take large/bulk ride & delivery orders, and set your own pricing.',
-  },
-  security_escort: {
-    label: 'Security Escort Service',
-    icon: ShieldCheck,
-    blurb: 'Offer security escorts customers can add to a ride or delivery, with your own team and rates.',
-  },
+const CATEGORY_META: Record<BusinessCategory, { label: string; icon: typeof Truck }> = {
+  transport_company: { label: 'Transport Company', icon: Truck },
+  security_escort: { label: 'Security Escort Service', icon: ShieldCheck },
 };
-
-const inputCls = 'w-full border rounded-lg p-3 bg-white text-slate-900 placeholder-slate-400';
 
 export default function BusinessRegistrationModal({ category, onClose, onCreated }: BusinessRegistrationModalProps) {
   const [businessName, setBusinessName] = useState('');
@@ -48,7 +39,7 @@ export default function BusinessRegistrationModal({ category, onClose, onCreated
     const found = validateRegistration(registration);
     setFieldErrors(found);
     if (Object.keys(found).length) {
-      setError('Please complete the highlighted registration details.');
+      setError('Complete the highlighted fields.');
       return;
     }
     setSubmitting(true);
@@ -72,64 +63,48 @@ export default function BusinessRegistrationModal({ category, onClose, onCreated
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/50 flex items-end sm:items-center justify-center p-0 sm:p-4">
-      <div className="bg-white rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-lg max-h-[92vh] flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between p-5 border-b border-slate-100 shrink-0">
-          <div className="flex items-center gap-2">
-            <Icon className="text-orange-500" size={20} />
-            <h3 className="font-bold text-slate-800">Register a {meta.label}</h3>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4">
+      <div className="classic-card !rounded-b-none sm:!rounded-b-[20px] flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden">
+        <div className="flex shrink-0 items-center justify-between border-b border-[#c4a052]/25 p-5">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28]"><Icon size={18} /></span>
+            <div>
+              <p className="classic-eyebrow">Register</p>
+              <h3 className="font-classic-display text-lg font-semibold leading-tight text-slate-800">{meta.label}</h3>
+            </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600" aria-label="Close">
             <X size={20} />
           </button>
         </div>
 
-        <form onSubmit={submit} className="p-5 space-y-5 overflow-y-auto">
-          <p className="text-sm text-slate-500">{meta.blurb}</p>
-          {error && <div className="bg-red-50 text-red-700 text-sm rounded-lg p-3">{error}</div>}
+        <form onSubmit={submit} className="space-y-5 overflow-y-auto p-5">
+          {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
           <section className="space-y-3">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Your business</h4>
-            <input
-              className={inputCls}
-              placeholder="Business name"
-              value={businessName}
-              onChange={(e) => setBusinessName(e.target.value)}
-              required
-            />
-            <textarea
-              className={inputCls}
-              placeholder="Short description (optional)"
-              rows={2}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
+            <ClassicField label="Business name" required>
+              <input className="classic-input" value={businessName} onChange={(e) => setBusinessName(e.target.value)} required />
+            </ClassicField>
             <div className="grid grid-cols-2 gap-3">
-              <input className={inputCls} placeholder="Home city (optional)" value={homeCity} onChange={(e) => setHomeCity(e.target.value)} />
-              <input className={inputCls} placeholder="Country" value={homeCountry} onChange={(e) => setHomeCountry(e.target.value)} />
+              <ClassicField label="City">
+                <input className="classic-input" value={homeCity} onChange={(e) => setHomeCity(e.target.value)} />
+              </ClassicField>
+              <ClassicField label="Country">
+                <input className="classic-input" value={homeCountry} onChange={(e) => setHomeCountry(e.target.value)} />
+              </ClassicField>
             </div>
+            <ClassicField label="About">
+              <textarea className="classic-input" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} />
+            </ClassicField>
           </section>
 
           <section className="space-y-3">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Registration details</h4>
+            <p className="classic-eyebrow">Registration</p>
             <RegistrationFields category={category} values={registration} errors={fieldErrors} onChange={setRegistration} />
           </section>
 
-          <div className="flex items-start gap-2 bg-orange-50 text-orange-800 text-xs rounded-lg p-3">
-            <ClipboardCheck size={16} className="shrink-0 mt-0.5" />
-            <p>
-              Only registered businesses can operate. The BodaGoEra team reviews these details in the developer panel.
-              While you wait you can finish your profile and pricing; adding {category === 'security_escort' ? 'escorts' : 'drivers'} and
-              insurance unlock once you are approved.
-            </p>
-          </div>
-
-          <button
-            type="submit"
-            disabled={submitting || !businessName.trim()}
-            className="w-full bg-orange-500 disabled:bg-slate-300 text-white rounded-lg py-3 font-semibold"
-          >
-            {submitting ? 'Registering…' : `Register ${meta.label}`}
+          <button type="submit" disabled={submitting || !businessName.trim()} className="classic-btn classic-btn-primary">
+            {submitting ? 'Submitting…' : 'Submit for approval'}
           </button>
         </form>
       </div>

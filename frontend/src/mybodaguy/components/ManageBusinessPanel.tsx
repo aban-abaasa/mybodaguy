@@ -111,7 +111,7 @@ export default function ManageBusinessPanel() {
 
       {gateError && (
         <div className="flex items-center justify-between gap-3 bg-red-50 text-red-700 text-sm rounded-lg p-3">
-          <span>Could not check your registration status: {gateError}</span>
+          <span>Could not check your status: {gateError}</span>
           <button onClick={load} className="font-semibold underline shrink-0">Retry</button>
         </div>
       )}
@@ -119,40 +119,20 @@ export default function ManageBusinessPanel() {
       {businesses.length === 0 && (
         <>
           <div>
-            <h3 className="text-lg font-bold text-slate-800">Manage Your Business</h3>
-            <p className="text-sm text-slate-500 mt-1">
-              Register a transport company or a security escort service. Each gets its own business profile —
-              customize it, add your own drivers or escorts, and set your own pricing.
-            </p>
+            <p className="classic-eyebrow">Business</p>
+            <h3 className="font-classic-display text-xl font-semibold text-slate-800">Manage Your Business</h3>
+            <p className="mt-1 text-sm text-slate-500">Register to run your own team at your own rates.</p>
           </div>
-          <ol className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-            {[
-              ['1. Register', 'Give your registration number and licence.'],
-              ['2. Get approved', 'The BodaGoEra team reviews your business.'],
-              ['3. Run your team', 'Add drivers or escorts, set rates, track earnings.'],
-            ].map(([title, text]) => (
-              <li key={title} className="bg-slate-50 rounded-xl p-3">
-                <p className="font-semibold text-slate-700">{title}</p>
-                <p className="text-xs text-slate-500 mt-0.5">{text}</p>
-              </li>
-            ))}
-          </ol>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <p className="classic-eyebrow !tracking-[0.14em] text-slate-500">Register · Get approved · Run your team</p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {(['transport_company', 'security_escort'] as BusinessCategory[]).map((cat) => {
               const Icon = cat === 'transport_company' ? Truck : ShieldCheck;
               return (
-                <button
-                  key={cat}
-                  onClick={() => setRegisterCategory(cat)}
-                  className="bg-white rounded-xl shadow-sm border border-slate-100 p-6 text-left hover:shadow-md hover:border-orange-200 transition-all"
-                >
-                  <Icon className="text-orange-500 mb-3" size={28} />
-                  <p className="font-semibold text-slate-800">Register a {CATEGORY_LABEL[cat]}</p>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {cat === 'transport_company'
-                      ? 'Run a fleet, take bulk orders, set your own pricing.'
-                      : 'Offer escorts customers can add to a ride or delivery.'}
-                  </p>
+                <button key={cat} onClick={() => setRegisterCategory(cat)} className="classic-tile flex items-center gap-3.5 p-4">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28]">
+                    <Icon size={22} />
+                  </span>
+                  <span className="font-classic-display text-base font-semibold text-slate-800">{CATEGORY_LABEL[cat]}</span>
                 </button>
               );
             })}
@@ -163,7 +143,10 @@ export default function ManageBusinessPanel() {
       {businesses.length > 0 && !activeBusiness && (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-2">
-            <h3 className="text-lg font-bold text-slate-800">Manage Your Business</h3>
+            <div>
+              <p className="classic-eyebrow">Business</p>
+              <h3 className="font-classic-display text-xl font-semibold text-slate-800">Manage Your Business</h3>
+            </div>
             <div className="flex flex-wrap gap-x-3 justify-end">
               {(['transport_company', 'security_escort'] as BusinessCategory[])
                 .filter((cat) => !businesses.some((b) => b.category_key === cat))
@@ -171,9 +154,9 @@ export default function ManageBusinessPanel() {
                   <button
                     key={cat}
                     onClick={() => setRegisterCategory(cat)}
-                    className="text-xs font-medium text-orange-600 hover:text-orange-700"
+                    className="text-xs font-semibold text-[#8a6a1f] hover:text-[#6b4f12]"
                   >
-                    + Register {CATEGORY_LABEL[cat]}
+                    + {CATEGORY_LABEL[cat]}
                   </button>
                 ))}
             </div>
@@ -182,12 +165,12 @@ export default function ManageBusinessPanel() {
             const state = stateOf(b);
             const pct = profileCompleteness(b, registrations.get(b.id));
             return (
-              <div key={b.id} className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 flex items-center gap-4">
+              <div key={b.id} className="classic-card p-3.5 flex items-center gap-3.5">
                 <button onClick={() => handleLogoPick(b.id)} className="relative shrink-0" aria-label="Change logo">
                   {b.avatar_url ? (
                     <img src={b.avatar_url} alt="" className="w-14 h-14 rounded-xl object-cover" />
                   ) : (
-                    <div className="w-14 h-14 rounded-xl bg-orange-100 flex items-center justify-center text-orange-500">
+                    <div className="w-14 h-14 rounded-xl bg-[#fbf3dc] flex items-center justify-center text-[#a17c28]">
                       {b.category_key === 'transport_company' ? <Truck size={22} /> : <ShieldCheck size={22} />}
                     </div>
                   )}
@@ -196,14 +179,14 @@ export default function ManageBusinessPanel() {
                   </span>
                 </button>
                 <div className="flex-1 min-w-0">
-                  <p className="font-semibold text-slate-800 truncate">{b.business_name}</p>
+                  <p className="font-classic-display text-base font-semibold text-slate-800 truncate">{b.business_name}</p>
                   <p className="text-xs text-slate-500 flex items-center gap-1.5 flex-wrap mt-0.5">
-                    {CATEGORY_LABEL[b.category_key]} {gateSupported ? <AccessChip state={state} /> : <span>· {b.status}</span>}
+                    {CATEGORY_LABEL[b.category_key]} {gateSupported && <AccessChip state={state} />}
                   </p>
                   {pct < 100 && (
                     <div className="flex items-center gap-2 mt-1.5">
                       <div className="h-1 flex-1 max-w-[120px] rounded-full bg-slate-100">
-                        <div className="h-1 rounded-full bg-orange-400" style={{ width: `${pct}%` }} />
+                        <div className="h-1 rounded-full bg-[#c4a052]" style={{ width: `${pct}%` }} />
                       </div>
                       <span className="text-[11px] text-slate-400">Profile {pct}%</span>
                     </div>
@@ -211,7 +194,7 @@ export default function ManageBusinessPanel() {
                 </div>
                 <button
                   onClick={() => { setActiveBusinessId(b.id); setActiveSection(state === 'incomplete' ? 'profile' : 'overview'); }}
-                  className="px-3 py-1.5 bg-orange-500 text-white rounded-lg text-xs font-semibold shrink-0"
+                  className="classic-btn classic-btn-primary !w-auto !min-h-[38px] !px-4 !py-1.5 !text-[13px] shrink-0"
                 >
                   Manage
                 </button>
@@ -243,9 +226,9 @@ export default function ManageBusinessPanel() {
                 href={`https://icanera.space/?business_profile_id=${activeBusiness.id}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-xs font-medium text-violet-600 hover:text-violet-700 flex items-center gap-1"
+                className="text-xs font-semibold text-[#8a6a1f] hover:text-[#6b4f12] flex items-center gap-1"
               >
-                Open full management (CMMS) on icanera.space <ExternalLink size={12} />
+                Full management <ExternalLink size={12} />
               </a>
             </div>
 
@@ -254,7 +237,7 @@ export default function ManageBusinessPanel() {
                 {activeBusiness.avatar_url ? (
                   <img src={activeBusiness.avatar_url} alt="" className="w-12 h-12 rounded-xl object-cover" />
                 ) : (
-                  <div className="w-12 h-12 rounded-xl bg-orange-100 flex items-center justify-center text-orange-500">
+                  <div className="w-12 h-12 rounded-xl bg-[#fbf3dc] flex items-center justify-center text-[#a17c28]">
                     {activeBusiness.category_key === 'transport_company' ? <Truck size={20} /> : <ShieldCheck size={20} />}
                   </div>
                 )}
@@ -263,7 +246,7 @@ export default function ManageBusinessPanel() {
                 </span>
               </button>
               <div className="min-w-0">
-                <h3 className="font-bold text-slate-800 truncate">{activeBusiness.business_name}</h3>
+                <h3 className="font-classic-display text-lg font-semibold text-slate-800 truncate">{activeBusiness.business_name}</h3>
                 <p className="text-xs text-slate-500 flex items-center gap-1.5 flex-wrap">
                   {CATEGORY_LABEL[activeBusiness.category_key]}
                   {gateSupported && <AccessChip state={state} />}
@@ -273,7 +256,7 @@ export default function ManageBusinessPanel() {
 
             <BusinessAccessBanner state={state} registration={registration} onOpenRegistration={() => setActiveSection('profile')} />
 
-            <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
+            <div>
               <div className="flex items-center gap-2 mb-4 overflow-x-auto -mx-1 px-1 pb-1" role="tablist">
                 {TABS.map(({ id, label, icon: Icon }) => {
                   const tabLocked = !live && LOCKED_UNTIL_APPROVED.includes(id);
@@ -283,9 +266,7 @@ export default function ManageBusinessPanel() {
                       role="tab"
                       aria-selected={activeSection === id}
                       onClick={() => setActiveSection(id)}
-                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium shrink-0 ${
-                        activeSection === id ? 'bg-orange-500 text-white' : 'text-slate-500 hover:bg-slate-50'
-                      }`}
+                      className={`classic-chip ${activeSection === id ? 'is-active' : ''}`}
                     >
                       <Icon size={14} /> {label}
                       {tabLocked && <Lock size={11} className="opacity-70" aria-label="Locked until approved" />}
@@ -296,20 +277,17 @@ export default function ManageBusinessPanel() {
 
               {locked && (
                 <div className="text-center py-10 px-4">
-                  <Lock size={28} className="mx-auto text-slate-300 mb-2" />
-                  <p className="font-semibold text-slate-700 text-sm">Available once you are approved</p>
-                  <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
-                    {state === 'incomplete'
-                      ? 'Add your registration details first, then the BodaGoEra team can approve you.'
-                      : state === 'pending'
-                        ? 'Your registration is with the BodaGoEra team. This unlocks as soon as they approve it.'
-                        : state === 'suspended'
-                          ? 'This business is suspended. Contact the BodaGoEra team to be reinstated.'
-                          : 'Update your registration details and resubmit to get approved.'}
+                  <Lock size={26} className="mx-auto text-[#c4a052] mb-2" />
+                  <p className="font-classic-display text-base font-semibold text-slate-700">Unlocks when you are approved</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {state === 'incomplete' ? 'Add your registration details first.'
+                      : state === 'pending' ? 'Your registration is under review.'
+                        : state === 'suspended' ? 'This business is suspended.'
+                          : 'Update your details and resubmit.'}
                   </p>
                   {(state === 'incomplete' || state === 'rejected') && (
-                    <button onClick={() => setActiveSection('profile')} className="mt-3 px-4 py-2 bg-orange-500 text-white rounded-lg text-xs font-semibold">
-                      {state === 'rejected' ? 'Update and resubmit' : 'Add registration details'}
+                    <button onClick={() => setActiveSection('profile')} className="classic-btn classic-btn-primary !w-auto !min-h-[40px] !px-5 !py-2 !text-sm mt-3">
+                      {state === 'rejected' ? 'Update and resubmit' : 'Add details'}
                     </button>
                   )}
                 </div>
@@ -358,13 +336,11 @@ export default function ManageBusinessPanel() {
             setActiveBusinessId(businessProfileId);
             if (registrationError) {
               setActiveSection('profile');
-              toast.error(`Business created, but registration details were not filed: ${registrationError}`);
+              toast.error(`Business created, but details were not saved: ${registrationError}`);
             } else {
               setActiveSection('overview');
               toast.success(
-                gateSupported
-                  ? 'Registration submitted! The BodaGoEra team will review it. Finish your profile while you wait.'
-                  : 'Business registered! Add your logo, roster, and pricing below.',
+                gateSupported ? 'Submitted for approval' : 'Business registered',
               );
             }
           }}
