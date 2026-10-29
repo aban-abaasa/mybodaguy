@@ -1,59 +1,83 @@
 import type { ComponentType, ReactNode } from 'react';
 import { AlertCircle, ArrowLeft, Check, X } from 'lucide-react';
 
-// Presentational pieces for the "Book a full journey" page, in the same
+// Presentational pieces for the "Book a journey" full page, in the same
 // ivory / ink / gold language as the customer dashboard (index.css:
-// .classic-card, .classic-eyebrow, .font-classic-display).
+// .journey-*, .classic-eyebrow, .font-classic-display). The page itself is
+// flat: no cards around steps, only the choices inside them are tiles.
 
 export interface StepperStep {
   id: string;
   label: string;
 }
 
+/** The page's top bar: a back arrow, what this page is, and how far along. */
+export function JourneyTopBar({
+  title, backLabel, onBack, backDisabled, progress,
+}: {
+  title: string;
+  backLabel: string;
+  onBack: () => void;
+  backDisabled?: boolean;
+  progress?: { steps: StepperStep[]; currentIndex: number; onGoTo: (id: string) => void };
+}) {
+  const current = progress ? progress.steps[progress.currentIndex] : undefined;
+  return (
+    <header className="journey-bar">
+      <div className="journey-bar-inner">
+        <div className="-mx-2 flex items-center gap-1 pr-2">
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={backDisabled}
+            aria-label={backLabel}
+            className="journey-icon-btn disabled:opacity-40"
+          >
+            <ArrowLeft size={22} />
+          </button>
+          <h2 className="min-w-0 flex-1 truncate font-classic-display text-[18px] font-bold leading-tight text-slate-800">{title}</h2>
+          {progress && current && (
+            <span className="shrink-0 text-[11px] font-semibold tabular-nums text-[#8a6a1f]">
+              {progress.currentIndex + 1}<span className="text-slate-400"> / {progress.steps.length}</span>
+            </span>
+          )}
+        </div>
+        {progress && <JourneyProgress {...progress} />}
+      </div>
+    </header>
+  );
+}
+
 /**
- * Where the customer is in the booking, and a way back. Only steps already
- * passed are clickable — jumping ahead would skip validation the next step
- * depends on.
+ * Where the customer is in the booking, as a row of segments. Only steps
+ * already passed are tappable — jumping ahead would skip validation the next
+ * step depends on.
  */
-export function JourneyStepper({
+export function JourneyProgress({
   steps, currentIndex, onGoTo,
 }: { steps: StepperStep[]; currentIndex: number; onGoTo: (id: string) => void }) {
   return (
-    <nav aria-label="Booking progress">
-      <ol className="flex items-start">
+    <nav aria-label="Booking progress" className="pb-2.5 pt-0.5">
+      <ol className="flex gap-1.5">
         {steps.map((s, i) => {
           const done = i < currentIndex;
           const current = i === currentIndex;
-          const dot = (
-            <span className={`classic-step-dot ${done ? 'is-done' : current ? 'is-current' : ''}`}>
-              {done ? <Check size={15} strokeWidth={3} /> : i + 1}
-            </span>
+          const bar = (
+            <span className={`block h-1 rounded-full transition-colors ${done || current ? 'bg-[#c4a052]' : 'bg-slate-200 dark:bg-slate-700'}`} />
           );
           return (
-            <li key={s.id} className="relative flex flex-1 flex-col items-center" aria-current={current ? 'step' : undefined}>
-              {i > 0 && (
-                <span
-                  aria-hidden
-                  className={`absolute right-1/2 top-[15px] h-px w-full ${i <= currentIndex ? 'bg-[#c4a052]' : 'bg-slate-200'}`}
-                />
-              )}
+            <li key={s.id} className="min-w-0 flex-1" aria-current={current ? 'step' : undefined}>
               {done ? (
                 <button
                   type="button"
                   onClick={() => onGoTo(s.id)}
                   aria-label={`Go back to ${s.label}`}
-                  className="relative z-10 rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c4a052]"
+                  className="block w-full rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c4a052]"
                 >
-                  {dot}
+                  {bar}
                 </button>
-              ) : (
-                <span className="relative z-10">{dot}</span>
-              )}
-              <span
-                className={`mt-1.5 font-classic-display text-[12px] leading-none ${
-                  current ? 'font-bold text-slate-800' : done ? 'font-semibold text-[#8a6a1f]' : 'text-slate-400'
-                }`}
-              >
+              ) : bar}
+              <span className={`mt-1 block truncate text-center text-[10.5px] leading-none ${current ? 'font-bold text-slate-800' : `max-[399px]:invisible ${done ? 'font-semibold text-[#8a6a1f]' : 'text-slate-400'}`}`}>
                 {s.label}
               </span>
             </li>
@@ -64,28 +88,55 @@ export function JourneyStepper({
   );
 }
 
-/** One step of the flow: serif title under a gold hairline, with a way back. */
+/** What are you booking? Each tab is its own page, not a toggle inside one. */
+export function JourneyKindTabs<K extends string>({
+  tabs, value, onChange,
+}: {
+  tabs: ReadonlyArray<{ id: K; label: string; Icon: ComponentType<{ size?: number; className?: string }> }>;
+  value: K;
+  onChange: (id: K) => void;
+}) {
+  return (
+    <div className="border-b border-[#c4a052]/30">
+      <div role="tablist" aria-label="What are you booking?" className="flex">
+        {tabs.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={value === id}
+            onClick={() => onChange(id)}
+            className="journey-tab"
+          >
+            <Icon size={18} className="shrink-0" />
+            <span className="max-w-full truncate">{label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** A step's main action, pinned to the bottom of the screen. */
+export function StepFooter({ children }: { children: ReactNode }) {
+  return <div className="journey-footer space-y-2">{children}</div>;
+}
+
+/** One step of the flow: a page, not a card. Serif title under a gold hairline. */
 export function StepCard({
-  eyebrow, title, description, onBack, backLabel = 'Back', children,
+  eyebrow, title, description, children,
 }: {
   eyebrow?: string;
   title: string;
   description?: string;
-  onBack?: () => void;
-  backLabel?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="classic-card animate-step-in space-y-5 p-3.5 sm:p-5">
+    <section className="animate-step-in space-y-5">
       <header className="space-y-2">
-        {onBack && (
-          <button type="button" onClick={onBack} className="classic-btn classic-btn-ghost -ml-2">
-            <ArrowLeft size={15} /> {backLabel}
-          </button>
-        )}
         <div>
           {eyebrow && <p className="classic-eyebrow">{eyebrow}</p>}
-          <h3 className="mt-0.5 font-classic-display text-[22px] font-semibold leading-tight text-slate-800">{title}</h3>
+          <h3 className="mt-0.5 font-classic-display text-[22px] font-semibold leading-tight text-slate-800 min-[400px]:text-[24px]">{title}</h3>
         </div>
         <div className="landing-classic-divider" />
         {description && <p className="text-[13px] leading-relaxed text-slate-500">{description}</p>}
@@ -159,7 +210,7 @@ export function Field({
 export function TripSummary({ items }: { items: Array<{ icon: ReactNode; label: string; value: string }> }) {
   if (items.length === 0) return null;
   return (
-    <div className="classic-card animate-step-in divide-y divide-[#c4a052]/20 px-4 py-1">
+    <div className="animate-step-in divide-y divide-[#c4a052]/20 border-y border-[#c4a052]/25">
       {items.map((item) => (
         <div key={item.label} className="flex items-center gap-3 py-2.5">
           <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#fbf3dc] text-[#a17c28] ring-1 ring-[#c4a052]/40">

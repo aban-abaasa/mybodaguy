@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, Loader2, Store } from 'lucide-react';
-import { StepCard, Field } from './JourneyUI';
+import { StepCard, Field, StepFooter } from './JourneyUI';
 import ProductPicker, { type CartLine } from './ProductPicker';
 import { listImportStores, quoteImportGoods, type ImportGoodsQuote, type ImportStore, type StoreCartLine } from '../services/journeyService';
 import { formatIcan } from '../services/flightOffers';
@@ -166,9 +166,11 @@ export default function ImportStoreStep({
         </div>
       )}
 
-      <button disabled={!store || !goods || quoting} onClick={onContinue} className="classic-btn classic-btn-primary">
-        {store && goods ? <>Continue to delivery <ArrowRight size={18} /></> : store ? 'Add items to continue' : 'Choose a store to continue'}
-      </button>
+      <StepFooter>
+        <button disabled={!store || !goods || quoting} onClick={onContinue} className="classic-btn classic-btn-primary">
+          {store && goods ? <>Continue to delivery <ArrowRight size={18} /></> : store ? 'Add items to continue' : 'Choose a store to continue'}
+        </button>
+      </StepFooter>
     </StepCard>
   );
 }

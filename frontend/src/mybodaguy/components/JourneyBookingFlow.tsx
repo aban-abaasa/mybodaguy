@@ -19,7 +19,7 @@ import MapReveal from './MapReveal';
 import ImportStoreStep from './ImportStoreStep';
 import type { CartLine } from './ProductPicker';
 import FlightResultsPicker, { CabinPicker } from './FlightResultsPicker';
-import { JourneyStepper, StepCard, Field, ChoiceTile, TripSummary, ErrorBanner, FlightSkeleton, type StepperStep } from './JourneyUI';
+import { JourneyTopBar, JourneyKindTabs, StepFooter, StepCard, Field, ChoiceTile, TripSummary, ErrorBanner, FlightSkeleton, type StepperStep } from './JourneyUI';
 import { formatIcan, formatMoney, summarizeOffer, todayIsoDate, type CabinClass } from '../services/flightOffers';
 import type { Location } from '../data/mockLocations';
 import { COUNTRIES } from '../data/countries';
@@ -83,6 +83,11 @@ interface JourneyBookingFlowProps {
   // customer picks a product from a store abroad on the Delivery tab, which is then a
   // complete-journey delivery rather than a local one.
   initialImport?: { store: ImportStore; lines: CartLine[]; homeCountry: string };
+  // The journey is a full page over the dashboard, so it needs a way out: the
+  // top bar's back arrow (and the phone's own Back button) call this from the
+  // first page of the flow. `exitLabel` names where that lands, for screen readers.
+  onExit?: () => void;
+  exitLabel?: string;
 }
 
 interface CustomerArea {
@@ -127,6 +132,10 @@ function legStatusClass(status: string): string {
   return 'bg-orange-100 text-orange-700';
 }
 
+// History entries we dropped ourselves with history.back(); their popstate
+// events are not the customer pressing Back, so the listener skips them.
+let syntheticPops = 0;
+
 export default function JourneyBookingFlow({
   customerId,
   initialBookingKind,
@@ -135,6 +144,8 @@ export default function JourneyBookingFlow({
   initialShipDropoff,
   initialPickupCountryIso2,
   resumeJourneyId,
+  onExit,
+  exitLabel = 'the dashboard',
 }: JourneyBookingFlowProps) {
   const [bookingKind, setBookingKind] = useState<BookingKind>(initialImport ? 'import' : initialBookingKind || 'fly');
   const [step, setStep] = useState<Step>(resumeJourneyId ? 'tracking' : initialImport ? 'import-store' : initialBookingKind === 'ship' ? 'ship-details' : 'pickup');
@@ -900,7 +911,7 @@ export default function JourneyBookingFlow({
   };
 
   const landVehicleTiles = (value: ShipLandVehicle, onPick: (v: ShipLandVehicle) => void) => (
-    <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" role="group" aria-label="Land transport vehicle">
+    <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 sm:grid-cols-3" role="group" aria-label="Land transport vehicle">
       {SHIP_LAND_VEHICLES.map(({ value: v, label, desc, Icon }) => (
         <button
           key={label}
@@ -949,65 +960,105 @@ export default function JourneyBookingFlow({
     tripItems.push({ icon: <Plane size={15} />, label: 'Flight', value: `${selectedSummary.airline} · ${selectedSummary.departDayLabel} · ${flightLine}` });
   }
 
-  // A new step starts at its top — otherwise, on a phone, "Next" lands the
-  // customer mid-way down a long page.
-  const containerRef = useRef<HTMLDivElement>(null);
+  const goToStep = (next: Step) => {
+    setError(null);
+    setStep(next);
+  };
+
+  // Each step is its own page, so Back means "the page before this one", and
+  // from the first page it means leaving the journey altogether.
+  const backTarget: { step: Step; label: string } | null =
+    step === 'import-delivery' ? { step: 'import-store', label: 'Basket' }
+    : step === 'flight' ? (importAir ? { step: 'import-delivery', label: 'Delivery' } : { step: 'pickup', label: 'Pickup' })
+    : step === 'destination' ? { step: 'flight', label: 'Flight' }
+    : step === 'review' ? { step: 'destination', label: 'Arrival' }
+    : null;
+  const handleBack = () => {
+    if (step === 'confirming') return;
+    if (backTarget) goToStep(backTarget.step);
+    else onExit?.();
+  };
+  const backLabel = backTarget ? `Back to ${backTarget.label}` : step === 'tracking' ? `Close, back to ${exitLabel}` : `Back to ${exitLabel}`;
+
+  // The phone's own Back button (and the browser's) should step back through
+  // the pages, not drop the customer out of the whole app. One history entry
+  // is pushed while the journey is open; each Back press is answered by
+  // handleBack and, if we stay on the journey, the entry is pushed again.
+  const handleBackRef = useRef(handleBack);
+  handleBackRef.current = handleBack;
+  const stepRef = useRef(step);
+  stepRef.current = step;
+  const backTargetRef = useRef(backTarget);
+  backTargetRef.current = backTarget;
+  useEffect(() => {
+    const arm = () => window.history.pushState({ ...(window.history.state ?? {}), journeyPage: true }, '');
+    arm();
+    const onPop = () => {
+      if (syntheticPops > 0) { syntheticPops -= 1; return; }
+      const wasConfirming = stepRef.current === 'confirming';
+      const leaving = !wasConfirming && !backTargetRef.current;
+      handleBackRef.current();
+      if (!leaving) arm();
+    };
+    window.addEventListener('popstate', onPop);
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      // Closed with the on-screen arrow: drop the entry we pushed, quietly.
+      if (window.history.state?.journeyPage) {
+        syntheticPops += 1;
+        window.history.back();
+      }
+    };
+  }, []);
+
+  // The page scrolls inside itself, so the dashboard underneath must not.
+  useEffect(() => {
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, []);
+
+  // A new step (or tab) starts at its top — otherwise, on a phone, "Next"
+  // lands the customer mid-way down a long page.
+  const scrollRef = useRef<HTMLDivElement>(null);
   const isFirstStepRender = useRef(true);
   useEffect(() => {
     if (isFirstStepRender.current) {
       isFirstStepRender.current = false;
       return;
     }
-    containerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [step]);
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [step, bookingKind]);
 
-  const goToStep = (next: Step) => {
-    setError(null);
-    setStep(next);
-  };
+  // An error shows at the top of the page; bring it into view.
+  useEffect(() => {
+    if (error) scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [error]);
+
+  const showKindTabs = step !== 'tracking' && step !== 'confirming';
+  const pageTitle = step === 'tracking' ? 'Your journey' : step === 'confirming' ? 'Booking…' : 'Book a journey';
 
   return (
-    <div ref={containerRef} className="mx-auto max-w-2xl scroll-mt-4 space-y-5 py-4 sm:px-4 sm:py-6">
-      <header className="text-center">
-        <p className="classic-eyebrow">Door to door</p>
-        <h2 className="mt-1 font-classic-display text-[28px] font-bold leading-tight text-slate-800">Book a full journey</h2>
-        <div className="landing-classic-divider mx-auto mt-3 max-w-[14rem]" />
-        <p className="mx-auto mt-3 max-w-md text-[13px] leading-relaxed text-slate-500">
-          {bookingKind === 'import'
-            ? 'Buy from a store abroad and have it brought to your door, by air or by sea.'
-            : bookingKind === 'ship'
-            ? 'Cargo carried across the water, with land transport at either end if you want it.'
-            : parcelMode
-              ? 'A courier to the airport, a real flight, and a courier waiting when it lands.'
-              : 'A ride to the airport, a real flight, and a driver waiting when you land.'}
-        </p>
-      </header>
+    <div className="journey-page animate-fade-soft" role="region" aria-label="Book a journey">
+      <JourneyTopBar
+        title={pageTitle}
+        backLabel={backLabel}
+        onBack={handleBack}
+        backDisabled={step === 'confirming'}
+        progress={showStepper ? { steps: flowSteps, currentIndex: flowIndex, onGoTo: (id) => goToStep(id as Step) } : undefined}
+      />
 
-      {step !== 'tracking' && step !== 'confirming' && (
-        <div className="classic-card grid grid-cols-3 gap-1 !rounded-2xl p-1" role="group" aria-label="What are you booking?">
-          {([['fly', 'Fly', Plane], ['ship', 'Ship Cargo', Ship], ['import', 'Buy abroad', ShoppingBag]] as const).map(([kind, label, Icon]) => {
-            const active = bookingKind === kind;
-            return (
-              <button
-                key={kind}
-                type="button"
-                aria-pressed={active}
-                onClick={() => changeBookingKind(kind)}
-                className={`flex min-h-[40px] items-center justify-center gap-1 whitespace-nowrap rounded-xl px-1 text-[12px] font-bold leading-none transition-all min-[400px]:min-h-[44px] min-[400px]:gap-2 min-[400px]:text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#c4a052] ${
-                  active
-                    ? 'bg-gradient-to-br from-[#231b12] to-[#3d2e18] text-[#f6e7bd] shadow-md ring-1 ring-inset ring-[#c4a052]/50'
-                    : 'text-slate-500 hover:bg-[#c4a052]/10 hover:text-[#7a5a12]'
-                }`}
-              >
-                <Icon size={14} className="shrink-0 max-[359px]:hidden min-[400px]:h-4 min-[400px]:w-4" /> {label}
-              </button>
-            );
-          })}
-        </div>
+      <div ref={scrollRef} className="journey-scroll">
+      <div className="journey-body space-y-5">
+      {/* Part of the page, not the bar: on a short phone screen they scroll
+          away instead of eating a third of the view on every step. */}
+      {showKindTabs && (
+        <JourneyKindTabs
+          tabs={[{ id: 'fly', label: 'Fly', Icon: Plane }, { id: 'ship', label: 'Ship cargo', Icon: Ship }, { id: 'import', label: 'Buy abroad', Icon: ShoppingBag }] as const}
+          value={bookingKind}
+          onChange={changeBookingKind}
+        />
       )}
-
-      {showStepper && <JourneyStepper steps={flowSteps} currentIndex={flowIndex} onGoTo={(id) => goToStep(id as Step)} />}
-
       {paymentIssue && (
         <div role="alert" className="animate-step-in rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 text-sm text-amber-900">
           <div className="flex items-start gap-2.5">
@@ -1060,8 +1111,6 @@ export default function JourneyBookingFlow({
           eyebrow="Buy abroad · 2 of 2"
           title="Where should it be delivered?"
           description="Set the address, choose how it travels, and see the whole price before you pay."
-          onBack={() => goToStep('import-store')}
-          backLabel="Basket"
         >
           <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#fbf3dc] p-3 text-sm text-[#5c4410]">
             <span className="min-w-0 truncate font-semibold">{importStore.name} · {importCart.reduce((n, l) => n + l.quantity, 0)} item{importCart.reduce((n, l) => n + l.quantity, 0) === 1 ? '' : 's'}</span>
@@ -1103,7 +1152,7 @@ export default function JourneyBookingFlow({
 
           <div>
             <span className="classic-label">How should it travel?</span>
-            <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="How it travels">
+            <div className="grid grid-cols-1 gap-2.5 min-[400px]:grid-cols-2" role="group" aria-label="How it travels">
               {([
                 { method: 'air', label: 'By air', desc: 'Fastest. A traveller flying the route carries it as baggage', Icon: Plane },
                 { method: 'sea', label: 'By sea', desc: 'Better for bulk. Cargo ship via the port, land transport both ends', Icon: Ship },
@@ -1131,7 +1180,7 @@ export default function JourneyBookingFlow({
             </p>
             <div>
               <span className="classic-label">Courier vehicle (both legs)</span>
-              <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="Courier vehicle">
+              <div className="grid grid-cols-1 gap-2.5 min-[400px]:grid-cols-2" role="group" aria-label="Courier vehicle">
                 {([
                   { value: 'motorcycle', label: 'Bike', desc: `Small orders, up to ${PARCEL_BIKE_MAX_KG} kg`, Icon: Bike },
                   { value: 'car', label: 'Car', desc: 'Bigger or awkward orders', Icon: Car },
@@ -1161,7 +1210,7 @@ export default function JourneyBookingFlow({
             <Field label="Recipient's phone" htmlFor="jb-import-recipient-phone" hint="The courier calls this number on arrival. Include the country code.">
               <input id="jb-import-recipient-phone" className="classic-input" type="tel" inputMode="tel" maxLength={30} autoComplete="off" placeholder="+256 7XX XXX XXX" value={importRecipientPhone} onChange={(e) => setImportRecipientPhone(e.target.value)} />
             </Field>
-            <div className="space-y-2">
+            <StepFooter>
               <button disabled={!importAirReady} onClick={startImportAir} className="classic-btn classic-btn-primary">
                 Choose the flight <ArrowRight size={18} />
               </button>
@@ -1170,7 +1219,7 @@ export default function JourneyBookingFlow({
                   {!importDropoff ? 'Set the delivery address on the map to continue.' : importWeight <= 0 ? 'Enter the order\'s weight to continue.' : !importRecipientOk ? 'Enter the recipient\'s name and phone number to continue.' : 'Choose a bigger courier vehicle to continue.'}
                 </p>
               )}
-            </div>
+            </StepFooter>
           </>)}
 
           {importSea && (<>
@@ -1193,7 +1242,7 @@ export default function JourneyBookingFlow({
             )}
             {payerPicker}
             {importShipQuoteError && <p role="alert" className="text-center text-xs font-medium text-red-600">{importShipQuoteError}</p>}
-            <div className="space-y-2">
+            <StepFooter>
               <button disabled={!importSeaReady || importShipQuoting || !importShipQuote || submittingShip} onClick={payImportSea} className="classic-btn classic-btn-primary">
                 {submittingShip || importShipQuoting ? <Loader2 className="animate-spin" size={18} /> : <Ship size={18} />}
                 {submittingShip ? 'Booking…' : importShipQuoting ? 'Pricing…' : importShipQuote ? `Pay ${formatIcan(importGoods.goodsIcan + importShipQuote.totalIcan)} ICAN & ship` : 'Pay & ship'}
@@ -1201,7 +1250,7 @@ export default function JourneyBookingFlow({
               {!importSeaReady && !importVehicleProblem && (
                 <p className="text-center text-xs text-slate-500">Set the delivery address on the map to see the shipping price.</p>
               )}
-            </div>
+            </StepFooter>
           </>)}
         </StepCard>
       )}
@@ -1256,7 +1305,7 @@ export default function JourneyBookingFlow({
           {(shipPickupLeg || shipDropoffLeg) && (
             <div>
               <span className="classic-label">Land transport vehicle</span>
-              <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3" role="group" aria-label="Land transport vehicle">
+              <div className="grid grid-cols-1 gap-2.5 min-[420px]:grid-cols-2 sm:grid-cols-3" role="group" aria-label="Land transport vehicle">
                 {SHIP_LAND_VEHICLES.map(({ value, label, desc, Icon }) => (
                   <button
                     key={label}
@@ -1359,6 +1408,7 @@ export default function JourneyBookingFlow({
           {payerPicker}
           {shipQuoteError && <p role="alert" className="text-center text-xs font-medium text-red-600">{shipQuoteError}</p>}
 
+          <StepFooter>
           <button
             disabled={!shipReady || submittingShip || shipQuoting || !shipQuote}
             onClick={() => submitShipCargo()}
@@ -1368,12 +1418,13 @@ export default function JourneyBookingFlow({
             {submittingShip ? 'Booking…' : shipQuoting ? 'Pricing…' : shipQuote ? `Ship this cargo · ${formatIcan(shipQuote.totalIcan)} ICAN` : 'Ship this cargo'}
           </button>
           {!shipReady && !shipVehicleProblem && (
-            <p className="-mt-2 text-center text-xs text-slate-500">
+            <p className="text-center text-xs text-slate-500">
               {(shipPickupLeg && !shipPickup) || (shipDropoffLeg && !shipDropoff)
                 ? 'Set the pin on the map for each land leg to continue.'
                 : 'Choose the countries to continue.'}
             </p>
           )}
+          </StepFooter>
         </StepCard>
       )}
 
@@ -1417,7 +1468,7 @@ export default function JourneyBookingFlow({
                 {(wantPickupRide || wantDropoffRide) && (
                   <div>
                     <span className="classic-label">Courier vehicle (both legs)</span>
-                    <div className="grid grid-cols-2 gap-2.5" role="group" aria-label="Courier vehicle">
+                    <div className="grid grid-cols-1 gap-2.5 min-[400px]:grid-cols-2" role="group" aria-label="Courier vehicle">
                       {([
                         { value: 'motorcycle', label: 'Bike', desc: `Small parcels, up to ${PARCEL_BIKE_MAX_KG} kg`, Icon: Bike },
                         { value: 'car', label: 'Car', desc: 'Bigger or awkward parcels', Icon: Car },
@@ -1615,7 +1666,7 @@ export default function JourneyBookingFlow({
 
           {/* Sticks to the bottom of the screen so "Continue" is always one
               tap away on a phone, however long this step gets. */}
-          <div className="sticky bottom-0 z-10 -mx-3.5 space-y-2 border-t border-[#c4a052]/25 bg-white/95 px-3.5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur sm:-mx-5 sm:px-5 dark:bg-slate-800/95">
+          <StepFooter>
             <button
               disabled={(wantPickupRide && ((!selectedAreaId && !manualAddress.trim()) || geocoding)) || (parcelMode && !parcelDescription.trim())}
               onClick={goToFlightStep}
@@ -1630,7 +1681,7 @@ export default function JourneyBookingFlow({
             {parcelMode && !parcelDescription.trim() && (
               <p className="text-center text-xs text-slate-500">Say what you are sending to continue.</p>
             )}
-          </div>
+          </StepFooter>
         </StepCard>
       )}
 
@@ -1641,8 +1692,6 @@ export default function JourneyBookingFlow({
           description={importAir
             ? "Pick the route and date of whoever is flying your order in, and we'll show every airline flying it."
             : "Pick your route and date, and we'll show every airline flying it."}
-          onBack={() => goToStep(importAir ? 'import-delivery' : 'pickup')}
-          backLabel={importAir ? 'Delivery' : 'Pickup'}
         >
           <AirportPicker
             label="From"
@@ -1729,15 +1778,17 @@ export default function JourneyBookingFlow({
 
           <FlightResultsPicker offers={offers} selectedOffer={selectedOffer} onSelect={setSelectedOffer} travellers={partySize} />
 
-          <button
-            disabled={!selectedOffer || (parcelMode && parcelWeight <= 0)}
-            onClick={() => goToStep('destination')}
-            className="classic-btn classic-btn-primary"
-          >
-            {selectedOffer
-              ? (parcelMode && parcelWeight <= 0 ? "Enter the parcel's weight to continue" : <>Continue with {selectedOffer.carrier || 'this flight'} <ArrowRight size={18} /></>)
-              : 'Choose a flight to continue'}
-          </button>
+          <StepFooter>
+            <button
+              disabled={!selectedOffer || (parcelMode && parcelWeight <= 0)}
+              onClick={() => goToStep('destination')}
+              className="classic-btn classic-btn-primary"
+            >
+              {selectedOffer
+                ? (parcelMode && parcelWeight <= 0 ? "Enter the parcel's weight to continue" : <>Continue with {selectedOffer.carrier || 'this flight'} <ArrowRight size={18} /></>)
+                : 'Choose a flight to continue'}
+            </button>
+          </StepFooter>
         </StepCard>
       )}
 
@@ -1748,8 +1799,6 @@ export default function JourneyBookingFlow({
           description={parcelMode
             ? 'A courier is dispatched automatically once the flight lands — timed off the actual arrival, and re-timed if the flight is delayed.'
             : 'A driver is dispatched automatically once you land — timed off your actual arrival, and re-timed if your flight is delayed.'}
-          onBack={() => goToStep('flight')}
-          backLabel="Flight"
         >
           <div>
             <span className="classic-label">{parcelMode ? 'When the parcel lands' : 'When you land'}</span>
@@ -1874,7 +1923,7 @@ export default function JourneyBookingFlow({
           </>)}
           </>)}
 
-          <div className="space-y-2">
+          <StepFooter>
             <button
               disabled={(wantDropoffRide && (!destCountry || !destAddress)) || !!parcelProblem || quoting}
               onClick={buildQuote}
@@ -1888,7 +1937,7 @@ export default function JourneyBookingFlow({
             ) : parcelProblem ? (
               <p role="alert" className="text-center text-xs font-medium text-red-600">{parcelProblem}</p>
             ) : null}
-          </div>
+          </StepFooter>
         </StepCard>
       )}
 
@@ -1897,8 +1946,6 @@ export default function JourneyBookingFlow({
           eyebrow={importAir ? 'Buy abroad · pay' : 'Step 4 of 4'}
           title="Review & pay"
           description="Your whole journey, door to door."
-          onBack={() => goToStep('destination')}
-          backLabel="Arrival"
         >
           <ol>
             {[
@@ -2089,7 +2136,7 @@ export default function JourneyBookingFlow({
             })}
           </div>
 
-          <div className="space-y-2">
+          <StepFooter>
             <button
               disabled={confirming || !passengerDetailsValid || !hasEnoughBalance}
               onClick={doConfirm}
@@ -2104,7 +2151,7 @@ export default function JourneyBookingFlow({
             {!confirming && passengerDetailsValid && !hasEnoughBalance && (
               <p className="text-center text-xs text-slate-500">Top up your wallet above to continue.</p>
             )}
-          </div>
+          </StepFooter>
         </StepCard>
       )}
 
@@ -2149,12 +2196,12 @@ export default function JourneyBookingFlow({
 
           {!journey ? (
             trackingError ? (
-              <div className="classic-card space-y-2 p-5 text-center text-sm text-slate-600" role="alert">
+              <div className="space-y-2 border-y border-[#c4a052]/25 py-5 text-center text-sm text-slate-600" role="alert">
                 <p className="font-semibold text-slate-800">Your booking is placed — we just can't load its status right now.</p>
                 <p>It is safe to leave this page; you'll find it under My Journeys in the Orders tab of your dashboard.</p>
               </div>
             ) : (
-              <div className="classic-card flex items-center justify-center gap-2 p-6 text-sm text-slate-500" role="status">
+              <div className="flex items-center justify-center gap-2 py-8 text-sm text-slate-500" role="status">
                 <Loader2 className="animate-spin" size={18} /> Getting your journey…
               </div>
             )
@@ -2172,7 +2219,7 @@ export default function JourneyBookingFlow({
                   <span className="shrink-0 font-semibold tabular-nums">{formatIcan(importGoods.goodsIcan)} ICAN</span>
                 </div>
               )}
-              <ol className="classic-card p-4">
+              <ol className="pt-1">
                 {[...journey.legs].sort((a, b) => a.leg_order - b.leg_order).map((leg, i, all) => {
                   const rider = leg.ride?.rider;
                   const LegIcon = legIcon[leg.leg_type] || MapPin;
@@ -2221,6 +2268,8 @@ export default function JourneyBookingFlow({
           )}
         </section>
       )}
+      </div>
+      </div>
     </div>
   );
 }

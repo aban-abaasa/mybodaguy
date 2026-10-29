@@ -529,6 +529,116 @@ textarea:-webkit-autofill:active {
   .animate-step-in { animation: none; }
 }
 
+/* "Book a journey" as a real full page. It sits over the dashboard (header,
+   bottom nav, chat button) and scrolls on its own, so every step starts at
+   the top of a clean screen. Only the top bar and the Continue footer stay
+   put. --journey-gutter is the one place the side padding is decided: 12px
+   on the smallest phones, 16px from 360px, wider from tablets up. */
+.journey-page {
+  --journey-gutter: 12px;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #faf8f3 0%, #f7f0e1 100%);
+  color: #1e293b;
+}
+.dark .journey-page { background: #0f172a; color: #f1f5f9; }
+@media (min-width: 360px) { .journey-page { --journey-gutter: 16px; } }
+@media (min-width: 640px) { .journey-page { --journey-gutter: 24px; } }
+
+.journey-bar {
+  flex: none;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: rgba(250, 248, 243, 0.94);
+  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid rgba(196, 160, 82, 0.3);
+}
+.dark .journey-bar { background: rgba(15, 23, 42, 0.94); border-bottom-color: #334155; }
+.journey-bar-inner,
+.journey-body {
+  width: 100%;
+  max-width: 40rem;
+  margin-inline: auto;
+  padding-inline: var(--journey-gutter);
+}
+
+.journey-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.journey-body { padding-top: 16px; padding-bottom: max(24px, env(safe-area-inset-bottom, 0px)); }
+
+/* Back / close in the top bar: a 44px target without a 44px-looking button. */
+.journey-icon-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  border-radius: 999px;
+  color: #7a5a12;
+  transition: background 0.15s, transform 0.12s;
+}
+.journey-icon-btn:hover { background: rgba(196, 160, 82, 0.14); }
+.journey-icon-btn:active { transform: scale(0.94); }
+.journey-icon-btn:focus-visible { outline: 2px solid #c4a052; outline-offset: -2px; }
+.dark .journey-icon-btn { color: #e6c980; }
+
+/* Fly / Ship / Buy abroad: three pages, switched like classic folder tabs. */
+.journey-tab {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 50px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 2px;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  color: #64748b;
+  transition: color 0.15s;
+}
+.journey-tab:hover { color: #7a5a12; }
+.journey-tab:focus-visible { outline: 2px solid #c4a052; outline-offset: -2px; border-radius: 8px; }
+.journey-tab::after {
+  content: '';
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+.journey-tab[aria-selected='true'] { color: #7a5a12; font-weight: 700; }
+.journey-tab[aria-selected='true']::after { background: #c4a052; }
+.dark .journey-tab { color: #94a3b8; }
+.dark .journey-tab[aria-selected='true'], .dark .journey-tab:hover { color: #e6c980; }
+
+/* Pins the step's main action to the bottom of the screen so it is always one
+   tap away. Negative margin cancels the page gutter so it runs edge to edge. */
+.journey-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  margin-inline: calc(var(--journey-gutter) * -1);
+  padding: 12px var(--journey-gutter) max(12px, env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, #f9f5ea 78%, rgba(249, 245, 234, 0));
+}
+.dark .journey-footer { background: linear-gradient(to top, #0f172a 78%, rgba(15, 23, 42, 0)); }
+
 .safe-top { padding-top: env(safe-area-inset-top, 0px); }
 .safe-bottom { padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px)); }
 
