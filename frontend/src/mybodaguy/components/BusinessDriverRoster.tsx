@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { UserPlus, Star, CheckCircle, XCircle, Car } from 'lucide-react';
+import { UserPlus, Star, CheckCircle, XCircle, Car, Search, BadgeCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../../services/supabaseClient';
 import type { BusinessCategory } from './BusinessRegistrationModal';
@@ -17,8 +17,11 @@ interface Driver {
   rating: number | null;
   total_rides: number | null;
   escort_has_own_transport: boolean;
+  admin_verified_at?: string | null;
   created_at: string;
 }
+
+type RosterFilter = 'all' | 'online' | 'offline';
 
 const VEHICLE_TYPES = ['motorcycle', 'bicycle', 'tuktuk', 'car', 'van', 'truck'];
 
@@ -33,6 +36,8 @@ export default function BusinessDriverRoster({ businessProfileId, category }: { 
   const [hasOwnTransport, setHasOwnTransport] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<RosterFilter>('all');
 
   const isEscort = category === 'security_escort';
   const label = isEscort ? 'Escort' : 'Driver';
@@ -90,6 +95,15 @@ export default function BusinessDriverRoster({ businessProfileId, category }: { 
   };
 
   if (loading) return <div className="p-6 text-slate-400 text-sm">Loading…</div>;
+
+  const onlineCount = drivers.filter((d) => d.is_available).length;
+  const q = query.trim().toLowerCase();
+  const visible = drivers.filter((d) => {
+    if (filter === 'online' && !d.is_available) return false;
+    if (filter === 'offline' && d.is_available) return false;
+    if (!q) return true;
+    return [d.full_name, d.email, d.plate_number, d.vehicle_type].some((v) => v?.toLowerCase().includes(q));
+  });
 
   return (
     <div className="space-y-4">
@@ -171,11 +185,45 @@ export default function BusinessDriverRoster({ businessProfileId, category }: { 
         </form>
       )}
 
+      {drivers.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs text-slate-500">
+            {drivers.length} {label.toLowerCase()}{drivers.length === 1 ? '' : 's'} · {onlineCount} online
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                className="w-full border rounded-lg py-2 pl-8 pr-3 bg-white text-slate-900 placeholder-slate-400 text-sm"
+                placeholder="Search name, email or plate"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </div>
+            <div className="flex gap-1.5">
+              {(['all', 'online', 'offline'] as RosterFilter[]).map((f) => (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium capitalize ${
+                    filter === f ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
       {drivers.length === 0 ? (
         <p className="text-slate-400 text-sm text-center py-8">No {label.toLowerCase()}s yet.</p>
+      ) : visible.length === 0 ? (
+        <p className="text-slate-400 text-sm text-center py-6">No {label.toLowerCase()}s match.</p>
       ) : (
         <div className="space-y-2">
-          {drivers.map((d) => (
+          {visible.map((d) => (
             <div key={d.id} className="flex items-center justify-between p-3 bg-white border border-slate-100 rounded-xl">
               <div>
                 <p className="text-sm font-medium text-slate-800">{d.full_name}</p>
@@ -185,6 +233,11 @@ export default function BusinessDriverRoster({ businessProfileId, category }: { 
                 </p>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{d.status}</span>
+                  {d.admin_verified_at && (
+                    <span className="text-xs flex items-center gap-0.5 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">
+                      <BadgeCheck size={11} /> Verified
+                    </span>
+                  )}
                   {d.rating != null && (
                     <span className="text-xs flex items-center gap-0.5 text-amber-600">
                       <Star size={11} className="fill-amber-500 text-amber-500" /> {Number(d.rating).toFixed(1)}
