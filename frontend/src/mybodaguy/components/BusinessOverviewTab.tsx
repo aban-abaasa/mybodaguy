@@ -193,7 +193,7 @@ export default function BusinessOverviewTab({
         <p className="py-2 text-sm text-red-600">Could not load figures: {overviewError}</p>
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
             <Kpi icon={Wallet} label="Fares · 30 days" value={formatMoney(Number(overview.revenue_30d))} hint={`${formatMoney(Number(overview.revenue_all))} total`} />
             <Kpi icon={Car} label="Completed" value={String(overview.completed_30d)} hint={completionRate != null ? `${completionRate}% completion` : '30 days'} />
             <Kpi icon={Activity} label="Active now" value={String(overview.active_now)} hint={`${overview.rides_30d} requested`} />
@@ -202,6 +202,7 @@ export default function BusinessOverviewTab({
             <Kpi icon={TrendingUp} label="Cancelled" value={String(overview.cancelled_30d)} hint="30 days" />
           </div>
 
+          <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
           <ClassicSection title="Last 14 days" summary={formatMoney(overview.trend.reduce((sum, d) => sum + Number(d.revenue), 0))}>
             <RevenueBars trend={overview.trend} />
           </ClassicSection>
@@ -218,6 +219,7 @@ export default function BusinessOverviewTab({
               </ol>
             </ClassicSection>
           )}
+          </div>
         </>
       )}
     </div>

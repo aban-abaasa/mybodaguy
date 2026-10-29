@@ -161,6 +161,7 @@ export default function ManageBusinessPanel() {
                 ))}
             </div>
           </div>
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
           {businesses.map((b) => {
             const state = stateOf(b);
             const pct = profileCompleteness(b, registrations.get(b.id));
@@ -201,6 +202,7 @@ export default function ManageBusinessPanel() {
               </div>
             );
           })}
+          </div>
         </div>
       )}
 

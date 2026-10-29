@@ -77,7 +77,7 @@ export default function BusinessProfileEditor({
   const registrationLocked = !needsRegistration && state !== 'unsupported';
 
   return (
-    <div className="space-y-3">
+    <div className="grid grid-cols-1 items-start gap-3 lg:grid-cols-2">
       {state !== 'unsupported' && (
         <ClassicSection
           title="Registration"
