@@ -9,6 +9,7 @@ import RiderModeSelector from '../components/RiderModeSelector';
 import { useRiderSmartAssist, WorkModeCard, MyAreasCard } from '../components/RiderSmartAssist';
 import type { WorkMode } from '../utils/riderSmarts';
 import SupermarketPartnership from '../components/SupermarketPartnership';
+import { useNewMarketAlerts } from '../hooks/useNewMarketAlerts';
 import ProfileModal from '../components/ProfileModal';
 import MobileBottomTabs from '../components/common/MobileBottomTabs';
 import RiderICANEarnings from '../components/RiderICANEarnings';
@@ -364,6 +365,15 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const voteAttention = useLeadershipAttention(user?.id);
+  // A new business opening is announced wherever the rider is; the Markets tab carries the unread count.
+  const marketAlerts = useNewMarketAlerts(user?.id, () => { setActiveTab('partnerships'); setShowMobileMenu(false); });
+  const newMarketCount = activeTab === 'partnerships' ? 0 : marketAlerts.freshIds.size;
+  // "New" stays on a market while the rider is on the Markets tab, and is cleared when they leave it.
+  const leftMarkets = useRef(false);
+  useEffect(() => {
+    if (activeTab === 'partnerships') leftMarkets.current = true;
+    else if (leftMarkets.current) { leftMarkets.current = false; marketAlerts.clearFresh(); }
+  }, [activeTab]); // eslint-disable-line react-hooks/exhaustive-deps
   const { stats: riderStats, loading: riderStatsLoading, allVehicles, activeVehicleType, activeRiderId, reload: reloadRiderStats } = useRiderStats(user?.id);
   // Bumped after the rider pays for their ID card so the wallet cards re-read the balance.
   const [walletRefresh, setWalletRefresh] = useState(0);
@@ -620,6 +630,11 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                   }`}
                 >
                   <span>{TAB_META[id].emoji}</span>{TAB_META[id].label}
+                  {id === 'partnerships' && newMarketCount > 0 && (
+                    <span className="grid h-4 min-w-[1rem] place-items-center rounded-full bg-orange-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-white" aria-label={`${newMarketCount} new`}>
+                      {newMarketCount}
+                    </span>
+                  )}
                 </button>
               ))}
             </nav>
@@ -644,6 +659,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
               className="flex h-9 flex-shrink-0 items-center gap-1.5 rounded-full border border-[#c4a052]/40 bg-[#faf8f3] px-3.5 text-xs font-semibold text-slate-700 shadow-sm transition-transform active:scale-95 dark:border-slate-600 dark:bg-slate-800"
             >
               <LayoutGrid size={14} className="text-orange-500" /> Menu
+              {newMarketCount > 0 && <span className="h-2 w-2 rounded-full bg-orange-500" aria-label={`${newMarketCount} new market${newMarketCount === 1 ? '' : 's'}`} />}
             </button>
           </div>
         </div>
@@ -921,7 +937,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
         )}
 
         {activeTab === 'partnerships' && (
-          <SupermarketPartnership riderId={user.id} vehicleType={activeVehicleType} />
+          <SupermarketPartnership riderId={user.id} vehicleType={activeVehicleType} freshIds={marketAlerts.freshIds} refreshKey={marketAlerts.version} />
         )}
 
         {/* Same always-mounted pattern as the ride/escort feeds above —
@@ -996,6 +1012,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                     </span>
                     <span className={`text-[11px] leading-tight ${active ? 'font-bold text-orange-600' : 'font-medium text-slate-700'}`}>
                       {TAB_META[id].label}
+                      {id === 'partnerships' && newMarketCount > 0 && <span className="ml-1 font-bold text-orange-500">· {newMarketCount} new</span>}
                     </span>
                   </button>
                 );
