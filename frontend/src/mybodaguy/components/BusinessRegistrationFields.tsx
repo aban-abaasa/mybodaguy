@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
+import ClassicSection from './common/ClassicSection';
+import { ClassicField } from './common/classicForm';
 import {
   LICENSE_LABEL,
   businessService,
@@ -34,20 +36,6 @@ export function registrationFrom(r: BusinessRegistration | undefined): Registrat
   };
 }
 
-const inputCls = 'w-full border rounded-lg p-2.5 bg-white text-slate-900 placeholder-slate-400 text-sm';
-
-function Field({ label, error, required, children }: { label: string; error?: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="block text-xs font-medium text-slate-500 mb-1">
-        {label}{required && <span className="text-red-500"> *</span>}
-      </span>
-      {children}
-      {error && <span className="block text-xs text-red-600 mt-1">{error}</span>}
-    </label>
-  );
-}
-
 /** The legal + contact details a registered business gives. Used by the sign-up modal and the "complete registration" card. */
 export function RegistrationFields({
   category,
@@ -60,37 +48,49 @@ export function RegistrationFields({
   errors: Record<string, string>;
   onChange: (next: RegistrationInput) => void;
 }) {
+  const [more, setMore] = useState(false);
   const set = (key: keyof RegistrationInput) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     onChange({ ...values, [key]: e.target.value });
+  const optionalFilled = [values.taxId, values.contactEmail, values.website, values.businessAddress, values.operatingHours].filter((v) => v?.trim()).length;
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="Business registration number" required error={errors.registrationNumber}>
-          <input className={inputCls} placeholder="e.g. URSB certificate no." value={values.registrationNumber} onChange={set('registrationNumber')} autoComplete="off" />
-        </Field>
-        <Field label={LICENSE_LABEL[category]} required error={errors.licenseNumber}>
-          <input className={inputCls} value={values.licenseNumber} onChange={set('licenseNumber')} autoComplete="off" />
-        </Field>
-        <Field label="Contact phone" required error={errors.contactPhone}>
-          <input className={inputCls} type="tel" inputMode="tel" placeholder="+256 …" value={values.contactPhone} onChange={set('contactPhone')} />
-        </Field>
-        <Field label="Tax ID (TIN)" error={errors.taxId}>
-          <input className={inputCls} value={values.taxId} onChange={set('taxId')} autoComplete="off" />
-        </Field>
-        <Field label="Business email" error={errors.contactEmail}>
-          <input className={inputCls} type="email" value={values.contactEmail} onChange={set('contactEmail')} />
-        </Field>
-        <Field label="Website" error={errors.website}>
-          <input className={inputCls} placeholder="https://" value={values.website} onChange={set('website')} />
-        </Field>
-      </div>
-      <Field label="Office address" error={errors.businessAddress}>
-        <input className={inputCls} value={values.businessAddress} onChange={set('businessAddress')} />
-      </Field>
-      <Field label="Operating hours" error={errors.operatingHours}>
-        <input className={inputCls} placeholder="e.g. Mon–Sat 7am–8pm" value={values.operatingHours} onChange={set('operatingHours')} />
-      </Field>
+      <ClassicField label="Registration number" required error={errors.registrationNumber}>
+        <input className="classic-input" value={values.registrationNumber} onChange={set('registrationNumber')} autoComplete="off" />
+      </ClassicField>
+      <ClassicField label={LICENSE_LABEL[category]} required error={errors.licenseNumber}>
+        <input className="classic-input" value={values.licenseNumber} onChange={set('licenseNumber')} autoComplete="off" />
+      </ClassicField>
+      <ClassicField label="Contact phone" required error={errors.contactPhone}>
+        <input className="classic-input" type="tel" inputMode="tel" placeholder="+256" value={values.contactPhone} onChange={set('contactPhone')} />
+      </ClassicField>
+
+      <ClassicSection
+        title="More details"
+        summary={optionalFilled ? `${optionalFilled} added` : 'Optional'}
+        open={more || !!errors.contactEmail || !!errors.website}
+        onToggle={setMore}
+      >
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <ClassicField label="Tax ID (TIN)">
+              <input className="classic-input" value={values.taxId} onChange={set('taxId')} autoComplete="off" />
+            </ClassicField>
+            <ClassicField label="Email" error={errors.contactEmail}>
+              <input className="classic-input" type="email" value={values.contactEmail} onChange={set('contactEmail')} />
+            </ClassicField>
+            <ClassicField label="Website" error={errors.website}>
+              <input className="classic-input" placeholder="https://" value={values.website} onChange={set('website')} />
+            </ClassicField>
+            <ClassicField label="Hours">
+              <input className="classic-input" placeholder="Mon–Sat 7am–8pm" value={values.operatingHours} onChange={set('operatingHours')} />
+            </ClassicField>
+          </div>
+          <ClassicField label="Address">
+            <input className="classic-input" value={values.businessAddress} onChange={set('businessAddress')} />
+          </ClassicField>
+        </div>
+      </ClassicSection>
     </div>
   );
 }
@@ -128,18 +128,14 @@ export function RegistrationSubmitCard({
       toast.error(err);
       return;
     }
-    toast.success('Registration submitted');
+    toast.success('Submitted');
     await onSubmitted();
   };
 
   return (
     <form onSubmit={submit} className="space-y-4">
       <RegistrationFields category={category} values={values} errors={errors} onChange={setValues} />
-      <button
-        type="submit"
-        disabled={submitting}
-        className="w-full bg-orange-500 disabled:bg-slate-300 text-white rounded-lg py-2.5 text-sm font-semibold"
-      >
+      <button type="submit" disabled={submitting} className="classic-btn classic-btn-primary">
         {submitting ? 'Submitting…' : submitLabel}
       </button>
     </form>

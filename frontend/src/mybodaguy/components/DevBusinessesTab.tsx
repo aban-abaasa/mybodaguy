@@ -78,9 +78,9 @@ export default function DevBusinessesTab({ onPendingCount }: { onPendingCount?: 
       return;
     }
     toast.success(
-      decision === 'approve' ? `${row.business_name} approved — it can now run its team`
-        : decision === 'reject' ? `${row.business_name} rejected — the owner can fix and resubmit`
-          : decision === 'suspend' ? `${row.business_name} suspended and its team taken offline`
+      decision === 'approve' ? `${row.business_name} approved`
+        : decision === 'reject' ? `${row.business_name} rejected`
+          : decision === 'suspend' ? `${row.business_name} suspended`
             : `${row.business_name} reinstated`,
     );
     setReasonFor(null);
@@ -92,10 +92,9 @@ export default function DevBusinessesTab({ onPendingCount }: { onPendingCount?: 
     return (
       <div className="text-center py-12 max-w-md mx-auto">
         <Building2 size={32} className="mx-auto text-slate-300 mb-3" />
-        <p className="font-semibold text-slate-700">Business approvals are not switched on yet</p>
+        <p className="font-semibold text-slate-700">Business approvals are not switched on</p>
         <p className="text-sm text-slate-500 mt-1">
-          Run <code className="text-xs bg-slate-100 px-1 py-0.5 rounded">backend/database/ADD_BUSINESS_REGISTRATION_AND_ACCESS.sql</code> once in
-          the Supabase SQL editor. Existing businesses keep working — they are approved automatically.
+          Run <code className="text-xs bg-slate-100 px-1 py-0.5 rounded">ADD_BUSINESS_REGISTRATION_AND_ACCESS.sql</code> in Supabase.
         </p>
       </div>
     );
@@ -105,10 +104,8 @@ export default function DevBusinessesTab({ onPendingCount }: { onPendingCount?: 
     <div>
       <div className="flex items-center justify-between mb-5 gap-3">
         <div>
-          <h2 className="text-2xl font-bold text-slate-800">Registered Businesses</h2>
-          <p className="text-sm text-slate-600 mt-1">
-            Review the registration of each Transport Company and Security Escort business. Approved businesses can add drivers and go live.
-          </p>
+          <h2 className="text-2xl font-bold text-slate-800">Businesses</h2>
+          <p className="text-sm text-slate-600 mt-1">Approve registered transport and escort businesses.</p>
         </div>
         <button
           onClick={load}
@@ -239,7 +236,7 @@ export default function DevBusinessesTab({ onPendingCount }: { onPendingCount?: 
                   <div className="border-t border-slate-100 bg-slate-50 p-4 space-y-3">
                     {incomplete && (
                       <p className="text-xs bg-amber-50 text-amber-800 rounded-lg p-2.5">
-                        This business has not given a registration number and licence yet, so it cannot be approved.
+                        Registration number or licence missing. It cannot be approved yet.
                       </p>
                     )}
                     <dl className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
@@ -267,8 +264,8 @@ export default function DevBusinessesTab({ onPendingCount }: { onPendingCount?: 
                       >
                         <label className="block text-xs font-medium text-slate-600">
                           {asking.decision === 'reject'
-                            ? 'Why is it not approved? The owner sees this and can fix and resubmit.'
-                            : 'Why is it suspended? The owner sees this, and their whole team goes offline now.'}
+                            ? 'Reason (the owner sees this and can resubmit)'
+                            : 'Reason (the owner sees this; their team goes offline now)'}
                         </label>
                         <textarea
                           className="w-full border rounded-lg p-2.5 bg-white text-slate-900 placeholder-slate-400 text-sm"

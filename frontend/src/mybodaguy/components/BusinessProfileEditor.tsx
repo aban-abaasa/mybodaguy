@@ -3,6 +3,8 @@ import { Lock } from 'lucide-react';
 import { toast } from 'sonner';
 import { businessService, LICENSE_LABEL, type AccessState, type BusinessCategory, type BusinessRegistration } from '../services/businessService';
 import { RegistrationSubmitCard } from './BusinessRegistrationFields';
+import ClassicSection from './common/ClassicSection';
+import { ClassicField } from './common/classicForm';
 
 interface EditableBusiness {
   id: string;
@@ -13,13 +15,11 @@ interface EditableBusiness {
   home_country: string | null;
 }
 
-const inputCls = 'w-full border rounded-lg p-2.5 bg-white text-slate-900 placeholder-slate-400 text-sm';
-
 function Row({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="min-w-0">
-      <dt className="text-xs text-slate-400">{label}</dt>
-      <dd className="text-sm text-slate-800 break-words">{value || '—'}</dd>
+      <dt className="classic-label !mb-0">{label}</dt>
+      <dd className="break-words text-sm text-slate-800">{value || '—'}</dd>
     </div>
   );
 }
@@ -64,111 +64,99 @@ export default function BusinessProfileEditor({
       toast.error(err);
       return;
     }
-    toast.success('Profile saved');
+    toast.success('Saved');
     await onSaved();
   };
 
   // Unsupported = the registration step does not exist yet, so there is nothing to submit.
-  const showRegistrationForm =
+  const needsRegistration =
     state === 'incomplete' ||
     state === 'rejected' ||
     (state === 'approved' && !!registration?.grandfathered) ||
     (state === 'pending' && !registration?.registration_number);
-  const registrationLocked = !showRegistrationForm && state !== 'unsupported';
+  const registrationLocked = !needsRegistration && state !== 'unsupported';
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       {state !== 'unsupported' && (
-        <section className="space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <h4 className="font-semibold text-slate-800">Registration</h4>
-            {registrationLocked && (
-              <span className="flex items-center gap-1 text-xs text-slate-400">
-                <Lock size={12} /> Locked while {state === 'pending' ? 'under review' : 'approved'}
-              </span>
-            )}
-          </div>
-          {showRegistrationForm ? (
+        <ClassicSection
+          title="Registration"
+          defaultOpen={needsRegistration}
+          summary={registration?.registration_number ? `No. ${registration.registration_number}` : 'Not submitted'}
+          right={registrationLocked ? <Lock size={14} className="text-slate-400" aria-label="Locked" /> : undefined}
+        >
+          {needsRegistration ? (
             <>
               {state === 'rejected' && registration?.rejection_reason && (
-                <p className="text-xs bg-red-50 text-red-700 rounded-lg p-3">Last review: {registration.rejection_reason}</p>
+                <p className="mb-3 rounded-lg bg-red-50 p-3 text-xs text-red-700">Last review: {registration.rejection_reason}</p>
               )}
               <RegistrationSubmitCard
                 businessProfileId={business.id}
                 category={business.category_key}
                 registration={registration}
                 onSubmitted={onSaved}
-                submitLabel={state === 'rejected' ? 'Resubmit for approval' : state === 'approved' ? 'Save registration details' : 'Submit for approval'}
+                submitLabel={state === 'rejected' ? 'Resubmit' : state === 'approved' ? 'Save details' : 'Submit for approval'}
               />
             </>
           ) : (
-            <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 rounded-xl p-4">
-              <Row label="Registration number" value={registration?.registration_number ?? null} />
-              <Row label={LICENSE_LABEL[business.category_key]} value={registration?.license_number ?? null} />
-              <Row label="Tax ID (TIN)" value={registration?.tax_id ?? null} />
-            </dl>
+            <>
+              <dl className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <Row label="Registration no." value={registration?.registration_number ?? null} />
+                <Row label={LICENSE_LABEL[business.category_key]} value={registration?.license_number ?? null} />
+                <Row label="TIN" value={registration?.tax_id ?? null} />
+              </dl>
+              <p className="mt-3 text-xs text-slate-400">Locked. Contact BodaGoEra to change these.</p>
+            </>
           )}
-          {registrationLocked && (
-            <p className="text-xs text-slate-400">To change these details, contact the BodaGoEra team.</p>
-          )}
-        </section>
+        </ClassicSection>
       )}
 
       <form onSubmit={save} className="space-y-3">
-        <h4 className="font-semibold text-slate-800">Public profile</h4>
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Business name</label>
-          <input className={inputCls} value={form.businessName} onChange={set('businessName')} required />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">About your business</label>
-          <textarea className={inputCls} rows={3} placeholder="What you offer, areas you serve, what makes you reliable" value={form.description} onChange={set('description')} />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Home city</label>
-            <input className={inputCls} value={form.homeCity} onChange={set('homeCity')} />
+        <ClassicSection title="Public profile" defaultOpen={!needsRegistration} summary={business.business_name}>
+          <div className="space-y-3">
+            <ClassicField label="Business name">
+              <input className="classic-input" value={form.businessName} onChange={set('businessName')} required />
+            </ClassicField>
+            <ClassicField label="About">
+              <textarea className="classic-input" rows={3} value={form.description} onChange={set('description')} />
+            </ClassicField>
+            <div className="grid grid-cols-2 gap-3">
+              <ClassicField label="City">
+                <input className="classic-input" value={form.homeCity} onChange={set('homeCity')} />
+              </ClassicField>
+              <ClassicField label="Country">
+                <input className="classic-input" value={form.homeCountry} onChange={set('homeCountry')} />
+              </ClassicField>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Country</label>
-            <input className={inputCls} value={form.homeCountry} onChange={set('homeCountry')} />
-          </div>
-        </div>
+        </ClassicSection>
 
         {registration && (
-          <>
-            <h4 className="font-semibold text-slate-800 pt-2">Contact &amp; hours</h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Contact phone</label>
-                <input className={inputCls} type="tel" value={form.contactPhone} onChange={set('contactPhone')} />
+          <ClassicSection title="Contact & hours" summary={registration.contact_phone || undefined}>
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <ClassicField label="Phone">
+                  <input className="classic-input" type="tel" value={form.contactPhone} onChange={set('contactPhone')} />
+                </ClassicField>
+                <ClassicField label="Email">
+                  <input className="classic-input" type="email" value={form.contactEmail} onChange={set('contactEmail')} />
+                </ClassicField>
+                <ClassicField label="Website">
+                  <input className="classic-input" placeholder="https://" value={form.website} onChange={set('website')} />
+                </ClassicField>
+                <ClassicField label="Hours">
+                  <input className="classic-input" placeholder="Mon–Sat 7am–8pm" value={form.operatingHours} onChange={set('operatingHours')} />
+                </ClassicField>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Business email</label>
-                <input className={inputCls} type="email" value={form.contactEmail} onChange={set('contactEmail')} />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Website</label>
-                <input className={inputCls} placeholder="https://" value={form.website} onChange={set('website')} />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-500 mb-1">Operating hours</label>
-                <input className={inputCls} placeholder="e.g. Mon–Sat 7am–8pm" value={form.operatingHours} onChange={set('operatingHours')} />
-              </div>
+              <ClassicField label="Address">
+                <input className="classic-input" value={form.businessAddress} onChange={set('businessAddress')} />
+              </ClassicField>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Office address</label>
-              <input className={inputCls} value={form.businessAddress} onChange={set('businessAddress')} />
-            </div>
-          </>
+          </ClassicSection>
         )}
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="w-full bg-orange-500 disabled:bg-slate-300 text-white rounded-lg py-2.5 text-sm font-semibold"
-        >
-          {saving ? 'Saving…' : 'Save profile'}
+        <button type="submit" disabled={saving} className="classic-btn classic-btn-primary">
+          {saving ? 'Saving…' : 'Save'}
         </button>
       </form>
     </div>

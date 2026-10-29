@@ -40,79 +40,39 @@ export default function BusinessAccessBanner({
   registration: BusinessRegistration | undefined;
   onOpenRegistration: () => void;
 }) {
-  const action = (label: string) => (
-    <button onClick={onOpenRegistration} className="mt-2 text-xs font-semibold underline underline-offset-2">
-      {label}
-    </button>
-  );
+  const box = (tone: 'amber' | 'sky' | 'red', icon: React.ReactNode, title: string, body?: string, action?: string) => {
+    const tones = {
+      amber: 'border-amber-200 bg-amber-50 text-amber-900',
+      sky: 'border-sky-200 bg-sky-50 text-sky-900',
+      red: 'border-red-200 bg-red-50 text-red-900',
+    };
+    return (
+      <div className={`flex items-start gap-3 rounded-2xl border p-3.5 ${tones[tone]}`}>
+        <span className="mt-0.5 shrink-0">{icon}</span>
+        <div className="min-w-0 text-sm">
+          <p className="font-classic-display font-semibold">{title}</p>
+          {body && <p className="mt-0.5 text-xs">{body}</p>}
+          {action && (
+            <button onClick={onOpenRegistration} className="mt-1.5 text-xs font-semibold underline underline-offset-2">
+              {action}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
-  if (state === 'incomplete') {
-    return (
-      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 p-4">
-        <ClipboardList size={20} className="shrink-0 mt-0.5" />
-        <div className="text-sm">
-          <p className="font-semibold">Add your registration details</p>
-          <p className="text-xs mt-0.5">
-            Only registered businesses can operate. Give your registration number and licence so the BodaGoEra team can approve you.
-          </p>
-          {action('Add registration details')}
-        </div>
-      </div>
-    );
-  }
-  if (state === 'pending') {
-    return (
-      <div className="flex items-start gap-3 rounded-xl border border-sky-200 bg-sky-50 text-sky-900 p-4">
-        <Clock size={20} className="shrink-0 mt-0.5" />
-        <div className="text-sm">
-          <p className="font-semibold">Waiting for approval</p>
-          <p className="text-xs mt-0.5">
-            The BodaGoEra team is reviewing your registration. You can finish your profile and pricing meanwhile — your team and
-            insurance unlock the moment you are approved.
-          </p>
-        </div>
-      </div>
-    );
-  }
+  if (state === 'incomplete') return box('amber', <ClipboardList size={18} />, 'Registration details needed', undefined, 'Add details');
+  if (state === 'pending') return box('sky', <Clock size={18} />, 'Waiting for approval', 'Profile and pricing are open. Your team unlocks once approved.');
   if (state === 'rejected') {
-    return (
-      <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 text-red-900 p-4">
-        <XCircle size={20} className="shrink-0 mt-0.5" />
-        <div className="text-sm">
-          <p className="font-semibold">Registration not approved</p>
-          {registration?.rejection_reason && <p className="text-xs mt-0.5">Reason: {registration.rejection_reason}</p>}
-          <p className="text-xs mt-0.5">Fix the details and submit again.</p>
-          {action('Update and resubmit')}
-        </div>
-      </div>
-    );
+    return box('red', <XCircle size={18} />, 'Not approved', registration?.rejection_reason ? `Reason: ${registration.rejection_reason}` : undefined, 'Update and resubmit');
   }
   if (state === 'suspended') {
-    return (
-      <div className="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 text-red-900 p-4">
-        <Ban size={20} className="shrink-0 mt-0.5" />
-        <div className="text-sm">
-          <p className="font-semibold">Business suspended</p>
-          {registration?.rejection_reason && <p className="text-xs mt-0.5">Reason: {registration.rejection_reason}</p>}
-          <p className="text-xs mt-0.5">Your team is offline. Contact the BodaGoEra team to be reinstated.</p>
-        </div>
-      </div>
-    );
+    return box('red', <Ban size={18} />, 'Suspended', registration?.rejection_reason ? `Reason: ${registration.rejection_reason}` : 'Your team is offline.');
   }
   // Approved on trust before registration existed: nudge, never block.
   if (state === 'approved' && registration?.grandfathered && !registration.registration_number) {
-    return (
-      <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 text-amber-900 p-4">
-        <BadgeCheck size={20} className="shrink-0 mt-0.5" />
-        <div className="text-sm">
-          <p className="font-semibold">Add your registration details</p>
-          <p className="text-xs mt-0.5">
-            Your business is active, but we have no registration number on file. Add it now to stay in good standing.
-          </p>
-          {action('Add registration details')}
-        </div>
-      </div>
-    );
+    return box('amber', <BadgeCheck size={18} />, 'Add your registration details', 'No registration number on file yet.', 'Add details');
   }
   return null;
 }
