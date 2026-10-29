@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
-import { ShoppingBag, Check, X, Clock, Search, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, RefreshCw, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
+import { BUSINESS_TYPE_EMOJI, businessTypeLabel } from '../utils/markets';
 
 interface Supermarket {
   id: string;
@@ -15,37 +16,34 @@ interface Supermarket {
   application_status?: 'pending' | 'approved' | 'rejected';
 }
 
-const BUSINESS_TYPE_EMOJI: Record<string, string> = {
-  supermarket: '🏪', hotel: '🏨', boutique: '👗', restaurant_cafe: '🍽️',
-};
-
-const BUSINESS_TYPE_LABEL: Record<string, string> = {
-  supermarket: 'Supermarket', hotel: 'Hotel', boutique: 'Boutique', restaurant_cafe: 'Restaurant & Café',
-};
-
-// Known types get a proper label; anything new falls back to a readable
-// version of its raw value ("pharmacy_shop" -> "Pharmacy shop").
-const businessTypeLabel = (type: string) =>
-  BUSINESS_TYPE_LABEL[type] || type.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase());
-
 interface SupermarketPartnershipProps {
   riderId: string;
   vehicleType: string | null;
+  /** Markets that opened since the rider last looked: marked "New" and listed first. */
+  freshIds?: ReadonlySet<string>;
+  /** Changes whenever a new market arrives, so an open list reloads itself. */
+  refreshKey?: number;
 }
 
-export default function SupermarketPartnership({ riderId, vehicleType }: SupermarketPartnershipProps) {
+const STATUS_ORDER = { approved: 0, pending: 1, rejected: 2 } as const;
+
+// Markets — a plain, classic list on the page itself: no card around it, one line
+// per business, details folded away until the row is tapped.
+export default function SupermarketPartnership({ riderId, vehicleType, freshIds, refreshKey = 0 }: SupermarketPartnershipProps) {
   const [supermarkets, setSupermarkets] = useState<Supermarket[]>([]);
   const [loading, setLoading] = useState(false);
   const [selectedTab, setSelectedTab] = useState<'available' | 'applied'>('available');
+  const [typeFilter, setTypeFilter] = useState<string>('all');
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  // Which business row is open — one at a time, like the customer's order list.
+  // Which business row is open — one at a time.
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const toggleExpanded = (id: string) => setExpandedId(cur => (cur === id ? null : id));
 
   useEffect(() => {
     loadSupermarkets();
-  }, [riderId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [riderId, refreshKey]);
 
   const loadSupermarkets = async () => {
     setLoading(true);
@@ -85,7 +83,7 @@ export default function SupermarketPartnership({ riderId, vehicleType }: Superma
       );
     } catch (error) {
       console.error('[SupermarketPartnership] Failed to load supermarkets:', error);
-      toast.error('Failed to load businesses');
+      toast.error("Couldn't load markets");
     } finally {
       setLoading(false);
     }
@@ -115,10 +113,10 @@ export default function SupermarketPartnership({ riderId, vehicleType }: Superma
 
       if (error) throw error;
 
-      toast.success('Application submitted successfully');
+      toast.success('Applied');
       await loadSupermarkets();
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to submit application');
+      toast.error(error?.message || "Couldn't apply");
     } finally {
       setLoading(false);
     }
@@ -135,10 +133,10 @@ export default function SupermarketPartnership({ riderId, vehicleType }: Superma
 
       if (error) throw error;
 
-      toast.success('Application withdrawn');
+      toast.success('Withdrawn');
       await loadSupermarkets();
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to withdraw application');
+      toast.error(error?.message || "Couldn't withdraw");
     } finally {
       setLoading(false);
     }
@@ -150,61 +148,70 @@ export default function SupermarketPartnership({ riderId, vehicleType }: Superma
     [sm.name, sm.location, sm.address, sm.phone, businessTypeLabel(sm.business_type)]
       .some(v => v?.toLowerCase().includes(query));
 
-  const availableSupermarkets = supermarkets.filter(sm => !sm.is_applied && matchesSearch(sm));
-  const appliedSupermarkets = supermarkets.filter(sm => sm.is_applied && matchesSearch(sm));
+  const isFresh = (id: string) => !!freshIds?.has(id);
+
+  // New markets first, then by name (the query already sorts by name).
+  const available = supermarkets
+    .filter(sm => !sm.is_applied && matchesSearch(sm))
+    .sort((a, b) => Number(isFresh(b.id)) - Number(isFresh(a.id)));
+  // Approved first: those are the ones the rider can already work for.
+  const applied = supermarkets
+    .filter(sm => sm.is_applied && matchesSearch(sm))
+    .sort((a, b) => STATUS_ORDER[a.application_status || 'pending'] - STATUS_ORDER[b.application_status || 'pending']);
+
+  const tabList = selectedTab === 'available' ? available : applied;
+
+  // Only the kinds of business actually on this tab, so there's never a filter that empties the list.
+  const types = Array.from(new Set(tabList.map(sm => sm.business_type)));
+  const activeType = types.includes(typeFilter) ? typeFilter : 'all';
+  const shown = activeType === 'all' ? tabList : tabList.filter(sm => sm.business_type === activeType);
 
   const closeSearch = () => { setSearchOpen(false); setSearchQuery(''); };
+  const switchTab = (tab: 'available' | 'applied') => { setSelectedTab(tab); setExpandedId(null); };
 
   return (
-    <div className="bg-white rounded-xl shadow-lg p-6">
-      <div className="mb-4 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="text-xl font-bold text-slate-800 mb-2">Business Partnerships</h3>
-          <p className="text-sm text-slate-600">Apply to work for businesses and earn commissions on deliveries</p>
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
-            aria-label={searchOpen ? 'Close search' : 'Search businesses'}
-            aria-expanded={searchOpen}
-            className={`grid h-9 w-9 place-items-center rounded-full transition-colors ${
-              searchOpen ? 'bg-orange-50 text-orange-600' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700'
-            }`}
-          >
-            <Search size={18} />
-          </button>
-          <button
-            onClick={loadSupermarkets}
-            disabled={loading}
-            className="text-sm text-orange-600 hover:text-orange-700 font-medium disabled:opacity-50 whitespace-nowrap px-1"
-          >
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
-        </div>
+    <section className="mx-auto w-full max-w-2xl">
+      <div className="flex items-center gap-3">
+        <h2 className="font-classic-display text-xl font-semibold text-slate-800 dark:text-slate-100">Markets</h2>
+        <div className="landing-classic-divider flex-1" />
+        <button
+          type="button"
+          onClick={() => (searchOpen ? closeSearch() : setSearchOpen(true))}
+          aria-label={searchOpen ? 'Close search' : 'Search'}
+          aria-expanded={searchOpen}
+          className={`grid h-8 w-8 place-items-center rounded-full transition-colors ${searchOpen ? 'text-orange-600' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
+        >
+          <Search size={17} />
+        </button>
+        <button
+          type="button"
+          onClick={loadSupermarkets}
+          disabled={loading}
+          aria-label="Refresh"
+          className="grid h-8 w-8 place-items-center rounded-full text-slate-500 transition-colors hover:text-slate-800 disabled:opacity-60 dark:hover:text-slate-200"
+        >
+          <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+        </button>
       </div>
 
-      {/* Search — opened by the icon above; filters both tabs by name, type,
-          location or phone */}
       {searchOpen && (
-        <div className="relative mb-4">
-          <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+        <div className="relative mt-3">
           <input
             type="search"
             autoFocus
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             onKeyDown={e => { if (e.key === 'Escape') closeSearch(); }}
-            placeholder="Search by name, type or place"
-            aria-label="Search businesses"
-            className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-10 text-sm text-slate-800 outline-none transition-colors focus:border-orange-400 focus:ring-2 focus:ring-orange-100"
+            placeholder="Name, type or place"
+            aria-label="Search markets"
+            className="w-full border-0 border-b border-[#c4a052]/60 bg-transparent py-2 pr-8 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-orange-500 dark:text-slate-100"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={() => setSearchQuery('')}
               aria-label="Clear search"
-              className="absolute right-2 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-slate-400 hover:bg-slate-200 hover:text-slate-600"
+              className="absolute right-0 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center text-slate-400 hover:text-slate-600"
             >
               <X size={14} />
             </button>
@@ -212,249 +219,161 @@ export default function SupermarketPartnership({ riderId, vehicleType }: Superma
         </div>
       )}
 
-      {/* Tabs */}
-      <div className="flex gap-2 mb-2 border-b border-slate-200">
-        <button
-          onClick={() => setSelectedTab('available')}
-          className={`px-4 py-2 font-medium transition-all relative ${
-            selectedTab === 'available'
-              ? 'text-orange-500'
-              : 'text-slate-600 hover:text-slate-800'
-          }`}
-        >
-          Available ({availableSupermarkets.length})
-          {selectedTab === 'available' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
-          )}
-        </button>
-        <button
-          onClick={() => setSelectedTab('applied')}
-          className={`px-4 py-2 font-medium transition-all relative ${
-            selectedTab === 'applied'
-              ? 'text-orange-500'
-              : 'text-slate-600 hover:text-slate-800'
-          }`}
-        >
-          My Applications ({appliedSupermarkets.length})
-          {selectedTab === 'applied' && (
-            <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-orange-500" />
-          )}
-        </button>
+      <div role="tablist" className="mt-3 flex gap-6 border-b border-[#c4a052]/25">
+        {([['available', 'Open', available.length], ['applied', 'Applied', applied.length]] as const).map(([id, label, count]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={selectedTab === id}
+            onClick={() => switchTab(id)}
+            className={`relative -mb-px border-b-2 pb-2 pt-1 text-sm font-semibold transition-colors ${
+              selectedTab === id ? 'border-orange-500 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+            }`}
+          >
+            {label} <span className="font-normal text-slate-400">{count}</span>
+          </button>
+        ))}
       </div>
 
-      {/* Content — a plain list, one row per business */}
-      {loading && supermarkets.length === 0 ? (
-        <div className="text-center py-8">
-          <div className="animate-spin w-8 h-8 border-4 border-orange-500 border-t-transparent rounded-full mx-auto" />
-        </div>
-      ) : (
-        <div>
-          {selectedTab === 'available' && (
-            availableSupermarkets.length === 0 ? (
-              <EmptyState
-                title={query ? `No businesses match “${searchQuery.trim()}”` : 'No available businesses'}
-                hint={query ? 'Try a different name or place' : "You've applied to all registered businesses"}
-              />
-            ) : (
-              availableSupermarkets.map((supermarket) => (
-                <BusinessRow
-                  key={supermarket.id}
-                  supermarket={supermarket}
-                  expanded={expandedId === supermarket.id}
-                  onToggle={() => toggleExpanded(supermarket.id)}
-                  onApply={handleApply}
-                  loading={loading}
-                />
-              ))
-            )
-          )}
-
-          {selectedTab === 'applied' && (
-            appliedSupermarkets.length === 0 ? (
-              <EmptyState
-                title={query ? `No applications match “${searchQuery.trim()}”` : 'No applications yet'}
-                hint={query ? 'Try a different name or place' : 'Apply to businesses to start earning commissions'}
-              />
-            ) : (
-              appliedSupermarkets.map((supermarket) => (
-                <ApplicationRow
-                  key={supermarket.id}
-                  supermarket={supermarket}
-                  expanded={expandedId === supermarket.id}
-                  onToggle={() => toggleExpanded(supermarket.id)}
-                  onWithdraw={handleWithdrawApplication}
-                  loading={loading}
-                />
-              ))
-            )
-          )}
+      {types.length > 1 && (
+        <div className="scrollbar-hide -mx-1 mt-2 flex gap-4 overflow-x-auto px-1 text-xs">
+          {['all', ...types].map(t => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTypeFilter(t)}
+              aria-pressed={activeType === t}
+              className={`flex-shrink-0 whitespace-nowrap py-1.5 font-medium transition-colors ${activeType === t ? 'text-orange-600 underline decoration-[#c4a052] decoration-2 underline-offset-[6px]' : 'text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'}`}
+            >
+              {t === 'all' ? 'All' : businessTypeLabel(t)}
+            </button>
+          ))}
         </div>
       )}
 
-      {/* Info Box */}
-      <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-        <p className="text-sm text-blue-800">
-          <strong>How it works:</strong> Apply to any registered business on the platform.
-          Once approved, you'll receive delivery requests from customers ordering from that business.
-          Earn commission on every successful delivery!
+      {loading && supermarkets.length === 0 ? (
+        <ul className="mt-2" aria-hidden>
+          {[0, 1, 2, 3].map(i => (
+            <li key={i} className="flex animate-pulse items-center gap-3 border-b border-[#c4a052]/15 py-3.5">
+              <div className="h-6 w-6 rounded bg-slate-200/70" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3.5 w-2/5 rounded bg-slate-200/70" />
+                <div className="h-3 w-1/4 rounded bg-slate-200/50" />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : shown.length === 0 ? (
+        <p className="py-10 text-center text-sm text-slate-500">
+          {query
+            ? 'No match'
+            : selectedTab === 'available' ? 'Nothing new right now' : 'No applications yet'}
         </p>
-      </div>
-    </div>
+      ) : (
+        <ul className="mt-1">
+          {shown.map(sm => selectedTab === 'available' ? (
+            <MarketRow
+              key={sm.id}
+              market={sm}
+              fresh={isFresh(sm.id)}
+              expanded={expandedId === sm.id}
+              onToggle={() => toggleExpanded(sm.id)}
+              action={
+                <button
+                  type="button"
+                  onClick={() => handleApply(sm.id)}
+                  disabled={loading}
+                  className="flex-shrink-0 rounded-full border border-orange-400 px-3.5 py-1 text-xs font-semibold text-orange-600 transition-colors hover:bg-orange-50 active:scale-95 disabled:opacity-50"
+                >
+                  Apply
+                </button>
+              }
+            />
+          ) : (
+            <MarketRow
+              key={sm.id}
+              market={sm}
+              fresh={false}
+              expanded={expandedId === sm.id}
+              onToggle={() => toggleExpanded(sm.id)}
+              action={<StatusWord status={sm.application_status || 'pending'} />}
+              extra={sm.application_status === 'pending' || !sm.application_status ? (
+                <button
+                  type="button"
+                  onClick={() => handleWithdrawApplication(sm.id)}
+                  disabled={loading}
+                  className="text-xs font-medium text-red-600 underline-offset-2 hover:underline disabled:opacity-50"
+                >
+                  Withdraw application
+                </button>
+              ) : undefined}
+            />
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
-function EmptyState({ title, hint }: { title: string; hint: string }) {
-  return (
-    <div className="text-center py-8 mt-2 bg-slate-50 rounded-lg">
-      <ShoppingBag className="w-12 h-12 text-slate-400 mx-auto mb-3" />
-      <p className="text-slate-600 px-4 break-words">{title}</p>
-      <p className="text-sm text-slate-500">{hint}</p>
-    </div>
-  );
+function StatusWord({ status }: { status: 'pending' | 'approved' | 'rejected' }) {
+  if (status === 'approved') return <span className="flex flex-shrink-0 items-center gap-1 text-xs font-semibold text-green-700"><Check size={13} />Approved</span>;
+  if (status === 'rejected') return <span className="flex-shrink-0 text-xs font-semibold text-red-600">Declined</span>;
+  return <span className="flex-shrink-0 text-xs font-semibold text-amber-600">Pending</span>;
 }
 
-function DetailLine({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-start justify-between gap-4 py-1.5">
-      <span className="flex-shrink-0 text-slate-500">{label}</span>
-      <span className="min-w-0 break-words text-right font-medium text-slate-800">{children}</span>
-    </div>
-  );
-}
-
-// One row of the list. Tapping the left side (emoji, name, place) opens the
-// business's details in place; the action (Apply / status) stays on the right
-// so it's always one tap away without opening anything.
-function ListRow({
-  supermarket, expanded, onToggle, action, sub, subClass,
+// One line per business. Tapping the name opens its details in place; the action
+// (Apply / status) stays on the right so it is always one tap away. A row with
+// nothing more to show is not expandable, so there is never an empty drawer.
+function MarketRow({
+  market, fresh, expanded, onToggle, action, extra,
 }: {
-  supermarket: Supermarket;
+  market: Supermarket;
+  fresh: boolean;
   expanded: boolean;
   onToggle: () => void;
   action: React.ReactNode;
-  // Replaces the default "Type · Place" line (e.g. an application's status note)
-  sub?: string;
-  subClass?: string;
+  extra?: React.ReactNode;
 }) {
-  const address = supermarket.address && supermarket.address !== supermarket.location ? supermarket.address : null;
+  const address = market.address && market.address !== market.location ? market.address : null;
+  const expandable = !!(address || market.phone || extra);
+
+  const lead = (
+    <>
+      <span className="w-7 flex-shrink-0 text-center text-xl" aria-hidden>{BUSINESS_TYPE_EMOJI[market.business_type] || '🏪'}</span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className={`font-classic-display text-[15px] font-semibold text-slate-800 dark:text-slate-100 ${expanded ? 'break-words' : 'truncate'}`}>{market.name}</span>
+          {fresh && <span className="flex-shrink-0 text-[10px] font-bold uppercase tracking-wider text-orange-600">New</span>}
+        </span>
+        <span className={`block text-xs text-slate-500 ${expanded ? 'break-words' : 'truncate'}`}>
+          {[market.location, businessTypeLabel(market.business_type)].filter(Boolean).join(' · ')}
+        </span>
+      </span>
+    </>
+  );
 
   return (
-    <div className="border-b border-slate-100 last:border-0">
+    <li className={`border-b border-[#c4a052]/20 last:border-0 ${fresh ? 'shadow-[inset_2px_0_0_#fb923c]' : ''}`}>
       <div className="flex items-center gap-3 py-3">
-        <button
-          type="button"
-          onClick={onToggle}
-          aria-expanded={expanded}
-          className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left"
-        >
-          <span className="grid h-10 w-10 flex-shrink-0 place-items-center rounded-full bg-orange-50 text-lg ring-1 ring-inset ring-orange-100">
-            {BUSINESS_TYPE_EMOJI[supermarket.business_type] || '🏪'}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className={`block text-sm font-semibold text-slate-800 ${expanded ? 'break-words' : 'truncate'}`}>{supermarket.name}</span>
-            <span className={`block text-xs ${subClass || 'text-slate-500'} ${expanded ? 'break-words' : 'truncate'}`}>
-              {sub ?? [businessTypeLabel(supermarket.business_type), supermarket.location].filter(Boolean).join(' · ')}
-            </span>
-          </span>
-          <ChevronDown size={16} className={`flex-shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-        </button>
+        {expandable ? (
+          <button type="button" onClick={onToggle} aria-expanded={expanded} className="flex min-w-0 flex-1 items-center gap-3 text-left">
+            {lead}
+            <ChevronDown size={15} className={`flex-shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </button>
+        ) : (
+          <div className="flex min-w-0 flex-1 items-center gap-3">{lead}</div>
+        )}
         {action}
       </div>
 
-      {expanded && (
-        <div className="mb-3 rounded-xl bg-slate-50 px-3 py-1.5 text-sm">
-          <DetailLine label="Type">{businessTypeLabel(supermarket.business_type)}</DetailLine>
-          {supermarket.location && <DetailLine label="Location">{supermarket.location}</DetailLine>}
-          {address && <DetailLine label="Address">{address}</DetailLine>}
-          {supermarket.phone && (
-            <DetailLine label="Phone">
-              <a href={`tel:${supermarket.phone}`} className="text-orange-600 hover:underline">{supermarket.phone}</a>
-            </DetailLine>
-          )}
+      {expanded && expandable && (
+        <div className="space-y-1.5 pb-3 pl-10 text-sm text-slate-600 dark:text-slate-300">
+          {address && <p className="break-words">{address}</p>}
+          {market.phone && <p><a href={`tel:${market.phone}`} className="font-medium text-orange-600 hover:underline">{market.phone}</a></p>}
+          {extra && <p>{extra}</p>}
         </div>
       )}
-    </div>
-  );
-}
-
-function BusinessRow({
-  supermarket,
-  expanded,
-  onToggle,
-  onApply,
-  loading
-}: {
-  supermarket: Supermarket;
-  expanded: boolean;
-  onToggle: () => void;
-  onApply: (id: string) => void;
-  loading: boolean;
-}) {
-  return (
-    <ListRow
-      supermarket={supermarket}
-      expanded={expanded}
-      onToggle={onToggle}
-      action={
-        <button
-          onClick={() => onApply(supermarket.id)}
-          disabled={loading}
-          className="flex-shrink-0 rounded-full bg-gradient-to-r from-orange-500 to-yellow-500 px-4 py-2 text-xs font-semibold text-white transition-all hover:from-orange-600 hover:to-yellow-600 active:scale-95 disabled:opacity-50"
-        >
-          Apply
-        </button>
-      }
-    />
-  );
-}
-
-const APPLICATION_STATUS = {
-  pending:  { icon: Clock, text: 'Pending',  chip: 'bg-yellow-100 text-yellow-700', sub: undefined,                                         subClass: undefined },
-  approved: { icon: Check, text: 'Approved', chip: 'bg-green-100 text-green-700',   sub: 'You can accept their delivery requests',           subClass: 'text-green-700' },
-  rejected: { icon: X,     text: 'Rejected', chip: 'bg-red-100 text-red-700',       sub: 'Not approved — you can try again later',           subClass: 'text-red-600' },
-} as const;
-
-function ApplicationRow({
-  supermarket,
-  expanded,
-  onToggle,
-  onWithdraw,
-  loading
-}: {
-  supermarket: Supermarket;
-  expanded: boolean;
-  onToggle: () => void;
-  onWithdraw: (id: string) => void;
-  loading: boolean;
-}) {
-  const state = supermarket.application_status || 'pending';
-  const status = APPLICATION_STATUS[state];
-  const StatusIcon = status.icon;
-
-  return (
-    <ListRow
-      supermarket={supermarket}
-      expanded={expanded}
-      onToggle={onToggle}
-      sub={status.sub}
-      subClass={status.subClass}
-      action={
-        <div className="flex flex-shrink-0 flex-col items-end gap-1">
-          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${status.chip}`}>
-            <StatusIcon size={12} />
-            {status.text}
-          </span>
-          {state === 'pending' && (
-            <button
-              onClick={() => onWithdraw(supermarket.id)}
-              disabled={loading}
-              className="text-[11px] font-medium text-slate-500 underline-offset-2 hover:text-slate-700 hover:underline disabled:opacity-50"
-            >
-              Withdraw
-            </button>
-          )}
-        </div>
-      }
-    />
+    </li>
   );
 }
