@@ -36,7 +36,7 @@ export default function ClassicSection({
         type="button"
         onClick={toggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-3 px-4 py-3.5 text-left"
+        className="flex w-full items-center gap-3 px-3.5 py-3.5 text-left sm:px-4"
       >
         <span className="min-w-0 flex-1">
           <span className="classic-eyebrow block">{title}</span>
@@ -45,7 +45,7 @@ export default function ClassicSection({
         {right}
         <ChevronDown size={18} className={`shrink-0 text-[#a17c28] transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
-      {open && <div className="border-t border-[#c4a052]/20 px-4 pb-4 pt-4">{children}</div>}
+      {open && <div className="border-t border-[#c4a052]/20 px-3.5 pb-4 pt-4 sm:px-4">{children}</div>}
     </section>
   );
 }

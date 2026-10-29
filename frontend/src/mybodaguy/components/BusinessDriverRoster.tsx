@@ -207,7 +207,7 @@ export default function BusinessDriverRoster({ businessProfileId, category }: { 
       </div>
 
       {showAdd && (
-        <form onSubmit={addDriver} className="max-w-3xl space-y-4 rounded-2xl border border-[#c4a052]/40 bg-[#fffdf8] p-4 dark:bg-slate-800">
+        <form onSubmit={addDriver} className="max-w-3xl space-y-4 rounded-2xl border border-[#c4a052]/40 bg-[#fffdf8] p-3.5 sm:p-4 dark:bg-slate-800">
           {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
           <ClassicField label={`${Word}'s account email`} required>
@@ -363,7 +363,7 @@ export default function BusinessDriverRoster({ businessProfileId, category }: { 
                 {open && (
                   <div className="space-y-3 border-t border-[#c4a052]/20 px-3.5 pb-3.5 pt-3">
                     <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                      <div className="col-span-2 min-w-0"><dt className="classic-label !mb-0">Email</dt><dd className="truncate text-slate-700">{d.email}</dd></div>
+                      <div className="col-span-2 min-w-0"><dt className="classic-label !mb-0">Email</dt><dd className="break-all text-slate-700">{d.email}</dd></div>
                       <div><dt className="classic-label !mb-0">Rides</dt><dd className="text-slate-700">{d.total_rides ?? 0}</dd></div>
                       <div>
                         <dt className="classic-label !mb-0">Rating</dt>

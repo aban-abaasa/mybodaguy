@@ -944,7 +944,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             the BodaGoEra-specific pieces (driver/escort roster, pricing) —
             see ManageBusinessPanel.tsx. */}
         {activeTab === 'manage-business' && (
-          <div className="px-1 sm:px-3">
+          <div className="px-0 sm:px-3">
             <ManageBusinessPanel />
           </div>
         )}

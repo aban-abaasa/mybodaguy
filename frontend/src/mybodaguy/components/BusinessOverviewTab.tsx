@@ -22,15 +22,25 @@ interface OverviewBusiness {
   home_city: string | null;
 }
 
+/** Full amount normally; compact ("UGX 412M") once it would not fit a small phone. */
+function money(n: number): string {
+  if (Math.abs(n) < 10_000_000) return formatMoney(n);
+  try {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'UGX', currencyDisplay: 'code', notation: 'compact', maximumFractionDigits: 1 }).format(n);
+  } catch {
+    return formatMoney(n);
+  }
+}
+
 function Kpi({ icon: Icon, label, value, hint }: { icon: typeof Car; label: string; value: string; hint?: string }) {
   return (
     <div className="classic-card !rounded-2xl p-3.5">
       <div className="flex items-center gap-1.5">
         <Icon size={13} className="text-[#a17c28]" />
-        <span className="classic-eyebrow !tracking-[0.14em] truncate">{label}</span>
+        <span className="classic-eyebrow !tracking-[0.1em] leading-tight">{label}</span>
       </div>
-      <p className="mt-1.5 truncate font-classic-display text-xl font-bold leading-none tabular-nums text-slate-900">{value}</p>
-      {hint && <p className="mt-1 truncate text-[11px] text-slate-400">{hint}</p>}
+      <p className="mt-1.5 break-words font-classic-display text-lg font-bold leading-tight tabular-nums text-slate-900 min-[380px]:text-xl">{value}</p>
+      {hint && <p className="mt-1 text-[11px] leading-tight text-slate-400">{hint}</p>}
     </div>
   );
 }
@@ -194,7 +204,7 @@ export default function BusinessOverviewTab({
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-            <Kpi icon={Wallet} label="Fares · 30 days" value={formatMoney(Number(overview.revenue_30d))} hint={`${formatMoney(Number(overview.revenue_all))} total`} />
+            <Kpi icon={Wallet} label="Fares · 30 days" value={money(Number(overview.revenue_30d))} hint={`${money(Number(overview.revenue_all))} total`} />
             <Kpi icon={Car} label="Completed" value={String(overview.completed_30d)} hint={completionRate != null ? `${completionRate}% completion` : '30 days'} />
             <Kpi icon={Activity} label="Active now" value={String(overview.active_now)} hint={`${overview.rides_30d} requested`} />
             <Kpi icon={Users} label={isEscort ? 'Escorts online' : 'Drivers online'} value={`${overview.team_online} / ${overview.team_total}`} hint={overview.team_verified ? `${overview.team_verified} verified` : undefined} />
