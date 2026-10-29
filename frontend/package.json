@@ -11,6 +11,7 @@
     "test:era-api": "node --test tests/eraApi.test.js",
     "test:ranked-products": "node --experimental-test-module-mocks --test tests/rankedProducts.test.js",
     "test:rider-smarts": "node --test tests/riderSmarts.test.js",
+    "test:store-lock": "node --test tests/storeLock.test.js",
     "dev": "vite --open",
     "dev:clean": "taskkill /F /IM node.exe & vite --open",
     "build": "vite build",
