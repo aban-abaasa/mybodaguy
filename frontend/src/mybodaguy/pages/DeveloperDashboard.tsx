@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  Bike, Users, MapPin, DollarSign, Settings,
+  Bike, Building2, Users, MapPin, DollarSign, Settings,
   TrendingUp, LogOut, Menu, X, Shield, Search,
   MessageSquare, RefreshCw, Globe, Lock, Trash2, Send, CheckCircle, Mail, Gift,
   ShoppingBag, ChevronRight, Truck, XCircle, Activity, Share2, Zap,
@@ -15,6 +15,8 @@ import SupermarketProductManager from '../components/SupermarketProductManager';
 import { supabase } from '../services/supabaseClient';
 import { Linkify } from '../utils/linkify';
 import EraApiDevTab from '../components/EraApiDevTab';
+import DevBusinessesTab from '../components/DevBusinessesTab';
+import { adminBusinessService } from '../services/businessService';
 import VehicleFareRatesPanel from '../components/VehicleFareRatesPanel';
 import {
   devListAllLandingMessages,
@@ -50,7 +52,7 @@ interface DeveloperDashboardProps {
 type DevPermissions = { isMain: boolean; allowedTabs: string[] | null };
 type DevOperatorRow = { email: string; is_main: boolean; allowed_tabs: string[] | null; added_at: string };
 
-const ALL_DEV_TAB_IDS = ['overview', 'users', 'applications', 'regions', 'commissions', 'supermarkets', 'transport', 'rewards', 'public-board', 'messages', 'settings'];
+const ALL_DEV_TAB_IDS = ['overview', 'users', 'applications', 'businesses', 'regions', 'commissions', 'supermarkets', 'transport', 'rewards', 'public-board', 'messages', 'settings'];
 
 export default function DeveloperDashboard({ user, onSignOut, embedded = false, onGoToWallet }: DeveloperDashboardProps) {
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
@@ -60,6 +62,8 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
   const [loading, setLoading] = useState(true);
   const [transportOrders, setTransportOrders] = useState<any[]>([]);
   const [transportLoading, setTransportLoading] = useState(false);
+  // business registrations waiting for a decision — shown as a badge on the Businesses tab
+  const [pendingBusinesses, setPendingBusinesses] = useState(0);
 
   // null allowedTabs = unrestricted (all tabs) — the graceful default
   // shown while mbg_developer_self() is still loading, matching how
@@ -199,6 +203,15 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
     }
   }, []);
 
+  // Count pending business registrations once on open so the badge shows before the tab is visited.
+  useEffect(() => {
+    let off = false;
+    adminBusinessService.list().then(({ rows }) => {
+      if (!off) setPendingBusinesses(rows.filter((r) => r.access_status === 'pending').length);
+    });
+    return () => { off = true; };
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'transport') loadTransportOrders();
   }, [activeTab, loadTransportOrders]);
@@ -207,6 +220,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
     { id: 'overview', label: 'Overview', icon: TrendingUp },
     { id: 'users', label: 'Users', icon: Users },
     { id: 'applications', label: 'Applications', icon: Truck },
+    { id: 'businesses', label: 'Businesses', icon: Building2 },
     { id: 'regions', label: 'Regions', icon: MapPin },
     { id: 'commissions', label: 'Commissions', icon: DollarSign },
     { id: 'supermarkets', label: 'Supermarkets', icon: ShoppingBag },
@@ -276,6 +290,16 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
                 >
                   <Icon size={18} />
                   <span>{tab.label}</span>
+                  {tab.id === 'businesses' && pendingBusinesses > 0 && (
+                    <span
+                      className={`min-w-[20px] h-5 px-1.5 rounded-full text-xs font-bold flex items-center justify-center ${
+                        activeTab === tab.id ? 'bg-white text-orange-600' : 'bg-red-500 text-white'
+                      }`}
+                      aria-label={`${pendingBusinesses} waiting for review`}
+                    >
+                      {pendingBusinesses}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -287,6 +311,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
           {activeTab === 'overview' && <OverviewTab onSwitchToRegions={() => setActiveTab('regions')} onSwitchToCommissions={() => setActiveTab('commissions')} userId={user?.id} onGoToWallet={goToWallet} />}
           {activeTab === 'users' && <UsersTab users={users} loading={loading} onReload={loadUsers} />}
           {activeTab === 'applications' && <ApplicationsTab />}
+          {activeTab === 'businesses' && <DevBusinessesTab onPendingCount={setPendingBusinesses} />}
           {activeTab === 'regions' && <RegionsManagement />}
           {activeTab === 'commissions' && <CommissionsTab />}
           {activeTab === 'supermarkets' && <SupermarketsTab />}
