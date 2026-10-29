@@ -248,7 +248,7 @@ export default function ManageBusinessPanel() {
                 </span>
               </button>
               <div className="min-w-0">
-                <h3 className="font-classic-display text-lg font-semibold text-slate-800 truncate">{activeBusiness.business_name}</h3>
+                <h3 className="font-classic-display text-lg font-semibold leading-tight text-slate-800 break-words">{activeBusiness.business_name}</h3>
                 <p className="text-xs text-slate-500 flex items-center gap-1.5 flex-wrap">
                   {CATEGORY_LABEL[activeBusiness.category_key]}
                   {gateSupported && <AccessChip state={state} />}
