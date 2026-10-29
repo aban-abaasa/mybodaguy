@@ -25,6 +25,8 @@ import { AUTO_DISPATCH_STAGGER_SECONDS, OFFER_SECONDS } from '../services/offerW
 import { productService, type Product } from '../services/productService';
 import type { ImportStore } from '../services/journeyService';
 import ZoneChargeNotice from './ZoneChargeNotice';
+import { StoreStrip, StoreSwitchPrompt, type StripStore } from './StoreSwitcher';
+import { switchNeedsConfirm } from '../utils/storeLock';
 import { zoneAccessService } from '../services/zoneAccessService';
 import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
 
@@ -541,6 +543,11 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const [nearbyStoreProducts, setNearbyStoreProducts] = useState<Record<string, Product[]>>({});
   const [loadingNearbyProducts, setLoadingNearbyProducts] = useState(false);
   const [deliveryCart, setDeliveryCart] = useState<CartLine[]>([]);
+  // A product the customer tapped before the shop was open (nearby preview, or a switch from another store):
+  // the picker starts with it already in the basket. Cleared once the picker has taken it.
+  const [seedQty, setSeedQty] = useState<Record<string, number> | undefined>(undefined);
+  // The customer reached for another store while the basket belongs to one: asked before anything is lost.
+  const [pendingSwitch, setPendingSwitch] = useState<{ storeId: string; product?: Product } | null>(null);
   // Bumped on reset so the product picker remounts with an empty cart
   const [pickerKey, setPickerKey] = useState(0);
   // Products from every store are always shown. A delivery picks up from ONE
@@ -1049,9 +1056,43 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deliveryCart]);
 
-  const jumpToStoreProduct = (supermarketId: string) => {
+  // Tapping a product opens ONLY that product's store, with the product already in the basket.
+  const jumpToStoreProduct = (supermarketId: string, product?: Product) => {
     setDeliveryMode('supermarket');
     setSelectedSupermarketId(supermarketId);
+    if (product && product.stock_qty > 0) {
+      setSeedQty({ [product.id]: 1 });
+      setPickerKey(k => k + 1);
+    }
+  };
+  useEffect(() => {
+    if (seedQty && serviceType === 'delivery' && deliveryMode === 'supermarket') setSeedQty(undefined);
+  }, [seedQty, serviceType, deliveryMode]);
+
+  const storeNameOf = (id: string) => supermarkets.find(sm => sm.id === id)?.name || 'the store';
+  const stripStores: StripStore[] = filteredStores.map(sm => ({
+    id: sm.id, name: sm.name, emoji: typeEmoji(sm.business_type), distanceKm: sm.distanceKm, abroad: isAbroad(sm), country: sm.country,
+  }));
+  const cartItemCount = deliveryCart.reduce((n, l) => n + l.qty, 0);
+  const cartStoreForSwitch = cartStoreIds[0] ?? null;
+
+  // A store tapped in the strip: free to move while the basket is empty; otherwise ask first.
+  const pickStore = (storeId: string) => {
+    if (storeId === selectedSupermarketId) return;
+    if (switchNeedsConfirm(cartStoreForSwitch, storeId)) {
+      setPendingSwitch({ storeId });
+      return;
+    }
+    setSelectedSupermarketId(storeId);
+  };
+  const confirmSwitch = () => {
+    if (!pendingSwitch) return;
+    const { storeId, product } = pendingSwitch;
+    setPendingSwitch(null);
+    setDeliveryCart([]);
+    setSeedQty(product ? { [product.id]: 1 } : undefined);
+    setSelectedSupermarketId(storeId);
+    setPickerKey(k => k + 1);
   };
 
   // Always searchable — a text filter on top of the type pills, matched
@@ -2404,7 +2445,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                                   <button
                                     key={p.id}
                                     type="button"
-                                    onClick={() => jumpToStoreProduct(sm.id)}
+                                    onClick={() => jumpToStoreProduct(sm.id, p)}
                                     className="flex-shrink-0 w-20 text-left"
                                   >
                                     <div className="w-20 h-20 rounded-lg bg-slate-100 overflow-hidden flex items-center justify-center">
@@ -2532,6 +2573,15 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                     </>
                   )}
 
+                  <StoreStrip
+                    stores={stripStores}
+                    activeStoreId={selectedSupermarketId}
+                    cartStoreId={cartStoreForSwitch}
+                    cartCount={cartItemCount}
+                    nearestStoreId={nearestStoreId}
+                    onPick={pickStore}
+                  />
+
                   {cartSpansStores && (
                     <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
                       A delivery picks up from one store. Remove items so they all come from the same store.
@@ -2554,9 +2604,26 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                     excludeStoreIds={abroadStores.map(sm => sm.id)}
                     currency={selectedStore?.price_currency?.toUpperCase() || undefined}
                     onCartChange={setDeliveryCart}
+                    initialQty={seedQty}
+                    singleStoreCart
+                    onStoreLocked={(storeId) => {
+                      setSelectedSupermarketId(storeId);
+                      toast.info(`Showing ${storeNameOf(storeId)} only — a delivery picks up from one store`, { id: 'store-lock' });
+                    }}
+                    onStoreConflict={(product) => setPendingSwitch({ storeId: product.supermarket_id, product })}
                     fullPage
                     hideCartBar
                   />
+                  {pendingSwitch && cartStoreForSwitch && (
+                    <StoreSwitchPrompt
+                      cartStoreName={storeNameOf(cartStoreForSwitch)}
+                      cartCount={cartItemCount}
+                      targetStoreName={storeNameOf(pendingSwitch.storeId)}
+                      productName={pendingSwitch.product?.name}
+                      onKeep={() => setPendingSwitch(null)}
+                      onSwitch={confirmSwitch}
+                    />
+                  )}
 
                   {deliveryCart.length > 0 && (
                     <div className="rounded-xl border-2 border-orange-200 bg-orange-50/60 p-3">

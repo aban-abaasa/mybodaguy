@@ -11,6 +11,7 @@
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Minus, Plus, Image as ImageIcon, ShoppingCart, Search, Store, X, Loader2, Star } from 'lucide-react';
 import { productService, Product, SupermarketProfile } from '../services/productService';
+import { cartStoreId, decideAdd } from '../utils/storeLock';
 
 export interface CartLine {
   product: Product;
@@ -39,6 +40,15 @@ interface ProductPickerProps {
   initialQty?: Record<string, number>;
   /** Replaces the quantities (product id -> qty) each time `version` changes, e.g. after the basket was edited on a cart page. */
   syncQty?: { version: number; qty: Record<string, number> };
+  /**
+   * With allStores: the basket may hold ONE store's products (a delivery picks up from one store).
+   * Adding from another store is refused on the spot and reported through onStoreConflict.
+   */
+  singleStoreCart?: boolean;
+  /** With singleStoreCart and every store showing: the first product added, so the parent can open only that store. */
+  onStoreLocked?: (storeId: string, product: Product) => void;
+  /** With singleStoreCart: the customer tried to add `product` while the basket belongs to `cartStoreId`. */
+  onStoreConflict?: (product: Product, cartStoreId: string) => void;
 }
 
 type Money = (n: number) => string;
@@ -184,7 +194,7 @@ function SkeletonGrid({ count, full }: { count: number; full: boolean }) {
 
 const SEARCH_DEBOUNCE_MS = 300;
 
-export default function ProductPicker({ supermarketId, allStores = false, stores, excludeStoreIds, onCartChange, currency = 'UGX', initialQty, syncQty, fullPage = false, onOpenCart, hideCartBar = false }: ProductPickerProps) {
+export default function ProductPicker({ supermarketId, allStores = false, stores, excludeStoreIds, onCartChange, currency = 'UGX', initialQty, syncQty, fullPage = false, onOpenCart, hideCartBar = false, singleStoreCart = false, onStoreLocked, onStoreConflict }: ProductPickerProps) {
   const [profile, setProfile] = useState<SupermarketProfile | null>(null);
   const [categoryNames, setCategoryNames] = useState<string[]>([]);
 
@@ -306,8 +316,22 @@ export default function ProductPicker({ supermarketId, allStores = false, stores
   const storeNameById = useMemo(() => new Map((stores || []).map(s => [s.id, s.name])), [stores]);
   const showStoreName = allStores && !supermarketId;
 
+  // Latest basket + callbacks for setQty, which stays referentially stable so the memoised cards don't re-render.
+  const basketRef = useRef({ qtyById, cartProducts, supermarketId, singleStoreCart, onStoreLocked, onStoreConflict });
+  basketRef.current = { qtyById, cartProducts, supermarketId, singleStoreCart, onStoreLocked, onStoreConflict };
+
   const setQty = useCallback((product: Product, qty: number) => {
     const next = Math.max(0, qty);
+    const b = basketRef.current;
+    // Adding is where the one-store rule bites; lowering or removing is always allowed.
+    if (b.singleStoreCart && next > (b.qtyById[product.id] || 0)) {
+      const decision = decideAdd(product, cartStoreId(b.qtyById, b.cartProducts), b.supermarketId);
+      if (decision.kind === 'conflict') {
+        b.onStoreConflict?.(product, decision.cartStoreId);
+        return;
+      }
+      if (decision.kind === 'lock') b.onStoreLocked?.(decision.storeId, product);
+    }
     setQtyById(prev => ({ ...prev, [product.id]: next }));
     setCartProducts(prev => (prev[product.id] ? prev : { ...prev, [product.id]: product }));
   }, []);
