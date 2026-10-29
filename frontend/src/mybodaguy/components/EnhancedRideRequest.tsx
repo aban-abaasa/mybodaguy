@@ -2051,32 +2051,26 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   if (bookingMode === 'journey') {
     const prefillFromAutoRedirect = needsJourneyPath && selectedPickup && selectedDropoff;
     return (
-      <div className="space-y-4">
-        <button
-          onClick={() => { setBookingMode('ride'); setResumeJourneyId(null); leaveImportLaunch(); onJourneyClosed?.(); }}
-          className="text-sm text-orange-600 hover:text-orange-700 flex items-center gap-1 font-medium"
-        >
-          <ArrowLeft size={16} /> {serviceType === 'delivery' ? 'Back to Delivery' : 'Back to Book a Ride'}
-        </button>
-        <JourneyBookingFlow
-          key={resumeJourneyId ?? (importLaunch ? `import-${importLaunch.store.id}` : 'new-journey')}
-          customerId={customerId}
-          resumeJourneyId={resumeJourneyId ?? undefined}
-          initialImport={importLaunch ? { ...importLaunch, homeCountry } : undefined}
-          initialBookingKind={prefillFromAutoRedirect ? (serviceType === 'delivery' ? 'ship' : 'fly') : undefined}
-          initialShipPickup={
-            prefillFromAutoRedirect && serviceType === 'delivery'
-              ? { lat: selectedPickup!.coordinates.lat, lng: selectedPickup!.coordinates.lng, address: selectedPickup!.fullAddress }
-              : undefined
-          }
-          initialShipDropoff={
-            prefillFromAutoRedirect && serviceType === 'delivery'
-              ? { lat: selectedDropoff!.coordinates.lat, lng: selectedDropoff!.coordinates.lng, address: selectedDropoff!.fullAddress }
-              : undefined
-          }
-          initialPickupCountryIso2={prefillFromAutoRedirect ? pickupCountry?.iso2 : undefined}
-        />
-      </div>
+      <JourneyBookingFlow
+        key={resumeJourneyId ?? (importLaunch ? `import-${importLaunch.store.id}` : 'new-journey')}
+        customerId={customerId}
+        resumeJourneyId={resumeJourneyId ?? undefined}
+        initialImport={importLaunch ? { ...importLaunch, homeCountry } : undefined}
+        initialBookingKind={prefillFromAutoRedirect ? (serviceType === 'delivery' ? 'ship' : 'fly') : undefined}
+        initialShipPickup={
+          prefillFromAutoRedirect && serviceType === 'delivery'
+            ? { lat: selectedPickup!.coordinates.lat, lng: selectedPickup!.coordinates.lng, address: selectedPickup!.fullAddress }
+            : undefined
+        }
+        initialShipDropoff={
+          prefillFromAutoRedirect && serviceType === 'delivery'
+            ? { lat: selectedDropoff!.coordinates.lat, lng: selectedDropoff!.coordinates.lng, address: selectedDropoff!.fullAddress }
+            : undefined
+        }
+        initialPickupCountryIso2={prefillFromAutoRedirect ? pickupCountry?.iso2 : undefined}
+        onExit={() => { setBookingMode('ride'); setResumeJourneyId(null); leaveImportLaunch(); onJourneyClosed?.(); }}
+        exitLabel={serviceType === 'delivery' ? 'Delivery' : 'Book a Ride'}
+      />
     );
   }
 

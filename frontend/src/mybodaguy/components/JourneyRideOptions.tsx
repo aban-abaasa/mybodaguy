@@ -79,7 +79,7 @@ export default function JourneyRideOptions({
     `classic-tile flex items-center justify-center gap-1.5 p-2.5 text-[13px] font-semibold ${active ? 'is-active' : ''}`;
 
   return (
-    <details className="classic-card group !rounded-2xl p-3.5" open={value.powerType !== 'any' || value.umbrella || !!value.companyId}>
+    <details className="group border-y border-[#c4a052]/30 py-3" open={value.powerType !== 'any' || value.umbrella || !!value.companyId}>
       <summary className="cursor-pointer select-none text-sm font-semibold text-slate-700">
         Ride options <span className="font-normal text-slate-500">— same choices as booking a ride</span>
       </summary>
