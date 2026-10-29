@@ -702,7 +702,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
       {/* Shop, Book a Ride and Delivery run edge-to-edge: no centred container or
           side gutters, so products / the booking form get the whole screen.
           Every other tab keeps the container. */}
-      <div className={activeTab === 'shop' || activeTab === 'book-ride' || activeTab === 'delivery' ? 'w-full px-2 pt-2 pb-28' : 'container mx-auto px-4 pt-5 pb-28'}>
+      <div className={activeTab === 'shop' || activeTab === 'book-ride' || activeTab === 'delivery' || activeTab === 'manage-business' ? 'w-full px-2 pt-2 pb-28' : 'container mx-auto px-4 pt-5 pb-28'}>
 
         {/* Overview */}
         {activeTab === 'overview' && (
@@ -944,7 +944,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             the BodaGoEra-specific pieces (driver/escort roster, pricing) —
             see ManageBusinessPanel.tsx. */}
         {activeTab === 'manage-business' && (
-          <div className="classic-card p-5">
+          <div className="px-1 sm:px-3">
             <ManageBusinessPanel />
           </div>
         )}

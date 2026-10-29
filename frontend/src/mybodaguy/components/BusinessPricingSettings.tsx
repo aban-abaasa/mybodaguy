@@ -74,7 +74,7 @@ export default function BusinessPricingSettings({ businessProfileId, category }:
   if (loading) return <div className="p-6 text-sm text-slate-400">Loading…</div>;
 
   return (
-    <div className="space-y-4">
+    <div className="max-w-3xl space-y-4">
       <div>
         <p className="classic-eyebrow">Pricing</p>
         <p className="mt-1 text-xs text-slate-500">Leave a field blank to use the platform rate.</p>

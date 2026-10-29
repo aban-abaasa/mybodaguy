@@ -207,7 +207,7 @@ export default function BusinessDriverRoster({ businessProfileId, category }: { 
       </div>
 
       {showAdd && (
-        <form onSubmit={addDriver} className="space-y-4 rounded-2xl border border-[#c4a052]/40 bg-[#fffdf8] p-4 dark:bg-slate-800">
+        <form onSubmit={addDriver} className="max-w-3xl space-y-4 rounded-2xl border border-[#c4a052]/40 bg-[#fffdf8] p-4 dark:bg-slate-800">
           {error && <div role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>}
 
           <ClassicField label={`${Word}'s account email`} required>
@@ -325,7 +325,7 @@ export default function BusinessDriverRoster({ businessProfileId, category }: { 
       ) : visible.length === 0 && drivers.length > 0 ? (
         <p className="py-6 text-center text-sm text-slate-400">No match.</p>
       ) : (
-        <ul className="space-y-2">
+        <ul className="grid grid-cols-1 items-start gap-2.5 lg:grid-cols-2 2xl:grid-cols-3">
           {visible.map((d) => {
             const open = openId === d.id;
             const inactive = d.status === 'inactive' || d.status === 'suspended';
