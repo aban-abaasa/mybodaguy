@@ -204,7 +204,7 @@ export default function SupermarketPartnership({ riderId, vehicleType, freshIds,
             onKeyDown={e => { if (e.key === 'Escape') closeSearch(); }}
             placeholder="Name, type or place"
             aria-label="Search markets"
-            className="w-full border-0 border-b border-[#c4a052]/60 bg-transparent py-2 pr-8 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-orange-500 dark:text-slate-100"
+            className="input-bare w-full border-0 border-b border-[#c4a052]/60 bg-transparent py-2 pr-8 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-orange-500 dark:text-slate-100"
           />
           {searchQuery && (
             <button

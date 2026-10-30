@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
-import { MapPin, Plus, X, Star, Crosshair } from 'lucide-react';
+import { ChevronDown, MapPin, Plus, Star, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
-import { reverseGeocode } from '../services/geocodeService';
 import LocationPickerMap from './LocationPickerMap';
-import { describeGeoFailure, locateDevice } from '../utils/geolocation';
+import { coveringArea, formatKm } from '../utils/riderAreas';
 import type { Location } from '../data/mockLocations';
 
 interface Area {
@@ -16,29 +15,45 @@ interface Area {
   is_default: boolean;
 }
 
+interface Draft {
+  name: string;
+  address: string;
+  latitude: number | null;
+  longitude: number | null;
+  is_default: boolean;
+  // Once the customer types or taps a name, moving the pin no longer overwrites it.
+  nameTouched: boolean;
+}
+
+const EMPTY_DRAFT: Draft = { name: '', address: '', latitude: null, longitude: null, is_default: false, nameTouched: false };
+
+// Two saved spots closer than this are almost certainly the same place.
+const SAME_SPOT_KM = 0.2;
+const QUICK_NAMES = ['Home', 'Work'];
+
+const underlineInput =
+  'input-bare w-full border-0 border-b border-[#c4a052]/60 bg-transparent py-2 text-sm text-slate-800 outline-none placeholder:text-slate-400 focus:border-orange-500 dark:text-slate-100';
+
 interface CustomerAreaManagerProps {
   customerId: string;
 }
 
+// My Areas — the customer's saved spots (home, work…) as a plain classic list on the page
+// itself. The default one pre-fills the drop-off when booking, so setting it is one tap.
 export default function CustomerAreaManager({ customerId }: CustomerAreaManagerProps) {
   const [areas, setAreas] = useState<Area[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newArea, setNewArea] = useState({
-    name: '',
-    address: '',
-    latitude: null as number | null,
-    longitude: null as number | null,
-    is_default: false
-  });
-  const [loading, setLoading] = useState(false);
-  const [locating, setLocating] = useState(false);
+  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     loadAreas();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId]);
 
   const loadAreas = async () => {
-    setLoading(true);
     try {
       const { data, error } = await supabase
         .from('mbg_customer_areas')
@@ -51,236 +66,246 @@ export default function CustomerAreaManager({ customerId }: CustomerAreaManagerP
       setAreas(data || []);
     } catch (error) {
       console.error('[CustomerAreaManager] Failed to load areas:', error);
-      toast.error('Failed to load your areas');
+      toast.error("Couldn't load your areas");
     } finally {
-      setLoading(false);
+      setLoaded(true);
     }
   };
 
-  const captureCurrentPosition = async () => {
-    setLocating(true);
-    try {
-      const result = await locateDevice();
-      if (!result.ok) {
-        toast.error(describeGeoFailure(result.failure));
-        return;
-      }
-      const { lat, lng, accuracy } = result.fix;
-      const address = await reverseGeocode(lat, lng);
-      setNewArea((prev) => ({
-        ...prev,
-        address: address || `${lat.toFixed(5)}, ${lng.toFixed(5)}`,
-        latitude: lat,
-        longitude: lng,
-      }));
-      toast.success(accuracy > 1000 ? 'Approximate location captured — tap the map to fine-tune it' : 'GPS location captured');
-    } finally {
-      setLocating(false);
-    }
+  // The first place a customer saves is the one they'll book from most.
+  const openForm = () => {
+    setDraft({ ...EMPTY_DRAFT, is_default: areas.length === 0 });
+    setShowAddForm(true);
   };
+  const closeForm = () => { setShowAddForm(false); setDraft(EMPTY_DRAFT); };
+
+  // Fill the name from the map unless the customer has chosen one.
+  const applyPoint = (lat: number, lng: number, address: string, label?: string) =>
+    setDraft(prev => ({
+      ...prev,
+      address,
+      latitude: lat,
+      longitude: lng,
+      name: prev.nameTouched ? prev.name : (label || address.split(',')[0] || '').trim(),
+    }));
+
+  const samespot = draft.latitude != null && draft.longitude != null
+    ? coveringArea(draft.latitude, draft.longitude, areas, undefined, SAME_SPOT_KM)
+    : null;
+  const canSave = draft.latitude != null && draft.longitude != null && draft.name.trim() !== '' && !saving;
+  const quickNames = QUICK_NAMES.filter(n => !areas.some(a => a.name.trim().toLowerCase() === n.toLowerCase()));
 
   const handleAddArea = async () => {
-    if (!newArea.name || !newArea.address || newArea.latitude == null || newArea.longitude == null) {
-      toast.error('Choose the location on the map before saving');
-      return;
-    }
-
-    setLoading(true);
+    if (!canSave) return;
+    setSaving(true);
     try {
-      const { error } = await supabase.from('mbg_customer_areas').insert({
-        customer_user_id: customerId,
-        name: newArea.name,
-        address: newArea.address,
-        latitude: newArea.latitude,
-        longitude: newArea.longitude,
-        is_default: newArea.is_default
-      });
-
+      const name = draft.name.trim();
+      const { data: created, error } = await supabase
+        .from('mbg_customer_areas')
+        .insert({
+          customer_user_id: customerId,
+          name,
+          address: draft.address.trim() || name,
+          latitude: draft.latitude,
+          longitude: draft.longitude,
+          is_default: draft.is_default,
+        })
+        .select('id')
+        .single();
       if (error) throw error;
 
-      if (newArea.is_default) {
-        await supabase
-          .from('mbg_customer_areas')
-          .update({ is_default: false })
-          .eq('customer_user_id', customerId)
-          .neq('name', newArea.name);
+      // Only one default: clear it on every other row.
+      if (draft.is_default && created?.id) {
+        await supabase.from('mbg_customer_areas').update({ is_default: false }).eq('customer_user_id', customerId).neq('id', created.id);
       }
 
-      setNewArea({ name: '', address: '', latitude: null, longitude: null, is_default: false });
-      setShowAddForm(false);
-      toast.success('Area added successfully');
+      closeForm();
+      toast.success('Area saved');
       await loadAreas();
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to add area');
+      toast.error(error?.message || "Couldn't save the area");
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
-  const handleRemoveArea = async (areaId: string) => {
+  const restoreArea = async (area: Area) => {
+    const { error } = await supabase.from('mbg_customer_areas').insert({
+      customer_user_id: customerId, name: area.name, address: area.address,
+      latitude: area.latitude, longitude: area.longitude, is_default: area.is_default,
+    });
+    if (error) { toast.error("Couldn't bring it back"); return; }
+    await loadAreas();
+  };
+
+  // No confirm dialog: removing is instant and undoable from the toast.
+  const handleRemoveArea = async (area: Area) => {
     try {
-      const { error } = await supabase.from('mbg_customer_areas').delete().eq('id', areaId);
+      const { error } = await supabase.from('mbg_customer_areas').delete().eq('id', area.id);
       if (error) throw error;
-      setAreas(areas.filter((a) => a.id !== areaId));
-      toast.success('Area removed');
+      setAreas(prev => prev.filter(a => a.id !== area.id));
+      setExpandedId(null);
+      toast(`${area.name} removed`, { duration: 8000, action: { label: 'Undo', onClick: () => restoreArea(area) } });
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to remove area');
+      toast.error(error?.message || "Couldn't remove it");
     }
   };
 
   const handleSetDefault = async (areaId: string) => {
     try {
-      await supabase.from('mbg_customer_areas').update({ is_default: false }).eq('customer_user_id', customerId);
+      const { error: clearError } = await supabase.from('mbg_customer_areas').update({ is_default: false }).eq('customer_user_id', customerId).neq('id', areaId);
+      if (clearError) throw clearError;
       const { error } = await supabase.from('mbg_customer_areas').update({ is_default: true }).eq('id', areaId);
       if (error) throw error;
-      setAreas(areas.map((a) => ({ ...a, is_default: a.id === areaId })));
-      toast.success('Default area updated');
+      // The default goes to the top, like the server's ordering.
+      setAreas(prev => prev.map(a => ({ ...a, is_default: a.id === areaId })).sort((a, b) => Number(b.is_default) - Number(a.is_default)));
+      toast.success('Default set');
     } catch (error: any) {
-      toast.error(error?.message || 'Failed to update default area');
+      toast.error(error?.message || "Couldn't set the default");
     }
   };
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-5">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="font-bold text-slate-800 flex items-center gap-2">
-            <MapPin size={18} className="text-orange-500" /> My Areas
-          </h3>
-          <p className="text-xs text-slate-500 mt-0.5">Save your real pickup spots for faster, more accurate rides</p>
-        </div>
+    <section className="mx-auto w-full max-w-2xl">
+      <div className="flex items-center gap-3">
+        <h2 className="font-classic-display text-xl font-semibold text-slate-800 dark:text-slate-100">My Areas</h2>
+        <div className="landing-classic-divider flex-1" />
         <button
-          onClick={() => setShowAddForm(!showAddForm)}
-          className="flex items-center gap-1.5 px-3 py-2 bg-gradient-to-r from-orange-500 to-yellow-500 text-white rounded-lg text-sm font-medium hover:opacity-90 transition-all"
+          type="button"
+          onClick={() => (showAddForm ? closeForm() : openForm())}
+          aria-expanded={showAddForm}
+          className="flex items-center gap-1 text-sm font-semibold text-orange-600 hover:text-orange-700"
         >
-          {showAddForm ? <X size={16} /> : <Plus size={16} />}
-          {showAddForm ? 'Cancel' : 'Add Area'}
+          {showAddForm ? <><X size={15} /> Close</> : <><Plus size={15} /> Add</>}
         </button>
       </div>
 
+      {/* Add — pin first, then the name is already filled in. */}
       {showAddForm && (
-        <div className="bg-orange-50 border-2 border-orange-200 rounded-lg p-4 mb-4 space-y-3">
-          <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Area Name</label>
-            <input
-              type="text"
-              value={newArea.name}
-              onChange={(e) => setNewArea({ ...newArea, name: e.target.value })}
-              placeholder="e.g., Home, Office, Ntinda"
-              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-700 mb-1">Map-selected address</label>
-            <input
-              type="text"
-              value={newArea.address}
-              readOnly
-              placeholder="Search or select a point on the map below"
-              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-slate-50 text-slate-700 outline-none"
-            />
-          </div>
-          <div>
-            <button
-              type="button"
-              onClick={captureCurrentPosition}
-              disabled={locating}
-              className="flex items-center gap-2 text-sm font-medium text-orange-600 hover:text-orange-700 disabled:opacity-50"
-            >
-              <Crosshair size={16} className={locating ? 'animate-spin' : ''} />
-              {locating ? 'Getting GPS location…' : 'Use my current GPS location'}
-            </button>
-            {newArea.latitude != null && newArea.longitude != null && (
-              <p className="text-xs text-slate-500 mt-1">
-                📍 {newArea.latitude.toFixed(5)}, {newArea.longitude.toFixed(5)}
-              </p>
-            )}
-          </div>
+        <div className="mt-4 space-y-4 border-b border-[#c4a052]/25 pb-5">
           <LocationPickerMap
-            pickup={newArea.latitude != null && newArea.longitude != null ? {
-              id: 'new_area', name: newArea.name || 'Selected area', area: newArea.name || 'Selected area',
-              fullAddress: newArea.address || 'Selected map location',
-              coordinates: { lat: newArea.latitude, lng: newArea.longitude },
+            pickup={draft.latitude != null && draft.longitude != null ? {
+              id: 'new_area', name: draft.name || 'Selected area', area: draft.name || 'Selected area',
+              fullAddress: draft.address || 'Selected map location',
+              coordinates: { lat: draft.latitude, lng: draft.longitude },
             } as Location : null}
             dropoff={null}
             selectionMode="pickup"
-            onPickupChange={(location: Location) => setNewArea((prev) => ({
-              ...prev,
-              address: location.fullAddress,
-              latitude: location.coordinates.lat,
-              longitude: location.coordinates.lng,
-            }))}
+            onPickupChange={(location: Location) =>
+              applyPoint(location.coordinates.lat, location.coordinates.lng, location.fullAddress, location.name)}
             onDropoffChange={() => {}}
           />
-          <p className="text-xs text-slate-500">Use the search bar, current-location button, or tap/drag the green pin. Saving requires a map-selected coordinate.</p>
 
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="is_default"
-              checked={newArea.is_default}
-              onChange={(e) => setNewArea({ ...newArea, is_default: e.target.checked })}
-              className="w-4 h-4 text-orange-500 border-slate-300 rounded focus:ring-orange-500"
-            />
-            <label htmlFor="is_default" className="text-sm text-slate-700">Set as my default pickup area</label>
-          </div>
-          <button
-            onClick={handleAddArea}
-            disabled={loading}
-            className="w-full py-2.5 bg-gradient-to-r from-orange-500 to-yellow-500 text-white font-semibold rounded-lg text-sm hover:opacity-90 disabled:opacity-50"
-          >
-            {loading ? 'Saving…' : 'Save Area'}
-          </button>
-        </div>
-      )}
-
-      {loading && areas.length === 0 ? (
-        <div className="text-center py-6">
-          <div className="animate-spin w-6 h-6 border-4 border-orange-500 border-t-transparent rounded-full mx-auto" />
-        </div>
-      ) : areas.length === 0 ? (
-        <div className="text-center py-8 bg-slate-50 rounded-lg">
-          <MapPin className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-          <p className="text-slate-500 text-sm">No saved areas yet</p>
-          <p className="text-xs text-slate-400 mt-0.5">Add your home, office, or favorite spots for quicker booking</p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {areas.map((area) => (
-            <div
-              key={area.id}
-              className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
-                area.is_default ? 'border-orange-400 bg-orange-50' : 'border-slate-100 bg-white'
-              }`}
-            >
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-                  area.is_default ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500'
-                }`}>
-                  <MapPin size={16} />
-                </div>
-                <div className="min-w-0">
-                  <p className="font-medium text-slate-800 text-sm truncate flex items-center gap-1.5">
-                    {area.name}
-                    {area.is_default && <span className="text-[10px] px-1.5 py-0.5 bg-orange-500 text-white rounded-full">Default</span>}
-                  </p>
-                  <p className="text-xs text-slate-500 truncate">{area.address}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                {!area.is_default && (
-                  <button onClick={() => handleSetDefault(area.id)} className="p-2 text-slate-400 hover:text-orange-500" title="Set as default">
-                    <Star size={16} />
-                  </button>
+          {draft.latitude != null && (
+            <>
+              <div>
+                <input
+                  type="text"
+                  value={draft.name}
+                  onChange={e => setDraft({ ...draft, name: e.target.value, nameTouched: true })}
+                  placeholder="Name"
+                  aria-label="Area name"
+                  className={`${underlineInput} font-classic-display text-base font-semibold`}
+                />
+                {quickNames.length > 0 && (
+                  <div className="mt-2 flex gap-4 text-xs">
+                    {quickNames.map(n => (
+                      <button key={n} type="button" onClick={() => setDraft({ ...draft, name: n, nameTouched: true })} className="font-semibold text-orange-600 hover:text-orange-700">{n}</button>
+                    ))}
+                  </div>
                 )}
-                <button onClick={() => handleRemoveArea(area.id)} className="p-2 text-slate-400 hover:text-red-500" title="Remove">
-                  <X size={16} />
-                </button>
+                <p className="mt-2 break-words text-xs text-slate-500">{draft.address}</p>
               </div>
-            </div>
-          ))}
+
+              {samespot && (
+                <p className="text-xs text-amber-700">
+                  You saved <strong>{samespot.area.name}</strong> {samespot.km < 0.05 ? 'right here' : `${formatKm(samespot.km)} away`}.
+                </p>
+              )}
+
+              <button
+                type="button"
+                role="switch"
+                aria-checked={draft.is_default}
+                onClick={() => setDraft({ ...draft, is_default: !draft.is_default })}
+                className="flex w-full items-center justify-between py-1 text-sm text-slate-700 dark:text-slate-200"
+              >
+                <span className="flex items-center gap-2"><Star size={15} className="text-orange-500" /> Make it my default</span>
+                <span className={`relative h-5 w-9 rounded-full transition-colors ${draft.is_default ? 'bg-orange-500' : 'bg-slate-300'}`}>
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${draft.is_default ? 'left-[18px]' : 'left-0.5'}`} />
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleAddArea}
+                disabled={!canSave}
+                className="w-full rounded-full bg-orange-500 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-orange-600 active:scale-[0.99] disabled:opacity-40"
+              >
+                {saving ? 'Saving…' : 'Save area'}
+              </button>
+            </>
+          )}
         </div>
       )}
-    </div>
+
+      {!loaded ? (
+        <ul className="mt-2" aria-hidden>
+          {[0, 1, 2].map(i => (
+            <li key={i} className="flex animate-pulse items-center gap-3 border-b border-[#c4a052]/15 py-3.5">
+              <div className="h-5 w-7 rounded bg-slate-200/70" />
+              <div className="flex-1 space-y-1.5">
+                <div className="h-3.5 w-2/5 rounded bg-slate-200/70" />
+                <div className="h-3 w-3/5 rounded bg-slate-200/50" />
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : areas.length === 0 ? (
+        !showAddForm && (
+          <div className="py-10 text-center">
+            <p className="text-sm text-slate-500">Save home and work — book a ride in one tap.</p>
+            <button type="button" onClick={openForm} className="mt-2 text-sm font-semibold text-orange-600 hover:text-orange-700">Add your first area</button>
+          </div>
+        )
+      ) : (
+        <ul className="mt-1">
+          {areas.map(area => {
+            const open = expandedId === area.id;
+            return (
+              <li key={area.id} className="border-b border-[#c4a052]/20 last:border-0">
+                <button
+                  type="button"
+                  onClick={() => setExpandedId(cur => (cur === area.id ? null : area.id))}
+                  aria-expanded={open}
+                  className="flex w-full items-center gap-3 py-3 text-left"
+                >
+                  {area.is_default
+                    ? <Star size={18} className="w-7 flex-shrink-0 fill-orange-500 text-orange-500" aria-hidden />
+                    : <MapPin size={18} className="w-7 flex-shrink-0 text-slate-400" aria-hidden />}
+                  <span className="min-w-0 flex-1">
+                    <span className={`block font-classic-display text-[15px] font-semibold text-slate-800 dark:text-slate-100 ${open ? 'break-words' : 'truncate'}`}>{area.name}</span>
+                    {area.address && area.address !== area.name && (
+                      <span className={`block text-xs text-slate-500 ${open ? 'break-words' : 'truncate'}`}>{area.address}</span>
+                    )}
+                  </span>
+                  {area.is_default && <span className="flex-shrink-0 text-xs font-semibold text-orange-600">Default</span>}
+                  <ChevronDown size={15} className={`flex-shrink-0 text-slate-400 transition-transform ${open ? 'rotate-180' : ''}`} />
+                </button>
+
+                {open && (
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 pb-3 pl-10 text-sm font-medium">
+                    {!area.is_default && (
+                      <button type="button" onClick={() => handleSetDefault(area.id)} className="text-orange-600 hover:text-orange-700">Make default</button>
+                    )}
+                    <button type="button" onClick={() => handleRemoveArea(area)} className="text-slate-500 hover:text-red-600">Remove</button>
+                  </div>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }

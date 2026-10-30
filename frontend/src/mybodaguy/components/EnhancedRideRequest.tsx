@@ -27,13 +27,15 @@ import type { ImportStore } from '../services/journeyService';
 import ZoneChargeNotice from './ZoneChargeNotice';
 import { StoreStrip, StoreSwitchPrompt, type StripStore } from './StoreSwitcher';
 import { switchNeedsConfirm } from '../utils/storeLock';
+import { formatWindow, deadlineLabel, DEFAULT_WINDOW_HOURS } from '../utils/deliveryWindow';
+import DeliveryWindowPicker from './DeliveryWindowPicker';
 import { zoneAccessService } from '../services/zoneAccessService';
 import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
 type DeliveryMode = 'supermarket' | 'normal';
-type DeliveryTab = 'shop' | 'address' | 'vehicle' | 'pay';
+type DeliveryTab = 'shop' | 'address' | 'time' | 'vehicle' | 'pay';
 type PowerFilter = 'any' | 'electric' | 'fuel';
 type VehicleTypeFilter = 'any' | 'motorcycle' | 'car' | 'van' | 'truck';
 type ModePreference = 'all' | 'normal' | 'vip' | 'discount' | 'return';
@@ -476,6 +478,14 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // The Delivery page is one step per tab (shop, address, vehicle, pay) instead of one long scroll.
   // Every tab stays mounted, only hidden, so nothing typed or picked is lost when switching.
   const [deliveryTab, setDeliveryTab] = useState<DeliveryTab>('shop');
+  // The deadlines on the Time step are real clock times, so keep them current while it is open.
+  const [clockTick, setClockTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (deliveryTab !== 'time') return;
+    setClockTick(Date.now());
+    const t = setInterval(() => setClockTick(Date.now()), 30_000);
+    return () => clearInterval(t);
+  }, [deliveryTab]);
   const flowTopRef = useRef<HTMLDivElement>(null);
   // The booked journey being tracked, when the customer opened one from My Journeys.
   const [resumeJourneyId, setResumeJourneyId] = useState<string | null>(openJourneyId ?? null);
@@ -521,6 +531,10 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // Service options — real vehicle/weather filters matched against riders' actual registered attributes
   const [serviceType, setServiceType] = useState<ServiceType>(fixedServiceType || 'ride');
   const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('supermarket');
+  // The Time step only exists for a store delivery; if the mode changes underneath it, fall back to the shop.
+  useEffect(() => {
+    if (deliveryTab === 'time' && deliveryMode !== 'supermarket') setDeliveryTab('shop');
+  }, [deliveryTab, deliveryMode]);
   const [supermarkets, setSupermarkets] = useState<Supermarket[]>([]);
   const [selectedSupermarketId, setSelectedSupermarketId] = useState('');
   const [storeListOpen, setStoreListOpen] = useState(false);
@@ -563,7 +577,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // enough that a stalled order gets caught same-day); bounds come from
   // the backend's own delivery.min_deadline_hours/max_deadline_hours so
   // the presets shown here never fall outside what the server will accept.
-  const [maxDeliveryHours, setMaxDeliveryHours] = useState(3);
+  const [maxDeliveryHours, setMaxDeliveryHours] = useState(DEFAULT_WINDOW_HOURS);
   const [deliveryWindowBounds, setDeliveryWindowBounds] = useState({ min: 1, max: 48 });
   // Whether this delivery counts as a personal errand or a business expense
   // for the customer's own ICANera Wallet bookkeeping. Applies to the WHOLE
@@ -2186,6 +2200,8 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   const isDelivery = serviceType === 'delivery';
   // Delivery gets its own "details" step first, so the numbering shifts by one.
   const stepBase = isDelivery ? 1 : 0;
+  // A store delivery has one more step (Time) between the address and the vehicle.
+  const timeStep = isDelivery && deliveryMode === 'supermarket' ? 1 : 0;
   const formTitle = serviceType === 'ride'
     ? 'Book a Ride'
     : deliveryMode === 'supermarket'
@@ -2209,6 +2225,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       summary: storeShopping ? (goodsItemCount > 0 ? `${goodsItemCount} item${goodsItemCount !== 1 ? 's' : ''}` : 'Browse') : 'Details',
       done: storeShopping ? goodsItemCount > 0 : true },
     { id: 'address', emoji: '📍', label: 'Address', summary: routeReady ? (routeInfo ? `${routeInfo.distanceKm.toFixed(1)} km` : 'Set') : 'Where to?', done: routeReady },
+    ...(storeShopping ? [{ id: 'time' as const, emoji: '⏱️', label: 'Time', summary: formatWindow(maxDeliveryHours), done: true }] : []),
     { id: 'vehicle', emoji: '🚚', label: 'Vehicle', summary: vehicleLabel, done: vehicleTypeFilter !== 'any' },
     { id: 'pay', emoji: '💳', label: 'Pay', summary: paymentMethod === 'wallet' ? 'Wallet' : paymentMethod === 'cash' ? 'Cash' : 'Company', done: false },
   ];
@@ -2221,7 +2238,9 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
     ? (storeShopping ? `${goodsItemCount} item${goodsItemCount !== 1 ? 's' : ''} · ${goodsMoney(goodsTotal)}` : 'Normal delivery')
     : deliveryTab === 'address'
       ? (routeReady ? (routeInfo ? `${routeInfo.distanceKm.toFixed(1)} km · ~${Math.round(routeInfo.durationMin)} min` : 'Route set') : 'Set pickup and drop-off')
-      : `${vehicleLabel} vehicle`;
+      : deliveryTab === 'time'
+        ? `Delivered by ${deadlineLabel(new Date(clockTick), maxDeliveryHours)}`
+        : `${vehicleLabel} vehicle`;
   const canGoNext = deliveryTab === 'shop' ? (!storeShopping || goodsItemCount > 0) : deliveryTab === 'address' ? routeReady : true;
   const showTabBar = isDelivery && deliveryTab !== 'pay' && !(deliveryTab === 'shop' && storeShopping && goodsItemCount === 0);
 
@@ -2267,7 +2286,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       {/* Delivery steps — shop, address, vehicle, pay */}
       {isDelivery && (
         <div ref={flowTopRef} className="scroll-mt-28">
-          <div role="tablist" aria-label="Delivery steps" className="grid grid-cols-4 gap-1.5 rounded-2xl bg-slate-100 p-1.5">
+          <div role="tablist" aria-label="Delivery steps" className={`grid gap-1.5 rounded-2xl bg-slate-100 p-1.5 ${deliveryTabs.length === 5 ? 'grid-cols-5' : 'grid-cols-4'}`}>
             {deliveryTabs.map(t => {
               const active = deliveryTab === t.id;
               return (
@@ -2666,56 +2685,6 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
                       )}
                     </div>
                   )}
-
-                  {deliveryCart.length > 0 && (
-                    <div className="p-3 rounded-lg border-2 border-slate-200 bg-slate-50">
-                      <label className="block text-sm font-medium text-slate-700 mb-1">
-                        Deliver within
-                      </label>
-                      <p className="text-xs text-slate-500 mb-2">
-                        If your rider misses this window, you can claim a refund straight from your order receipt.
-                      </p>
-                      <div className="flex flex-wrap gap-1.5">
-                        {[
-                          { hours: 1, label: '1h · Express' },
-                          { hours: 3, label: '3h · Standard' },
-                          { hours: 6, label: '6h' },
-                          { hours: 24, label: '24h · Tomorrow' },
-                          { hours: 48, label: '48h · Flexible' },
-                        ]
-                          .filter(p => p.hours >= deliveryWindowBounds.min && p.hours <= deliveryWindowBounds.max)
-                          .map(p => (
-                            <button
-                              key={p.hours}
-                              type="button"
-                              onClick={() => setMaxDeliveryHours(p.hours)}
-                              className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-colors ${
-                                maxDeliveryHours === p.hours ? 'bg-blue-600 text-white' : 'bg-white border border-slate-300 text-slate-600'
-                              }`}
-                            >
-                              {p.label}
-                            </button>
-                          ))}
-                        <label className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-white border border-slate-300 text-slate-600">
-                          Custom
-                          <input
-                            type="number"
-                            min={deliveryWindowBounds.min}
-                            max={deliveryWindowBounds.max}
-                            value={maxDeliveryHours}
-                            onChange={(e) => {
-                              const v = Number(e.target.value);
-                              if (!Number.isNaN(v)) {
-                                setMaxDeliveryHours(Math.min(Math.max(v, deliveryWindowBounds.min), deliveryWindowBounds.max));
-                              }
-                            }}
-                            className="w-12 outline-none"
-                          />
-                          h
-                        </label>
-                      </div>
-                    </div>
-                  )}
                 </>
               )}
             </div>
@@ -2916,6 +2885,21 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
       </div>
 
       {/* Ride options — locked until the store order is confirmed with the PIN */}
+      {/* Time — how long the customer will wait for a store order. Its own step so it is never buried
+          under the product grid; only a store delivery has a window (mbg_request_ride). */}
+      {isDelivery && storeShopping && (
+        <div className={`space-y-3 ${tabHidden('time')}`}>
+          <StepHeading n={2 + stepBase}>Deliver within</StepHeading>
+          <DeliveryWindowPicker
+            hours={maxDeliveryHours}
+            onChange={setMaxDeliveryHours}
+            bounds={deliveryWindowBounds}
+            routeMinutes={routeInfo?.durationMin}
+            now={clockTick}
+          />
+        </div>
+      )}
+
       <div className={`space-y-5 ${tabHidden('vehicle')}`}>
       {goodsLocked && (
         <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
@@ -2926,7 +2910,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
         </div>
       )}
       <div className={`space-y-4 ${goodsLocked ? 'pointer-events-none select-none opacity-50' : ''}`}>
-        <StepHeading n={2 + stepBase}>{needsCrossBorderPath ? 'Your courier' : isDelivery ? 'Choose a vehicle' : 'Choose your ride'}</StepHeading>
+        <StepHeading n={2 + stepBase + timeStep}>{needsCrossBorderPath ? 'Your courier' : isDelivery ? 'Choose a vehicle' : 'Choose your ride'}</StepHeading>
 
         {/* Cross-border delivery: mode/vehicle-type/power/rain-cover filters
             below don't apply to cargo couriers, so hide them and explain
@@ -3060,7 +3044,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
 
       {/* Payment + extras */}
       <div className={`space-y-4 ${tabHidden('pay')}`}>
-        <StepHeading n={3 + stepBase}>Payment</StepHeading>
+        <StepHeading n={3 + stepBase + timeStep}>Payment</StepHeading>
 
         {/* Payment method — Wallet settles automatically the instant the
             trip ends, for the all-in amount shown as the fare; Cash means

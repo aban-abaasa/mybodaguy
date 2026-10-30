@@ -393,7 +393,7 @@ export function useRiderSmartAssist({ userId, riderId, vehicleType, mode, pendin
     isOnline: !!row?.isAvailable,
     rowLoaded: row !== null,
     setOnline, togglingOnline, onlineSince,
-    areas, areasLoaded,
+    areas, areasLoaded, reloadAreas: loadAreas,
     hotspots: dueHotspots, snooze, addHotspot, addingKey,
     hasLiveDemand: snapshot !== null,
     waiting: Math.max(pendingCount, snapshot?.pendingNearby ?? 0),
