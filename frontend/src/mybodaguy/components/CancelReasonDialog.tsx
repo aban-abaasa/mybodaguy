@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Loader2, AlertTriangle } from 'lucide-react';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 const OTHER = '__other__';
 
@@ -22,6 +23,7 @@ export default function CancelReasonDialog({
   onConfirm: (reason: string) => void;
   onClose: () => void;
 }) {
+  useBackLayer(open, onClose);
   const [choice, setChoice] = useState<string | null>(null);
   const [other, setOther] = useState('');
 

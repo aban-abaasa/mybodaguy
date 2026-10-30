@@ -36,6 +36,8 @@ import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { PhoneBackButton, PhoneRoleSection, type PhoneNav } from '../components/common/PhoneRoleNav';
+import { useBackLayer } from '../hooks/useBackLayer';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 interface CustomerDashboardProps {
   user: any;
@@ -205,6 +207,9 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, p
   // A service picked in the Shop opens the Book screen already searching for it.
   const [bookSearch, setBookSearch]     = useState('');
   const [mobileMenuOpen, setMobileMenu] = useState(false);
+  // Phone/browser Back closes the menu first, then walks a sub-section back to Overview.
+  useBackLayer(mobileMenuOpen, () => setMobileMenu(false));
+  useBackLayer(activeTab !== 'overview', () => setActiveTab('overview'));
   // Plans waiting on the customer (deposit due, overdue, ready to collect…) — the red
   // number on the Installments icon. Re-read whenever the customer leaves that tab,
   // so paying a plan clears it; the tab itself shows the live list.
@@ -237,6 +242,8 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, p
   const [cancelTarget, setCancelTarget] = useState<any>(null);
   const [deleteTarget, setDeleteTarget] = useState<any>(null);
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  useBackLayer(deleteAllOpen, () => setDeleteAllOpen(false));
+  useBackLayer(!!deleteTarget, () => setDeleteTarget(null));
   const [orderActionBusy, setOrderActionBusy] = useState(false);
   // A booked journey chosen from My Journeys (Orders) to open on the Book a
   // Ride tab, where its live tracking screen lives.

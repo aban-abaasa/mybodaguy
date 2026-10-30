@@ -1,4 +1,5 @@
 import { X } from 'lucide-react';
+import { useBackLayer } from '../../hooks/useBackLayer';
 
 // Fullscreen tap-to-view for any message image — click the image anywhere
 // it's rendered to open it here, click the backdrop or the X to dismiss.
@@ -10,6 +11,7 @@ interface ImageLightboxProps {
 }
 
 export default function ImageLightbox({ src, alt = '', onClose }: ImageLightboxProps) {
+  useBackLayer(!!src, onClose);
   if (!src) return null;
   return (
     <div

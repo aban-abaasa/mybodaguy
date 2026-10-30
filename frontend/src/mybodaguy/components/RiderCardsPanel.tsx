@@ -19,6 +19,7 @@ import {
   type DistrictRiderRow,
   type RiderCard,
 } from '../services/riderCardService';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 type Filter = 'all' | 'no_card' | 'awaiting' | 'active' | 'renewal' | 'permit' | 'uninsured';
 
@@ -43,6 +44,7 @@ const isUninsured = (row: DistrictRiderRow) => {
 const vehicleLabel = (type: string) => type.charAt(0).toUpperCase() + type.slice(1);
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  useBackLayer(true, onClose);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/50 p-4" role="dialog" aria-modal="true" aria-label={title}>
       <div className="my-auto w-full max-w-md rounded-xl bg-white p-5 shadow-2xl">

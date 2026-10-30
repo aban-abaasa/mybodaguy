@@ -17,6 +17,7 @@ import {
 } from '../services/landingMessagesService';
 import { Linkify } from '../utils/linkify';
 import ProductOfLink from '../components/ProductOfLink';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 interface Contributor {
   authId: string | null;
@@ -86,6 +87,7 @@ export default function LandingPage({ onGetStarted }: LandingPageProps) {
   const [guestReplyForm, setGuestReplyForm] = useState({ name: '', email: '' });
   const [guestLikeKey] = useState<string>(() => getOrCreateGuestLikeKey());
   const [selectedContributor, setSelectedContributor] = useState<Contributor | null>(null);
+  useBackLayer(!!selectedContributor, () => setSelectedContributor(null));
   const [contributorBalance, setContributorBalance] = useState<number | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);

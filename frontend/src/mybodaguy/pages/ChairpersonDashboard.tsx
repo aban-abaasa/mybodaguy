@@ -17,8 +17,10 @@ import IcanCoinCard from '../components/IcanCoinCard';
 import LeadershipVote, { useLeadershipAttention } from '../components/LeadershipVote';
 import { ThemeMenuItem } from '../../components/ThemeToggle';
 import { PhoneBackButton, PhoneRoleSection, type PhoneNav } from '../components/common/PhoneRoleNav';
+import { useBackLayer } from '../hooks/useBackLayer';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { toast } from 'sonner';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 interface ChairpersonDashboardProps {
   user: any;
@@ -50,6 +52,9 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet, ph
   const [selectedSubordinate, setSelectedSubordinate] = useState<SubordinateChairperson | null>(null);
   const [selectedRider, setSelectedRider] = useState<Rider | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('overview');
+  // Phone/browser Back closes the menu first, then walks a sub-section back to Overview.
+  useBackLayer(showMobileMenu, () => setShowMobileMenu(false));
+  useBackLayer(activeTab !== 'overview', () => setActiveTab('overview'));
   const [openCommissionSection, setOpenCommissionSection] = useState<'summary' | 'activity' | 'rates' | null>('summary');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const voteAttention = useLeadershipAttention(user?.id);
@@ -1184,6 +1189,7 @@ interface AssignSubordinateModalProps {
 }
 
 function AssignSubordinateModal({ myCommitteeInfo, onClose, onSuccess }: AssignSubordinateModalProps) {
+  useBackLayer(true, onClose);
   const MAX_COMMITTEE_MEMBERS = 10;
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUserId, setSelectedUserId] = useState('');
@@ -1593,6 +1599,7 @@ interface AssignRiderModalProps {
 }
 
 function AssignRiderModal({ stageId, stageName, onClose, onSuccess }: AssignRiderModalProps) {
+  useBackLayer(true, onClose);
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
@@ -1957,6 +1964,7 @@ interface ManageSubordinateModalProps {
 }
 
 function ManageSubordinateModal({ subordinate, onClose, onSuccess }: ManageSubordinateModalProps) {
+  useBackLayer(true, onClose);
   const [commissionRate, setCommissionRate] = useState(String(subordinate.commission_rate));
   const [savingRate, setSavingRate] = useState(false);
   const [togglingStatus, setTogglingStatus] = useState(false);
@@ -2095,6 +2103,7 @@ interface ManageRiderModalProps {
 }
 
 function ManageRiderModal({ rider, card, onClose, onSuccess }: ManageRiderModalProps) {
+  useBackLayer(true, onClose);
   const [updating, setUpdating] = useState(false);
 
   const handleSetStatus = async (status: 'active' | 'suspended' | 'inactive') => {

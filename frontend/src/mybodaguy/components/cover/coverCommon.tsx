@@ -9,6 +9,7 @@ import {
   type LocalRate,
   type PolicyState,
 } from '../../services/insuranceService';
+import { useBackLayer } from '../../hooks/useBackLayer';
 
 // The user's own currency at the live ICAN price. Null (and quietly hidden) if the price engine can't be reached.
 export function useLocalRate(userId?: string) {
@@ -43,6 +44,7 @@ export function Amount({ ican, rate, suffix = '' }: { ican: number | null | unde
 
 // A bottom sheet on a phone, a centred card on a desktop.
 export function Sheet({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  useBackLayer(true, onClose);
   return (
     <div className="fixed inset-0 z-[1100] flex items-end justify-center bg-black/50 sm:items-center sm:p-4" role="dialog" aria-modal="true" aria-label={title}>
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 h-full w-full cursor-default" />

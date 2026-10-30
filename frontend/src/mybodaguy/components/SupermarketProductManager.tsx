@@ -12,6 +12,8 @@ import { productService, Product, ProductInput, SupermarketProfile, StoreImportO
 import { reverseGeocodeCountry } from '../services/geocodeService';
 import LocationPickerMap from './LocationPickerMap';
 import type { Location } from '../data/mockLocations';
+import { useBackLayer } from '../hooks/useBackLayer';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 interface SupermarketProductManagerProps {
   supermarketId: string;
@@ -153,6 +155,7 @@ function ProductEditModal({
   onClose: () => void;
   onSaved: () => void;
 }) {
+  useBackLayer(true, onClose);
   const [name, setName] = useState(product?.name || '');
   const [description, setDescription] = useState(product?.description || '');
   const [category, setCategory] = useState(product?.category || CATEGORIES[0]);
@@ -339,6 +342,7 @@ function ProductEditModal({
 function StoreLocationEditor({ supermarketId, onCurrencyChange }: { supermarketId: string; onCurrencyChange: (currency: string) => void }) {
   const [profile, setProfile] = useState<SupermarketProfile | null>(null);
   const [editing, setEditing] = useState(false);
+  useBackLayer(editing, () => setEditing(false));
   const [pin, setPin] = useState<Location | null>(null);
   const [saving, setSaving] = useState(false);
   const [priceCurrency, setPriceCurrency] = useState('UGX');

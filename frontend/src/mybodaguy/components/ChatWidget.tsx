@@ -36,6 +36,7 @@ import CallStage from './calls/CallStage';
 import IncomingCallOverlay from './calls/IncomingCallOverlay';
 import CommunityLiveStage from './community/CommunityLiveStage';
 import NavGlowDefs from './common/NavGlowDefs';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 // The colours that travel along the floating chat button's own outline (see NavGlowDefs).
 const CHAT_RAINBOW = ['#f43f5e', '#f59e0b', '#facc15', '#22c55e', '#06b6d4', '#6366f1', '#d946ef'];
@@ -138,6 +139,7 @@ export default function ChatWidget() {
   const [guestLikeKey] = useState<string>(() => getOrCreateGuestLikeKey());
 
   const [open, setOpen] = useState(false);
+  useBackLayer(open, () => setOpen(false));
   const [channel, setChannel] = useState<'support' | 'community'>('support');
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);

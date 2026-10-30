@@ -13,6 +13,7 @@ import {
 import { legLabel } from './JourneyBookingFlow';
 import AirTicketButton from './AirTicketButton';
 import JourneyLegRideActions from './JourneyLegRideActions';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 // A finished journey is offered for clearing from our servers once it has been
 // over for this long — always by asking first (see the "clear" banner below).
@@ -40,6 +41,7 @@ export default function JourneyTracker({ customerId, onOpen, compact = false }: 
   const [saved, setSaved] = useState<SavedJourney[]>(() => loadSavedJourneys(customerId));
   // The journey the remove dialog is asking about (set by a journey's Remove button).
   const [confirming, setConfirming] = useState<Journey | null>(null);
+  useBackLayer(!!confirming, () => setConfirming(null));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [clearPromptDismissed, setClearPromptDismissed] = useState(false);

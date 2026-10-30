@@ -13,13 +13,25 @@ import { ThemeToggle } from '../../components/ThemeToggle';
 import { toast } from 'sonner';
 import { consumePendingReferralCode } from '../services/referralService';
 import { PhoneBackButton, type PhoneNav } from '../components/common/PhoneRoleNav';
+import { useBackLayer, useBackDepth } from '../hooks/useBackLayer';
 
 interface UnifiedDashboardProps {
   user: any;
   onSignOut: () => void;
 }
 
-type RoleType = 'developer' | 'chairperson' | 'rider' | 'customer' | 'ican-wallet';
+// 'home' is the phone landing for accounts with more than one role: the header
+// with every role tab and the Wallet, and cards below it. Each one opens as its
+// own full page, and Back returns here.
+type RoleType = 'developer' | 'chairperson' | 'rider' | 'customer' | 'ican-wallet' | 'home';
+
+// developer > chairperson > rider > customer. Chairpersons are always also
+// riders, so chairperson shows first.
+const pickDefaultRole = (roles: string[]): RoleType =>
+  roles.includes('developer') ? 'developer'
+  : roles.includes('chairperson') ? 'chairperson'
+  : roles.includes('rider') ? 'rider'
+  : 'customer';
 
 // Set this right before a reload to land on a specific role once, instead
 // of whatever the hardcoded developer>chairperson>rider>customer priority
@@ -28,6 +40,15 @@ type RoleType = 'developer' | 'chairperson' | 'rider' | 'customer' | 'ican-walle
 // account that also holds a higher-priority role (e.g. chairperson) from
 // unrelated earlier testing.
 export const PREFERRED_ROLE_KEY = 'mbg_preferred_active_role';
+
+// What each card on the phone home screen says (the label itself comes from getRoleLabel).
+const ROLE_CARD: Record<string, { icon: typeof Bike; blurb: string }> = {
+  developer: { icon: Settings, blurb: 'Users, regions, applications and platform settings' },
+  chairperson: { icon: Users, blurb: 'Your committee, riders and commissions' },
+  rider: { icon: Bike, blurb: 'Ride requests, areas and earnings' },
+  customer: { icon: User, blurb: 'Book rides and deliveries, shop and pay' },
+  'ican-wallet': { icon: Wallet, blurb: 'Balance, send, receive and pay' },
+};
 
 // Phone-width viewport (below Tailwind's `sm`), tracked live so rotating a
 // phone or resizing a window switches layouts without a reload.
@@ -124,26 +145,21 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
       // testing would always land back on Chairperson, never Rider.
       const requestedRole = sessionStorage.getItem(PREFERRED_ROLE_KEY);
       sessionStorage.removeItem(PREFERRED_ROLE_KEY);
+      // On a phone, a multi-role account lands on the home screen (header with
+      // every role + Wallet); a requested role opens straight from it, so Back still has somewhere to go.
+      const phoneHub = isPhone && roles.length > 1;
       if (requestedRole && roles.includes(requestedRole)) {
         setActiveRole(requestedRole as RoleType);
+        setRoleTrail(phoneHub ? ['home'] : []);
         return;
       }
 
-      // Set active role based on priority: developer > chairperson > rider > customer
-      // NOTE: Chairpersons are always also riders, so show chairperson first
-      if (roles.includes('developer')) {
-        setActiveRole('developer');
-      } else if (roles.includes('chairperson')) {
-        setActiveRole('chairperson');
+      if (roles.includes('chairperson') && !roles.includes('rider')) {
         // Ensure rider role exists since all chairpersons must be riders
-        if (!roles.includes('rider')) {
-          console.warn('[UnifiedDashboard] Chairperson without rider role detected!');
-        }
-      } else if (roles.includes('rider')) {
-        setActiveRole('rider');
-      } else {
-        setActiveRole('customer');
+        console.warn('[UnifiedDashboard] Chairperson without rider role detected!');
       }
+      setRoleTrail([]);
+      setActiveRole(phoneHub ? 'home' : pickDefaultRole(roles));
     } catch (error) {
       console.error('[UnifiedDashboard] Error loading user roles:', error);
       toast.error('Failed to load user roles');
@@ -153,6 +169,11 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
       setLoading(false);
     }
   };
+
+  // The home screen only exists on phones — on a wider screen fall back to the usual default role.
+  useEffect(() => {
+    if (!isPhone && !loading && activeRole === 'home') setActiveRole(pickDefaultRole(userRoles));
+  }, [isPhone, loading, activeRole, userRoles]);
 
   const goToRole = (next: RoleType) => {
     if (next === activeRole) return;
@@ -167,6 +188,10 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
     setActiveRole(prev);
   };
 
+  // Phone/browser Back walks the role trail (Wallet → Rider → Customer…) one step at a time.
+  useBackDepth(roleTrail.length, goBackRole);
+  useBackLayer(showAccountMenu, () => setShowAccountMenu(false));
+
   const getRoleLabel = (role: string) => {
     switch (role) {
       case 'developer': return 'Developer';
@@ -178,6 +203,7 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
         return 'Rider';
       case 'customer': return 'Customer';
       case 'ican-wallet': return '₡ Wallet';
+      case 'home': return 'Home';
       default: return role;
     }
   };
@@ -192,6 +218,8 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
         return 'from-green-500 to-emerald-500';
       case 'customer':
         return 'from-purple-500 to-pink-500';
+      case 'home':
+        return 'from-orange-500 to-yellow-500';
       default:
         return 'from-slate-500 to-gray-500';
     }
@@ -233,7 +261,11 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
   // and Menu instead (PhoneRoleNav.tsx). Developer keeps the header + tabs.
   if (isPhone && (activeRole === 'customer' || activeRole === 'rider' || activeRole === 'chairperson' || activeRole === 'ican-wallet')) {
     const phoneNav: PhoneNav = {
-      roles: userRoles.filter((r) => r !== activeRole).map((r) => ({ id: r, label: getRoleLabel(r) })),
+      // 'Home' returns to the header with every role + Wallet.
+      roles: [
+        ...(userRoles.length > 1 ? [{ id: 'home', label: 'All roles' }] : []),
+        ...userRoles.filter((r) => r !== activeRole).map((r) => ({ id: r, label: getRoleLabel(r) })),
+      ],
       onSwitchRole: (r) => goToRole(r as RoleType),
       onBackToRole: roleTrail.length > 0 ? goBackRole : undefined,
       onSignOut,
@@ -267,6 +299,7 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
       activeRole === 'developer' ? 'from-blue-50 to-indigo-50' :
       activeRole === 'chairperson' ? 'from-orange-50 to-yellow-50' :
       activeRole === 'rider' ? 'from-green-50 to-emerald-50' :
+      activeRole === 'home' ? 'from-orange-50 to-yellow-50' :
       'from-purple-50 to-pink-50'
     }`}>
       {/* Unified Header with Role Tabs */}
@@ -279,7 +312,7 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
               <div>
                 <h1 className="text-sm xs:text-base sm:text-xl font-bold leading-tight">BodaGoEra</h1>
                 <p className="text-[9px] xs:text-[10px] sm:text-xs opacity-90 hidden xs:block">
-                  {getRoleLabel(activeRole)} Dashboard
+                  {activeRole === 'home' ? 'Choose where to go' : `${getRoleLabel(activeRole)} Dashboard`}
                 </p>
               </div>
             </div>
@@ -370,10 +403,35 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
         {activeRole === 'rider' && <RiderDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => goToRole('ican-wallet')} />}
         {activeRole === 'customer' && <CustomerDashboard user={user} onSignOut={onSignOut} embedded onGoToWallet={() => goToRole('ican-wallet')} />}
         {activeRole === 'ican-wallet' && <ICANWalletPage user={user} />}
+        {activeRole === 'home' && (
+          <div className="container mx-auto space-y-3 px-4 pb-10 pt-5">
+            <p className="font-classic-display text-xl font-semibold text-slate-800">Where to?</p>
+            {[
+              ...userRoles.map((r) => ({ id: r, ...ROLE_CARD[r] })),
+              { id: 'ican-wallet', ...ROLE_CARD['ican-wallet'] },
+            ].filter((c) => c.icon).map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => goToRole(c.id as RoleType)}
+                className="flex w-full items-center gap-4 rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-inset ring-[#c4a052]/25 transition-transform active:scale-[0.99]"
+              >
+                <span className={`grid h-12 w-12 flex-shrink-0 place-items-center rounded-full bg-gradient-to-br text-white shadow-md ${getRoleColor(c.id)}`}>
+                  <c.icon size={22} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-classic-display text-lg font-semibold leading-tight text-slate-800">{getRoleLabel(c.id)}</span>
+                  <span className="mt-0.5 block text-xs text-slate-500">{c.blurb}</span>
+                </span>
+                <ChevronRight size={20} className="flex-shrink-0 text-slate-300" />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <ProfileModal
         user={user}
-        userRole={activeRole === 'ican-wallet' ? (userRoles[0] || 'customer') : activeRole}
+        userRole={activeRole === 'ican-wallet' || activeRole === 'home' ? (userRoles[0] || 'customer') : activeRole}
         userRoles={userRoles}
         isOpen={showProfileModal}
         onClose={() => setShowProfileModal(false)}

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import MobileBottomTabs from '../components/common/MobileBottomTabs';
+import { useBackLayer } from '../hooks/useBackLayer';
 import { userService } from '../services/userService';
 import { roleService } from '../services/roleService';
 import RegionsManagement from '../components/RegionsManagement';
@@ -58,6 +59,9 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
   const [activeTab, setActiveTab] = useState('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  // Phone/browser Back closes the menu first, then walks a sub-section back to Overview.
+  useBackLayer(mobileMenuOpen, () => setMobileMenuOpen(false));
+  useBackLayer(activeTab !== 'overview', () => setActiveTab('overview'));
   const [users, setUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [transportOrders, setTransportOrders] = useState<any[]>([]);

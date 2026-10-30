@@ -17,6 +17,7 @@ import RideCommsBar from './RideCommsBar';
 import DeliveryReceiptCard from './DeliveryReceiptCard';
 import { supabase } from '../services/supabaseClient';
 import type { Location } from '../data/mockLocations';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 export interface TrackedRide {
   id: string;
@@ -53,6 +54,7 @@ export default function RideTrackingModal({
   customerName: string;
   onClose: () => void;
 }) {
+  useBackLayer(true, onClose);
   const pickup = toLocation(ride.pickup_location, ride.pickup_lat, ride.pickup_lng);
   const dropoff = toLocation(ride.dropoff_location, ride.dropoff_lat, ride.dropoff_lng);
   const isLive = ['accepted', 'in_progress'].includes(ride.status) && !!ride.rider_id;
