@@ -14,6 +14,7 @@
     "test:store-lock": "node --test tests/storeLock.test.js",
     "test:markets": "node --test tests/markets.test.js",
     "test:rider-areas": "node --test tests/riderAreas.test.js",
+    "test:delivery-window": "node --test tests/deliveryWindow.test.js",
     "dev": "vite --open",
     "dev:clean": "taskkill /F /IM node.exe & vite --open",
     "build": "vite build",
