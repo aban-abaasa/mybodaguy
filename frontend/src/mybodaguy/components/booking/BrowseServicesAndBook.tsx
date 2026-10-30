@@ -8,6 +8,7 @@ import {
   BookableBusiness,
 } from '../../services/bookingService';
 import BookServiceModal from './BookServiceModal';
+import { servicePriceText } from '../../utils/servicePrice';
 
 interface Identity {
   userId?: string | null;
@@ -50,11 +51,11 @@ const norm = (s?: string | null) => (s || '').toString().toLowerCase();
 // BookServiceModal, plus this customer's own bookings. Ported from
 // digital-city-era's BrowseServicesAndBook.jsx against the same shared
 // tables/RPCs so both apps' customers get the same search experience.
-export default function BrowseServicesAndBook({ identity }: { identity: Identity }) {
+export default function BrowseServicesAndBook({ identity, initialSearch = '' }: { identity: Identity; initialSearch?: string }) {
   const [services, setServices] = useState<BookableServiceWithBusiness[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(initialSearch);
   const [businessType, setBusinessType] = useState('all');
   const [businessId, setBusinessId] = useState<string | null>(null);
   const [bookingService, setBookingService] = useState<BookableServiceWithBusiness | null>(null);
@@ -215,9 +216,9 @@ export default function BrowseServicesAndBook({ identity }: { identity: Identity
                       </p>
                     )}
                     {svc.description && <p className="text-xs text-gray-400 mt-1 line-clamp-2">{svc.description}</p>}
-                    {(svc.selling_price || svc.price) && (
-                      <p className="text-sm font-semibold text-blue-600 mt-1">UGX {svc.selling_price || svc.price}</p>
-                    )}
+                    <p className="text-sm font-semibold text-blue-600 mt-1">
+                      {servicePriceText({ price_ugx: Number(svc.selling_price || svc.price) || 0, price_max: svc.price_max }, (n) => `UGX ${n.toLocaleString()}`)}
+                    </p>
                   </div>
                 </button>
               );

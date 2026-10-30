@@ -115,7 +115,10 @@ function cartTotals(cart: CartItem[]) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-export default function CustomerSelfCheckout({ user }: { user: any }) {
+/** A service the customer chose in the Shop: the dashboard opens its Book screen for it. */
+export type BookableServiceRef = { id: string; name: string; is_bookable?: boolean };
+
+export default function CustomerSelfCheckout({ user, onBookService }: { user: any; onBookService?: (service: BookableServiceRef) => void }) {
   const [state, setState] = useState<ScannerState>('idle');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [icanPrice, setIcanPrice] = useState<number>(ICAN_TO_UGX);
@@ -309,7 +312,11 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
     const product = { ...(data[0] as Product), supermarket_id: selectedSupermarketId };
 
     if (!product.in_stock) {
-      setScanError(`${product.name} is out of stock`);
+      // A service has no stock to run out of: it is booked, not scanned and paid for at the till.
+      const { data: kind } = await supabase.from('products').select('inventory_mode').eq('id', product.product_id).maybeSingle();
+      setScanError(kind?.inventory_mode === 'service_item'
+        ? `${product.name} is a service, so it can't be scanned and paid for here. Book it from Services in the Shop.`
+        : `${product.name} is out of stock`);
       setState('idle');
       return;
     }
@@ -929,6 +936,7 @@ export default function CustomerSelfCheckout({ user }: { user: any }) {
                 syncQty={pickerSync}
                 onCartChange={handleBrowseCartChange}
                 onOpenCart={() => setState('cart')}
+                onBookService={onBookService}
                 fullPage
               />
             </div>

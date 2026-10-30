@@ -28,6 +28,12 @@ export interface Product {
   /** How many customers subscribe to the store, and whether the signed-in customer is one of them. */
   store_followers?: number;
   store_followed?: boolean;
+  /** A service has no stock: it is booked or quoted, never put in a cart. Only set on products from getServices(). */
+  is_service?: boolean;
+  /** Top of a service price range (price_ugx is then the lowest price); null for a single price or a quote. */
+  price_max?: number | null;
+  is_bookable?: boolean;
+  booking_type?: 'slot' | 'ticket' | 'room' | null;
 }
 
 export interface ProductInput {
@@ -221,7 +227,87 @@ async function getRankedProductsPage(q: ProductPageQuery, pageSize: number, from
   return { products, hasMore };
 }
 
+// Which of these products are services. Best effort: a project without the service columns answers "none", so the
+// shop keeps listing exactly what it listed before.
+async function fetchServiceIds(ids: string[]): Promise<Set<string>> {
+  const found = new Set<string>();
+  if (ids.length === 0) return found;
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 100) chunks.push(ids.slice(i, i + 100));
+  try {
+    const pages = await Promise.all(chunks.map(async (chunk) => {
+      const flagged = await supabase.from('products').select('id').in('id', chunk).or('inventory_mode.eq.service_item,is_service.eq.true');
+      if (!flagged.error) return flagged;
+      return supabase.from('products').select('id').in('id', chunk).eq('inventory_mode', 'service_item');
+    }));
+    pages.forEach((res: any) => (res.data || []).forEach((r: any) => found.add(r.id)));
+  } catch { /* leave the list as it is */ }
+  return found;
+}
+
+// Services never belong in the goods grid: they have no stock, so they showed as "Out of stock" and could not be bought.
+async function withoutServices(page: ProductPage): Promise<ProductPage> {
+  if (page.products.length === 0) return page;
+  const services = await fetchServiceIds(page.products.map(p => p.id));
+  return services.size === 0 ? page : { ...page, products: page.products.filter(p => !services.has(p.id)) };
+}
+
+const SERVICES_LIMIT = 200;
+
+export interface ServiceQuery {
+  /** One store, or omit/null for every store. */
+  supermarketId?: string | null;
+  /** All-stores view only: stores whose services must not be listed (e.g. stores abroad). */
+  excludeStoreIds?: string[];
+  search?: string;
+}
+
 export const productService = {
+  // The store's (or every store's) services: active items with no stock to track, booked or quoted rather than carted.
+  // Resolves [] when the project cannot list them, so the shop simply shows no Services view.
+  async getServices(q: ServiceQuery = {}): Promise<Product[]> {
+    const term = cleanSearchTerm(q.search ?? '');
+    const build = (o: { flag: boolean; extra: boolean; activeStores: boolean }) => {
+      let query = supabase
+        .from('products')
+        .select(`${PRODUCT_COLUMNS}${o.extra ? ', price_max, is_bookable, booking_type' : ''}, categories(name)${o.activeStores ? ', supermarkets!inner(is_active)' : ''}`)
+        .eq('is_active', true)
+        .order('name')
+        .limit(SERVICES_LIMIT);
+      query = o.flag ? query.or('inventory_mode.eq.service_item,is_service.eq.true') : query.eq('inventory_mode', 'service_item');
+      if (q.supermarketId) query = query.eq('supermarket_id', q.supermarketId);
+      else {
+        if (q.excludeStoreIds?.length) query = query.not('supermarket_id', 'in', `(${q.excludeStoreIds.join(',')})`);
+        if (o.activeStores) query = query.eq('supermarkets.is_active', true);
+      }
+      if (term) query = query.or(`name.ilike.%${term}%,description.ilike.%${term}%`);
+      return query;
+    };
+    const attempts = [
+      { flag: true, extra: true, activeStores: !q.supermarketId },
+      { flag: true, extra: false, activeStores: false },
+      { flag: false, extra: false, activeStores: false },
+    ];
+    let rows: any[] | null = null;
+    for (const a of attempts) {
+      const { data, error } = await build(a);
+      if (!error) { rows = data || []; break; }
+    }
+    if (!rows) return [];
+    return rows.map((r: any) => {
+      const base = mapProductRow(r, new Map());
+      const top = Number(r.price_max) || 0;
+      return {
+        ...base,
+        is_service: true,
+        stock_qty: 0,
+        price_max: top > base.price_ugx ? top : null,
+        is_bookable: !!r.is_bookable,
+        booking_type: r.booking_type ?? null,
+      } as Product;
+    });
+  },
+
   // One page of active products, filtered on the server (store, search,
   // category) and ordered by store rating and subscriptions (see
   // getRankedProductsPage), or newest first where that is not installed. The
@@ -231,7 +317,7 @@ export const productService = {
     const pageSize = q.pageSize ?? PRODUCT_PAGE_SIZE;
     const from = q.page * pageSize;
     const ranked = await getRankedProductsPage(q, pageSize, from);
-    if (ranked) return ranked;
+    if (ranked) return withoutServices(ranked);
     const byCategory = !!q.category && q.category !== 'Other';
     const term = cleanSearchTerm(q.search ?? '');
     // In the all-stores view, products of deactivated stores stay hidden.
@@ -262,7 +348,7 @@ export const productService = {
     const hasMore = rows.length > pageSize;
     const pageRows = hasMore ? rows.slice(0, pageSize) : rows;
     const stock = await fetchStockFor(pageRows.map((r: any) => r.id));
-    return { products: pageRows.map((r: any) => mapProductRow(r, stock)), hasMore };
+    return withoutServices({ products: pageRows.map((r: any) => mapProductRow(r, stock)), hasMore });
   },
 
   // Specific products, e.g. to restore a basket started on another screen.
