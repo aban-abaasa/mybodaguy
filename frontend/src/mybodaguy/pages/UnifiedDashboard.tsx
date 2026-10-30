@@ -28,7 +28,23 @@ type RoleType = 'developer' | 'chairperson' | 'rider' | 'customer' | 'ican-walle
 // unrelated earlier testing.
 export const PREFERRED_ROLE_KEY = 'mbg_preferred_active_role';
 
+// Phone-width viewport (below Tailwind's `sm`), tracked live so rotating a
+// phone or resizing a window switches layouts without a reload.
+function useIsPhone() {
+  const query = '(max-width: 639px)';
+  const [isPhone, setIsPhone] = useState(() => typeof window !== 'undefined' && window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const onChange = () => setIsPhone(mq.matches);
+    onChange();
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
+  return isPhone;
+}
+
 export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardProps) {
+  const isPhone = useIsPhone();
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const [activeRole, setActiveRole] = useState<RoleType>('customer');
   const [loading, setLoading] = useState(true);
@@ -190,6 +206,23 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
       case 'customer':
         return <CustomerDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />;
     }
+  }
+
+  // Phones: tapping Customer hands over the whole screen. The shared brand
+  // header + role-tab strip would cost ~90px of a small viewport on top of
+  // Customer's own section bar and bottom tabs, so Customer renders alone and
+  // offers the other roles (and sign-out) from its Menu sheet instead.
+  if (isPhone && activeRole === 'customer') {
+    return (
+      <CustomerDashboard
+        user={user}
+        onSignOut={onSignOut}
+        fullScreen
+        otherRoles={userRoles.filter((r) => r !== 'customer').map((r) => ({ id: r, label: getRoleLabel(r) }))}
+        onSwitchRole={(r) => setActiveRole(r as RoleType)}
+        onGoToWallet={() => setActiveRole('ican-wallet')}
+      />
+    );
   }
 
   // User has multiple roles - show tabs

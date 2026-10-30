@@ -43,6 +43,13 @@ interface CustomerDashboardProps {
   // shows its own brand/avatar header above this one — skips this
   // component's own <header> so a multi-role account doesn't get two.
   embedded?: boolean;
+  // Phone only: UnifiedDashboard hands the whole screen to the Customer view
+  // (no brand row, no role-tab strip above it). Role switching and sign-out
+  // then live in the Menu sheet below, so nothing is lost by the missing header.
+  fullScreen?: boolean;
+  // The account's other roles, offered in the Menu sheet as "Switch role".
+  otherRoles?: { id: string; label: string }[];
+  onSwitchRole?: (role: string) => void;
   // Switches UnifiedDashboard's internal activeRole to 'ican-wallet'. This
   // app has no router (no path ever gets registered for it), so the old
   // `window.location.href = '/ican-wallet'` on every wallet button here was
@@ -194,7 +201,7 @@ function RideListItem({
 }
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
-export default function CustomerDashboard({ user, onSignOut, embedded = false, onGoToWallet }: CustomerDashboardProps) {
+export default function CustomerDashboard({ user, onSignOut, embedded = false, fullScreen = false, otherRoles = [], onSwitchRole, onGoToWallet }: CustomerDashboardProps) {
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
   const [activeTab, setActiveTab]       = useState<TabType>('overview');
   // A service picked in the Shop opens the Book screen already searching for it.
@@ -625,7 +632,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         {/* Row 1 — brand + user (skipped when embedded — UnifiedDashboard already shows this).
             safe-top keeps the brand clear of the notch / status bar when installed as a PWA
             (index.html sets a black-translucent status bar). */}
-        {!embedded && (
+        {!embedded && !fullScreen && (
           <div className="safe-top bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 text-white">
             <div className="container mx-auto px-4">
               <div className="flex items-center justify-between h-16">
@@ -681,7 +688,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             trigger (opens the bottom sheet rendered at the end of this
             component). Same bar whether standalone or embedded in
             UnifiedDashboard, which already shows its own avatar above. */}
-        <div className="sm:hidden bg-white border-b border-[#c4a052]/25 dark:border-slate-700">
+        <div className={`sm:hidden bg-white border-b border-[#c4a052]/25 dark:border-slate-700 ${fullScreen ? 'safe-top' : ''}`}>
           <div className="px-4 h-12 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <ActiveTabIcon size={17} className="flex-shrink-0 text-orange-500" />
@@ -1208,6 +1215,29 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                 <span className="text-[11px] font-semibold leading-tight text-violet-700">ICAN Wallet</span>
               </button>
             </div>
+
+            {/* Full-screen phone mode has no role strip or sign-out above, so they live here. */}
+            {fullScreen && (
+              <div className="px-4 pb-2 pt-4">
+                {otherRoles.length > 0 && onSwitchRole && (
+                  <>
+                    <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Switch role</p>
+                    <div className="flex flex-wrap gap-2">
+                      {otherRoles.map(r => (
+                        <button key={r.id} type="button" onClick={() => { setMobileMenu(false); onSwitchRole(r.id); }}
+                          className="rounded-full border border-[#c4a052]/40 bg-[#faf8f3] px-4 py-2 text-xs font-semibold text-slate-700 active:scale-95 transition-transform">
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+                <button type="button" onClick={() => { setMobileMenu(false); onSignOut(); }}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-red-50 py-3 text-sm font-semibold text-red-600 ring-1 ring-inset ring-red-100 active:scale-[0.99] transition-transform">
+                  <LogOut size={16} /> Sign Out
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
