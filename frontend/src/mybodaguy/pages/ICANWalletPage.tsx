@@ -28,6 +28,7 @@ import BuyIcan from '../components/BuyIcan';
 import SellIcan from '../components/SellIcan';
 import SendIcanOut from '../components/SendIcanOut';
 import SetPinPrompt from '../components/SetPinPrompt';
+import { useBackLayer } from '../hooks/useBackLayer';
 import PayMoneyModal from '../components/PayMoneyModal';
 import ReceiveMoneyModal from '../components/ReceiveMoneyModal';
 import {
@@ -429,6 +430,8 @@ export default function ICANWalletPage({ user }: ICANWalletPageProps) {
   const [historyOpen, setHistoryOpen] = useState(false); // collapsed until asked for
   const [query, setQuery] = useState('');
   const [modal, setModal] = useState<WalletAction | 'qr' | null>(null);
+  // Receive / Pay are full-screen modals with no WalletSheet around them, so give them their own Back layer.
+  useBackLayer((modal === 'receive' && !!balance.address) || modal === 'pay', () => setModal(null));
   const [selectedTx, setSelectedTx] = useState<ICANTransaction | null>(null);
   const [paymentReceipt, setPaymentReceipt] = useState<any>(null);
   const [paymentReceiptWebsite, setPaymentReceiptWebsite] = useState(typeof window !== 'undefined' ? window.location.origin : 'https://bodagoera.icanera.space');

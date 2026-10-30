@@ -23,6 +23,7 @@ import { toast } from 'sonner';
 import { supabase } from '../services/supabaseClient';
 import { Linkify } from '../utils/linkify';
 import { ChatAvatar } from '../utils/avatar';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 interface RideMessage {
   id: string;
@@ -88,6 +89,7 @@ export default function RideChatModal({
   onClose,
   quickReplies = DEFAULT_QUICK_REPLIES,
 }: RideChatModalProps) {
+  useBackLayer(isOpen, onClose);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);

@@ -10,6 +10,7 @@ import {
 } from '../services/rewardsService';
 import ReferralCard from './ReferralCard';
 import CoverPointsTile from './cover/CoverPointsTile';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 interface Props {
   user: any;
@@ -272,6 +273,7 @@ function RedeemItemModal({
 }: {
   item: RewardCatalogItem; userId: string; onClose: () => void; onRedeemed: () => void;
 }) {
+  useBackLayer(true, onClose);
   const [address, setAddress] = useState('');
   const [phone, setPhone] = useState('');
   const [submitting, setSubmitting] = useState(false);

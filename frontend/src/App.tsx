@@ -11,6 +11,7 @@ import ChatWidget from "./mybodaguy/components/ChatWidget";
 import CountryGate from "./mybodaguy/components/CountryGate";
 import DecoyPortal from "./mybodaguy/components/security/DecoyPortal";
 import HiddenDecoyLinks from "./mybodaguy/components/security/HiddenDecoyLinks";
+import { useBackLayer } from "./mybodaguy/hooks/useBackLayer";
 
 export default function App() {
   const [user, setUser] = useState<any>(null);
@@ -18,6 +19,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [showAuth, setShowAuth] = useState(false);
   const [isRecoveryMode, setIsRecoveryMode] = useState(false);
+  // Phone Back on the sign-in page returns to the landing page instead of leaving the app.
+  useBackLayer(showAuth && !user, () => setShowAuth(false));
   const [isDecoyPortalPath] = useState(
     () => typeof window !== 'undefined' && window.location.pathname === '/decoy-portal'
   );

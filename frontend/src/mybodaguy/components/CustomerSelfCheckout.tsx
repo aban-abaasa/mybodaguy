@@ -22,6 +22,7 @@ import { hasPinSet, verifyPin, validatePIN } from '../services/pinService';
 import { getStoreSiteForCustomer, getStoreWebsiteUrl } from '../services/storeWebsite';
 import { buildApprovalUrl, downloadReceiptPdf, type StoreReceipt } from '../services/receiptPdf';
 import ShopStoreChooser from './ShopStoreChooser';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -154,6 +155,8 @@ export default function CustomerSelfCheckout({ user, onBookService }: { user: an
   // A store the customer picked while their cart still holds another store's products —
   // waits for them to confirm that the cart will be cleared.
   const [pendingStoreId, setPendingStoreId] = useState('');
+  useBackLayer(!!pendingStoreId, () => setPendingStoreId(''));
+  useBackLayer(pinOpen, () => setPinOpen(false));
 
   const rootRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);

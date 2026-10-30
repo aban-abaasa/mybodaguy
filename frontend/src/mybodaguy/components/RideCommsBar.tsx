@@ -12,6 +12,7 @@ import CallController from './CallController';
 import RideChatModal from './RideChatModal';
 import { sendICAN, formatICAN } from '../services/icanWalletService';
 import { verifyPin } from '../services/pinService';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 interface RideCommsBarProps {
   rideId: string;
@@ -27,6 +28,7 @@ export default function RideCommsBar({ rideId, selfUserId, selfName, peerUserId,
   const [outgoingRequest, setOutgoingRequest] = useState<'voice' | 'video' | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [sendOpen, setSendOpen] = useState(false);
+  useBackLayer(sendOpen, () => setSendOpen(false));
   const [sendAmount, setSendAmount] = useState('');
   const [sendPin, setSendPin] = useState('');
   const [sending, setSending] = useState(false);

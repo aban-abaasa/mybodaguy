@@ -8,6 +8,7 @@ import { regionsService, District, Division, Subcounty, Parish, Stage } from '..
 import { chairpersonService, ChairpersonRole } from '../services/chairpersonService';
 import { userService } from '../services/userService';
 import { supabase } from '../services/supabaseClient';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 export default function RegionsManagement() {
   const [districts, setDistricts] = useState<District[]>([]);
@@ -288,6 +289,7 @@ function DistrictCard({
 
 // Add District Modal
 function AddDistrictModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  useBackLayer(true, onClose);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [description, setDescription] = useState('');
@@ -614,6 +616,7 @@ function AssignChairpersonModal({
   onClose: () => void;
   onSuccess: () => void;
 }) {
+  useBackLayer(true, onClose);
   const [users, setUsers] = useState<any[]>([]);
   const [selectedUserId, setSelectedUserId] = useState('');
   const [changingUser, setChangingUser] = useState(false);
@@ -1265,6 +1268,7 @@ function StageCard({ stage, onAssignChairperson }: any) {
 
 // Add Region Modal (for Divisions, Subcounties, Parishes, Stages)
 function AddRegionModal({ regionType, parentId, parentName, onClose, onSuccess }: any) {
+  useBackLayer(true, onClose);
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [description, setDescription] = useState('');

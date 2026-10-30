@@ -5,6 +5,7 @@ import TicketPicker, { TicketSelection } from './TicketPicker';
 import RoomPicker, { RoomSelection } from './RoomPicker';
 import BookingChatCallPanel from './BookingChatCallPanel';
 import { createBooking, BookableService } from '../../services/bookingService';
+import { useBackLayer } from '../../hooks/useBackLayer';
 
 interface Identity {
   userId?: string | null;
@@ -41,6 +42,7 @@ const confirmLabel = (bookingType: string, selected: Selection) => {
 // is shown. Ported from digital-city-era's BookServiceModal.jsx against the
 // same shared RPCs.
 export default function BookServiceModal({ service, businessName, identity, onClose }: BookServiceModalProps) {
+  useBackLayer(true, onClose);
   const bookingType = service.booking_type || 'slot';
   const [selected, setSelected] = useState<Selection>(null);
   const [name, setName] = useState(identity?.name || '');

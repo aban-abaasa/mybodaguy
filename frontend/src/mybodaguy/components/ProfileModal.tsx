@@ -4,6 +4,7 @@ import { supabase } from '../services/supabaseClient';
 import { avatarService } from '../services/avatarService';
 import { toast } from 'sonner';
 import RingtonePicker from './RingtonePicker';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 interface ProfileModalProps {
   user: any;
@@ -31,6 +32,7 @@ interface ProfileData {
 }
 
 export default function ProfileModal({ user, userRole, userRoles = [], isOpen, onClose, onSaved }: ProfileModalProps) {
+  useBackLayer(isOpen, onClose);
   const roles = userRoles.length > 0 ? userRoles : userRolesFor(userRole);
   const isChairperson = roles.includes('chairperson');
   const isOperator = roles.includes('rider');

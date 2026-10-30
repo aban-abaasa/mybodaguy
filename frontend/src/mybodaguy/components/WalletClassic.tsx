@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowDown, ArrowUp, Banknote, Check, Copy, Eye, EyeOff, QrCode, RefreshCw, ScanLine, ShoppingCart, X } from 'lucide-react';
 import { QRCodeCanvas } from 'qrcode.react';
 import { toast } from 'sonner';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 /**
  * The classic ivory / ink / gold pieces of the IcanEra wallet page: the engraved
@@ -13,6 +14,7 @@ import { toast } from 'sonner';
 
 /** A dialog that rises from the bottom on a phone and centres on a larger screen. */
 export function WalletSheet({ title, onClose, children, z = 50 }: { title: string; onClose: () => void; children: ReactNode; z?: number }) {
+  useBackLayer(true, onClose);
   const panelRef = useRef<HTMLDivElement>(null);
 
   // Escape closes, and the page behind stops scrolling while the sheet is open.

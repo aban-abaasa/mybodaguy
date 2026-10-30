@@ -31,6 +31,7 @@ import { formatWindow, deadlineLabel, DEFAULT_WINDOW_HOURS } from '../utils/deli
 import DeliveryWindowPicker from './DeliveryWindowPicker';
 import { zoneAccessService } from '../services/zoneAccessService';
 import { useVehicleClassQuotes, describeRates, formatUgxShort, CARGO_CLASSES, type CargoClass, type VehicleClassQuote } from '../services/vehicleRateService';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 type RideStatus = 'searching' | 'waiting_acceptance' | 'accepted' | 'declined' | 'journey_started' | 'completed';
 type ServiceType = 'ride' | 'delivery';
@@ -642,6 +643,7 @@ export default function EnhancedRideRequest({ customerId, fixedServiceType, show
   // items, the store or the payment method change.
   const [goodsPinVerified, setGoodsPinVerified] = useState(false);
   const [goodsPinOpen, setGoodsPinOpen] = useState(false);
+  useBackLayer(goodsPinOpen, () => setGoodsPinOpen(false));
   const [goodsPinNeedsSet, setGoodsPinNeedsSet] = useState(false);
   const [goodsPinUserId, setGoodsPinUserId] = useState('');
   const [goodsPin, setGoodsPin] = useState('');

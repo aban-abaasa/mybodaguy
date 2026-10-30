@@ -10,6 +10,7 @@
 import { useEffect, useRef } from 'react';
 import { ShoppingBasket, Store } from 'lucide-react';
 import { formatDistance } from '../utils/storeLock';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 export interface StripStore {
   id: string;
@@ -122,6 +123,7 @@ interface PromptProps {
 }
 
 export function StoreSwitchPrompt({ cartStoreName, cartCount, targetStoreName, productName, onKeep, onSwitch }: PromptProps) {
+  useBackLayer(true, onKeep);
   const keepRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     keepRef.current?.focus();

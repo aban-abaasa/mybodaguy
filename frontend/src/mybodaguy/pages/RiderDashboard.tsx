@@ -11,6 +11,7 @@ import type { WorkMode } from '../utils/riderSmarts';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import { useNewMarketAlerts } from '../hooks/useNewMarketAlerts';
 import { PhoneBackButton, PhoneRoleSection, type PhoneNav } from '../components/common/PhoneRoleNav';
+import { useBackLayer } from '../hooks/useBackLayer';
 import ProfileModal from '../components/ProfileModal';
 import MobileBottomTabs from '../components/common/MobileBottomTabs';
 import RiderICANEarnings from '../components/RiderICANEarnings';
@@ -367,6 +368,9 @@ export default function RiderDashboard({ user, onGoToWallet, phoneNav }: RiderDa
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  // Phone/browser Back closes the menu first, then walks a sub-section back to Overview.
+  useBackLayer(showMobileMenu, () => setShowMobileMenu(false));
+  useBackLayer(activeTab !== 'overview', () => setActiveTab('overview'));
   const voteAttention = useLeadershipAttention(user?.id);
   // A new business opening is announced wherever the rider is; the Markets tab carries the unread count.
   const marketAlerts = useNewMarketAlerts(user?.id, () => { setActiveTab('partnerships'); setShowMobileMenu(false); });

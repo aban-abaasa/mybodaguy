@@ -4,6 +4,7 @@ import { QRCodeCanvas as QRCode } from 'qrcode.react';
 import QRCodeImage from 'qrcode';
 import { supabase } from '../../services/supabaseClient';
 import { getStoreWebsiteUrl } from '../services/storeWebsite';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 interface DeliveryReceiptCardProps {
   verificationCode: string;
@@ -20,6 +21,7 @@ interface DeliveryReceiptCardProps {
 // see icanera_verify_delivery_receipt in
 // ICAN/backend/ADD_DELIVERY_RECEIPT_VERIFICATION.sql.
 export default function DeliveryReceiptCard({ verificationCode, verifyUrl, storeName, onClose }: DeliveryReceiptCardProps) {
+  useBackLayer(true, onClose);
   const [storeWebsiteUrl, setStoreWebsiteUrl] = useState(typeof window !== 'undefined' ? window.location.origin : 'https://bodagoera.icanera.space');
   useEffect(() => {
     let cancelled = false;

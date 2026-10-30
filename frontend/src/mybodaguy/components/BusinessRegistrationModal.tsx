@@ -4,6 +4,7 @@ import { ClassicField } from './common/classicForm';
 import { supabase } from '../../services/supabaseClient';
 import { businessService, validateRegistration, type BusinessCategory, type RegistrationInput } from '../services/businessService';
 import { RegistrationFields, emptyRegistration } from './BusinessRegistrationFields';
+import { useBackLayer } from '../hooks/useBackLayer';
 
 export type { BusinessCategory };
 
@@ -20,6 +21,7 @@ const CATEGORY_META: Record<BusinessCategory, { label: string; icon: typeof Truc
 };
 
 export default function BusinessRegistrationModal({ category, onClose, onCreated }: BusinessRegistrationModalProps) {
+  useBackLayer(true, onClose);
   const [businessName, setBusinessName] = useState('');
   const [description, setDescription] = useState('');
   const [homeCity, setHomeCity] = useState('');
