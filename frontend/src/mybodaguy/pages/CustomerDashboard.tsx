@@ -35,6 +35,7 @@ import MapReveal from '../components/MapReveal';
 import InsightSlider, { type InsightSlide } from '../components/InsightSlider';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { ThemeToggle } from '../../components/ThemeToggle';
+import { PhoneBackButton, PhoneRoleSection, type PhoneNav } from '../components/common/PhoneRoleNav';
 
 interface CustomerDashboardProps {
   user: any;
@@ -43,6 +44,10 @@ interface CustomerDashboardProps {
   // shows its own brand/avatar header above this one — skips this
   // component's own <header> so a multi-role account doesn't get two.
   embedded?: boolean;
+  // Phone only: UnifiedDashboard hands the whole screen to this view (no brand
+  // row, no role-tab strip above it). Back, role switching and sign-out then
+  // live in the section bar and Menu sheet, so nothing is lost by the missing header.
+  phoneNav?: PhoneNav;
   // Switches UnifiedDashboard's internal activeRole to 'ican-wallet'. This
   // app has no router (no path ever gets registered for it), so the old
   // `window.location.href = '/ican-wallet'` on every wallet button here was
@@ -194,7 +199,7 @@ function RideListItem({
 }
 
 // ── Main Dashboard ────────────────────────────────────────────────────────────
-export default function CustomerDashboard({ user, onSignOut, embedded = false, onGoToWallet }: CustomerDashboardProps) {
+export default function CustomerDashboard({ user, onSignOut, embedded = false, phoneNav, onGoToWallet }: CustomerDashboardProps) {
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
   const [activeTab, setActiveTab]       = useState<TabType>('overview');
   // A service picked in the Shop opens the Book screen already searching for it.
@@ -625,7 +630,7 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         {/* Row 1 — brand + user (skipped when embedded — UnifiedDashboard already shows this).
             safe-top keeps the brand clear of the notch / status bar when installed as a PWA
             (index.html sets a black-translucent status bar). */}
-        {!embedded && (
+        {!embedded && !phoneNav && (
           <div className="safe-top bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 text-white">
             <div className="container mx-auto px-4">
               <div className="flex items-center justify-between h-16">
@@ -681,9 +686,10 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
             trigger (opens the bottom sheet rendered at the end of this
             component). Same bar whether standalone or embedded in
             UnifiedDashboard, which already shows its own avatar above. */}
-        <div className="sm:hidden bg-white border-b border-[#c4a052]/25 dark:border-slate-700">
+        <div className={`sm:hidden bg-white border-b border-[#c4a052]/25 dark:border-slate-700 ${phoneNav ? 'safe-top' : ''}`}>
           <div className="px-4 h-12 flex items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
+              <PhoneBackButton nav={phoneNav} atHome={activeTab === 'overview'} onHome={() => setActiveTab('overview')} />
               <ActiveTabIcon size={17} className="flex-shrink-0 text-orange-500" />
               <h1 className="font-classic-display text-[18px] font-semibold leading-none text-slate-800 truncate">
                 {activeTabMeta.label}
@@ -1208,6 +1214,8 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
                 <span className="text-[11px] font-semibold leading-tight text-violet-700">ICAN Wallet</span>
               </button>
             </div>
+
+            <PhoneRoleSection nav={phoneNav} onDone={() => setMobileMenu(false)} />
           </div>
         </div>
       )}

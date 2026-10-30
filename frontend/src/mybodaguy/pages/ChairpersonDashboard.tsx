@@ -16,6 +16,7 @@ import { riderCardService, isFreshRequest, timeAgo, type RiderCard } from '../se
 import IcanCoinCard from '../components/IcanCoinCard';
 import LeadershipVote, { useLeadershipAttention } from '../components/LeadershipVote';
 import { ThemeMenuItem } from '../../components/ThemeToggle';
+import { PhoneBackButton, PhoneRoleSection, type PhoneNav } from '../components/common/PhoneRoleNav';
 import { SectionHeading, greetingForHour } from '../components/ClassicBits';
 import { toast } from 'sonner';
 
@@ -25,11 +26,13 @@ interface ChairpersonDashboardProps {
   // See CustomerDashboard.tsx's onGoToWallet doc — switches UnifiedDashboard's
   // internal activeRole instead of a hard-navigating to a URL nothing serves.
   onGoToWallet?: () => void;
+  // Phone only: UnifiedDashboard gives this view the whole screen (see PhoneRoleNav.tsx).
+  phoneNav?: PhoneNav;
 }
 
 type TabType = 'overview' | 'subordinates' | 'riders' | 'cards' | 'vote' | 'commission';
 
-export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: ChairpersonDashboardProps) {
+export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet, phoneNav }: ChairpersonDashboardProps) {
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
   const [myCommitteeInfo, setMyCommitteeInfo] = useState<CommitteeMember | null>(null);
   const [allAssignments, setAllAssignments] = useState<CommitteeMember[]>([]);
@@ -371,9 +374,10 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
           so this is the current section in serif plus one Menu trigger (the
           "Profile Avatar Menu" on the no-committee fallback screen is the
           exception, untouched). */}
-      <div className="md:hidden bg-white border-b border-[#c4a052]/25 dark:border-slate-700 sticky top-12 xs:top-14 z-40">
+      <div className={`md:hidden bg-white border-b border-[#c4a052]/25 dark:border-slate-700 sticky z-40 ${phoneNav ? 'top-0 safe-top' : 'top-12 xs:top-14'}`}>
         <div className="px-4 h-12 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
+            <PhoneBackButton nav={phoneNav} atHome={activeTab === 'overview'} onHome={() => setActiveTab('overview')} />
             <ActiveTabIcon size={17} className="flex-shrink-0 text-orange-500" />
             <h1 className="font-classic-display text-[18px] font-semibold leading-none text-slate-800 truncate">
               {activeTabMeta.label}
@@ -432,6 +436,7 @@ export default function ChairpersonDashboard({ user, onSignOut, onGoToWallet }: 
                 <span className="text-sm font-medium">My Profile</span>
               </button>
               <ThemeMenuItem onClick={() => setShowMobileMenu(false)} />
+              <PhoneRoleSection nav={phoneNav} onDone={() => setShowMobileMenu(false)} />
             </div>
           </>
         )}
