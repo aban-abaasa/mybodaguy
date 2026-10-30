@@ -29,6 +29,8 @@ export interface BookableService {
   price: number | null;
   image_url: string | null;
   booking_type: BookingType;
+  /** Top of a price range (selling_price is then the lowest price); null for a single price or a quote. */
+  price_max?: number | null;
 }
 
 export interface AvailableSlot {
@@ -51,7 +53,7 @@ export const getBusinessesOfferingServices = async (): Promise<BookableBusiness[
 export const getBookableServices = async (supermarketId: string): Promise<BookableService[]> => {
   const { data, error } = await supabase
     .from('products')
-    .select('id, name, description, selling_price, price, image_url, booking_type')
+    .select('id, name, description, selling_price, price, price_max, image_url, booking_type')
     .eq('supermarket_id', supermarketId)
     .eq('inventory_mode', 'service_item')
     .eq('is_bookable', true)
@@ -77,7 +79,7 @@ export const searchBookableServices = async (): Promise<BookableServiceWithBusin
   const { data, error } = await supabase
     .from('products')
     .select(
-      'id, name, description, selling_price, price, image_url, supermarket_id, booking_type,' +
+      'id, name, description, selling_price, price, price_max, image_url, supermarket_id, booking_type,' +
         ' supermarkets!inner(id, name, business_type, logo_url, city, address, offers_services, is_active)'
     )
     .eq('inventory_mode', 'service_item')

@@ -197,6 +197,8 @@ function RideListItem({
 export default function CustomerDashboard({ user, onSignOut, embedded = false, onGoToWallet }: CustomerDashboardProps) {
   const goToWallet = onGoToWallet ?? (() => { window.location.href = '/ican-wallet'; });
   const [activeTab, setActiveTab]       = useState<TabType>('overview');
+  // A service picked in the Shop opens the Book screen already searching for it.
+  const [bookSearch, setBookSearch]     = useState('');
   const [mobileMenuOpen, setMobileMenu] = useState(false);
   // Plans waiting on the customer (deposit due, overdue, ready to collect…) — the red
   // number on the Installments icon. Re-read whenever the customer leaves that tab,
@@ -950,7 +952,12 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         )}
 
         {/* Shop / Scan + POS */}
-        {activeTab === 'shop' && <CustomerSelfCheckout user={user} />}
+        {activeTab === 'shop' && (
+          <CustomerSelfCheckout
+            user={user}
+            onBookService={(service) => { setBookSearch(service.name); setActiveTab('book-service'); }}
+          />
+        )}
 
         {/* Book — appointment-style service bookings against the same
             shared service_bookings tables digital-city-era's Book tab uses,
@@ -958,6 +965,8 @@ export default function CustomerDashboard({ user, onSignOut, embedded = false, o
         {activeTab === 'book-service' && (
           <div className="classic-card overflow-hidden">
             <BrowseServicesAndBook
+              key={bookSearch}
+              initialSearch={bookSearch}
               identity={{
                 userId: user?.id,
                 name: user?.user_metadata?.full_name || user?.email || 'Customer',

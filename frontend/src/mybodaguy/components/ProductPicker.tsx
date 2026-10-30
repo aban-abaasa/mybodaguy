@@ -9,8 +9,9 @@
  * pages, so it survives any search, category or store change.
  */
 import { memo, useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Minus, Plus, Image as ImageIcon, ShoppingCart, Search, Store, X, Loader2, Star } from 'lucide-react';
+import { Minus, Plus, Image as ImageIcon, ShoppingCart, Search, Store, X, Loader2, Star, Briefcase, CalendarCheck } from 'lucide-react';
 import { productService, Product, SupermarketProfile } from '../services/productService';
+import { servicePriceText } from '../utils/servicePrice';
 import { cartStoreId, decideAdd } from '../utils/storeLock';
 
 export interface CartLine {
@@ -40,6 +41,12 @@ interface ProductPickerProps {
   initialQty?: Record<string, number>;
   /** Replaces the quantities (product id -> qty) each time `version` changes, e.g. after the basket was edited on a cart page. */
   syncQty?: { version: number; qty: Record<string, number> };
+  /**
+   * Services are booked or quoted, never put in a basket. When given, a store that has services gets a
+   * Products | Services switch and each bookable service a Book button that calls this; without it
+   * (e.g. a delivery, which cannot carry a haircut) services are simply not listed.
+   */
+  onBookService?: (service: Product) => void;
   /**
    * With allStores: the basket may hold ONE store's products (a delivery picks up from one store).
    * Adding from another store is refused on the spot and reported through onStoreConflict.
@@ -176,6 +183,48 @@ const CompactCard = memo(function CompactCard({ product: p, qty, price, money, o
   );
 });
 
+interface ServiceCardProps {
+  service: Product;
+  price: string;
+  storeName?: string;
+  onBook: (service: Product) => void;
+}
+
+// One service: no stock, no basket. Shows what it costs (a price, a range or "Ask for a quote") and how to book it.
+const ServiceCard = memo(function ServiceCard({ service: s, price, storeName, onBook }: ServiceCardProps) {
+  return (
+    <div className="flex min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="relative flex aspect-video w-full items-center justify-center bg-slate-100">
+        {s.image_url ? (
+          <img src={s.image_url} alt={s.name} loading="lazy" decoding="async" className="h-full w-full object-cover" />
+        ) : (
+          <Briefcase size={26} className="text-slate-300" />
+        )}
+        <span className="absolute bottom-1.5 left-1.5 rounded-full bg-white/95 px-2 py-0.5 text-xs font-bold text-orange-600 shadow">{price}</span>
+      </div>
+      <div className="flex flex-1 flex-col p-2.5">
+        <p className="text-[13px] font-semibold leading-tight text-slate-800 line-clamp-2">{s.name}</p>
+        {storeName && <p className="truncate text-[11px] text-slate-400">{storeName}</p>}
+        <StoreBadge product={s} />
+        {s.description && <p className="mt-1 text-xs text-slate-500 line-clamp-2">{s.description}</p>}
+        <div className="mt-auto pt-2">
+          {s.is_bookable ? (
+            <button
+              type="button"
+              onClick={() => onBook(s)}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-orange-500 py-2 text-xs font-semibold text-white transition hover:bg-orange-600 active:scale-95"
+            >
+              <CalendarCheck size={14} /> Book
+            </button>
+          ) : (
+            <p className="text-[11px] text-slate-400">Contact the store to arrange this service.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 function SkeletonGrid({ count, full }: { count: number; full: boolean }) {
   return (
     <div className={full
@@ -194,7 +243,7 @@ function SkeletonGrid({ count, full }: { count: number; full: boolean }) {
 
 const SEARCH_DEBOUNCE_MS = 300;
 
-export default function ProductPicker({ supermarketId, allStores = false, stores, excludeStoreIds, onCartChange, currency = 'UGX', initialQty, syncQty, fullPage = false, onOpenCart, hideCartBar = false, singleStoreCart = false, onStoreLocked, onStoreConflict }: ProductPickerProps) {
+export default function ProductPicker({ supermarketId, allStores = false, stores, excludeStoreIds, onCartChange, currency = 'UGX', initialQty, syncQty, fullPage = false, onOpenCart, hideCartBar = false, onBookService, singleStoreCart = false, onStoreLocked, onStoreConflict }: ProductPickerProps) {
   const [profile, setProfile] = useState<SupermarketProfile | null>(null);
   const [categoryNames, setCategoryNames] = useState<string[]>([]);
 
@@ -216,6 +265,10 @@ export default function ProductPicker({ supermarketId, allStores = false, stores
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [activeCategory, setActiveCategory] = useState<string>('All');
+
+  // Products (the basket) or the store's services (booked, not carted). The Services view only exists when the store has any.
+  const [view, setView] = useState<'products' | 'services'>('products');
+  const [services, setServices] = useState<Product[]>([]);
 
   const excludeKey = (excludeStoreIds ?? []).join(',');
   const storeKey = allStores ? `all:${supermarketId ?? ''}:${supermarketId ? '' : excludeKey}` : `one:${supermarketId ?? ''}`;
@@ -251,6 +304,21 @@ export default function ProductPicker({ supermarketId, allStores = false, stores
       .catch(() => { if (!cancelled) setCategoryNames([]); });
     return () => { cancelled = true; };
   }, [supermarketId]);
+
+  // The store's services, loaded once per store: they decide whether the Products | Services switch is shown at all.
+  const canBookServices = !!onBookService;
+  useEffect(() => {
+    if (!canBookServices || (!allStores && !supermarketId)) { setServices([]); setView('products'); return; }
+    let cancelled = false;
+    productService.getServices({
+      supermarketId: supermarketId || null,
+      excludeStoreIds: allStores && !supermarketId ? excludeStoreIds : undefined,
+    })
+      .then(list => { if (!cancelled) { setServices(list); if (list.length === 0) setView('products'); } })
+      .catch(() => { if (!cancelled) { setServices([]); setView('products'); } });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storeKey, canBookServices]);
 
   // Products already in a basket from another screen: fetch them so they show
   // up in the cart even though they may be far down the catalog.
@@ -372,6 +440,57 @@ export default function ProductPicker({ supermarketId, allStores = false, stores
   const filtering = !!search || activeCategory !== 'All';
   const catalogEmpty = !loading && !loadError && items.length === 0 && !filtering;
 
+  const showKinds = canBookServices && services.length > 0;
+  const servicesView = showKinds && view === 'services';
+  const visibleServices = useMemo(() => {
+    const q = search.toLowerCase();
+    return q ? services.filter(s => `${s.name} ${s.description ?? ''}`.toLowerCase().includes(q)) : services;
+  }, [services, search]);
+
+  const renderServices = (full: boolean) => {
+    if (visibleServices.length === 0) {
+      return (
+        <p className={`text-center text-slate-400 ${full ? 'text-sm py-10' : 'text-xs py-6'}`}>
+          No services match{search ? ` “${search}”` : ''}.{' '}
+          {search && <button type="button" onClick={() => setSearchInput('')} className="font-semibold text-orange-600">Clear</button>}
+        </p>
+      );
+    }
+    return (
+      <div className={full ? 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 px-2 sm:px-0' : 'grid grid-cols-1 sm:grid-cols-2 gap-3'}>
+        {visibleServices.map(s => (
+          <ServiceCard
+            key={s.id}
+            service={s}
+            price={servicePriceText({ price_ugx: inclusivePrice(s), price_max: s.price_max != null ? inclusivePrice({ ...s, price_ugx: s.price_max }) : null }, money)}
+            storeName={showStoreName ? storeNameById.get(s.supermarket_id) : undefined}
+            onBook={onBookService!}
+          />
+        ))}
+      </div>
+    );
+  };
+
+  // "Products | Services": only for a store that has services.
+  const kindSwitch = (full: boolean) => showKinds && (
+    <div className={`flex gap-1.5 ${full ? 'px-2 sm:px-0' : ''}`} role="tablist" aria-label="What to show">
+      {([['products', 'Products'], ['services', `Services (${services.length})`]] as const).map(([id, label]) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={view === id}
+          onClick={() => setView(id)}
+          className={`rounded-full font-semibold transition-colors ${full ? 'px-4 py-1.5 text-sm' : 'px-3 py-1 text-xs'} ${
+            view === id ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
   const renderGrid = (full: boolean) => {
     if (loading) return <SkeletonGrid count={full ? 12 : 6} full={full} />;
     if (loadError && items.length === 0) {
@@ -458,7 +577,7 @@ export default function ProductPicker({ supermarketId, allStores = false, stores
       <input
         value={searchInput}
         onChange={(e) => setSearchInput(e.target.value)}
-        placeholder={full ? `Search ${profile?.name || 'all stores'}…` : 'Search products…'}
+        placeholder={servicesView ? 'Search services…' : full ? `Search ${profile?.name || 'all stores'}…` : 'Search products…'}
         className={full
           ? 'w-full pl-9 pr-8 py-2 bg-slate-100 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 focus:bg-white'
           : 'w-full pl-8 pr-7 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-orange-400'}
@@ -486,8 +605,9 @@ export default function ProductPicker({ supermarketId, allStores = false, stores
         )}
 
         <div className="flex items-center gap-2 px-2 sm:px-0 pt-1 pb-2">{searchBox(true)}</div>
-        {chips(true)}
-        <div className="pt-2">{renderGrid(true)}</div>
+        {kindSwitch(true) && <div className="pb-2">{kindSwitch(true)}</div>}
+        {!servicesView && chips(true)}
+        <div className="pt-2">{servicesView ? renderServices(true) : renderGrid(true)}</div>
 
         {cartCount > 0 && !hideCartBar && (
           <div className="sticky bottom-20 sm:bottom-4 z-30 mt-5 px-2 sm:px-0">
@@ -529,8 +649,9 @@ export default function ProductPicker({ supermarketId, allStores = false, stores
 
       <div className="p-3 bg-white space-y-2.5">
         <div className="flex items-center gap-2">{searchBox(false)}</div>
-        {chips(false)}
-        <div className="max-h-80 overflow-y-auto pr-1">{renderGrid(false)}</div>
+        {kindSwitch(false)}
+        {!servicesView && chips(false)}
+        <div className="max-h-80 overflow-y-auto pr-1">{servicesView ? renderServices(false) : renderGrid(false)}</div>
 
         {cartCount > 0 && (
           <div className="flex items-center justify-between px-3 py-2 bg-orange-50 border border-orange-200 rounded-lg text-sm">
