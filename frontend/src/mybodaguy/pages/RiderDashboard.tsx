@@ -933,7 +933,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
         )}
 
         {activeTab === 'locations' && (
-          <RiderLocationManager riderId={user.id} />
+          <RiderLocationManager riderId={user.id} assist={smartAssist} />
         )}
 
         {activeTab === 'partnerships' && (

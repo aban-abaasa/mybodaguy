@@ -122,6 +122,11 @@ select {
   color: #1e293b !important;
 }
 
+/* An input drawn straight on the page (the classic underline style) opts out of the white fill above. */
+input.input-bare[type] {
+  background-color: transparent !important;
+}
+
 input[type="text"]::placeholder,
 input[type="email"]::placeholder,
 input[type="tel"]::placeholder,
