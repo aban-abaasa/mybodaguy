@@ -12,6 +12,7 @@ import ProfileModal from '../components/ProfileModal';
 import { ThemeToggle } from '../../components/ThemeToggle';
 import { toast } from 'sonner';
 import { consumePendingReferralCode } from '../services/referralService';
+import { PhoneBackButton, type PhoneNav } from '../components/common/PhoneRoleNav';
 
 interface UnifiedDashboardProps {
   user: any;
@@ -47,6 +48,10 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
   const isPhone = useIsPhone();
   const [userRoles, setUserRoles] = useState<string[]>([]);
   const [activeRole, setActiveRole] = useState<RoleType>('customer');
+  // Roles the user has moved through, newest last — what the phone Back arrow
+  // returns to. Moving to the role on top of the trail counts as going back, so
+  // Customer → Rider → Customer doesn't pile up entries.
+  const [roleTrail, setRoleTrail] = useState<RoleType[]>([]);
   const [loading, setLoading] = useState(true);
   // 'rider' is one role_type/user_roles value for both boda riders
   // (motorcycle/bicycle/tuktuk) and car/van/truck operators approved via
@@ -149,6 +154,19 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
     }
   };
 
+  const goToRole = (next: RoleType) => {
+    if (next === activeRole) return;
+    setRoleTrail((trail) => (trail[trail.length - 1] === next ? trail.slice(0, -1) : [...trail, activeRole]));
+    setActiveRole(next);
+  };
+
+  const goBackRole = () => {
+    const prev = roleTrail[roleTrail.length - 1];
+    if (!prev) return;
+    setRoleTrail(roleTrail.slice(0, -1));
+    setActiveRole(prev);
+  };
+
   const getRoleLabel = (role: string) => {
     switch (role) {
       case 'developer': return 'Developer';
@@ -200,29 +218,47 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
   if (userRoles.length === 1 && activeRole !== 'rider' && activeRole !== 'ican-wallet') {
     switch (activeRole) {
       case 'developer':
-        return <DeveloperDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />;
+        return <DeveloperDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => goToRole('ican-wallet')} />;
       case 'chairperson':
-        return <ChairpersonDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />;
+        return <ChairpersonDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => goToRole('ican-wallet')} />;
       case 'customer':
-        return <CustomerDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />;
+        return <CustomerDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => goToRole('ican-wallet')} />;
     }
   }
 
-  // Phones: tapping Customer hands over the whole screen. The shared brand
-  // header + role-tab strip would cost ~90px of a small viewport on top of
-  // Customer's own section bar and bottom tabs, so Customer renders alone and
-  // offers the other roles (and sign-out) from its Menu sheet instead.
-  if (isPhone && activeRole === 'customer') {
-    return (
-      <CustomerDashboard
-        user={user}
-        onSignOut={onSignOut}
-        fullScreen
-        otherRoles={userRoles.filter((r) => r !== 'customer').map((r) => ({ id: r, label: getRoleLabel(r) }))}
-        onSwitchRole={(r) => setActiveRole(r as RoleType)}
-        onGoToWallet={() => setActiveRole('ican-wallet')}
-      />
-    );
+  // Phones: Customer, Rider, Chairperson and the Wallet take the whole screen.
+  // The shared brand header + role-tab strip would cost ~90px of a small
+  // viewport on top of each dashboard's own section bar and bottom tabs, so
+  // they render alone; Back, "Switch role" and Sign Out live in their own bar
+  // and Menu instead (PhoneRoleNav.tsx). Developer keeps the header + tabs.
+  if (isPhone && (activeRole === 'customer' || activeRole === 'rider' || activeRole === 'chairperson' || activeRole === 'ican-wallet')) {
+    const phoneNav: PhoneNav = {
+      roles: userRoles.filter((r) => r !== activeRole).map((r) => ({ id: r, label: getRoleLabel(r) })),
+      onSwitchRole: (r) => goToRole(r as RoleType),
+      onBackToRole: roleTrail.length > 0 ? goBackRole : undefined,
+      onSignOut,
+    };
+    const toWallet = () => goToRole('ican-wallet');
+
+    if (activeRole === 'ican-wallet') {
+      // The wallet isn't a role, so Back always has somewhere to go.
+      const fromWallet = roleTrail.length > 0 ? goBackRole : () => setActiveRole((userRoles[0] || 'customer') as RoleType);
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-50">
+          <header className="safe-top sticky top-0 z-40 border-b border-[#c4a052]/25 bg-white shadow-md dark:border-slate-700">
+            <div className="flex h-12 items-center gap-2 px-4">
+              <PhoneBackButton nav={{ ...phoneNav, onBackToRole: fromWallet }} atHome onHome={fromWallet} />
+              <Wallet size={17} className="flex-shrink-0 text-violet-600" />
+              <h1 className="font-classic-display truncate text-[18px] font-semibold leading-none text-slate-800">ICAN Wallet</h1>
+            </div>
+          </header>
+          <ICANWalletPage user={user} />
+        </div>
+      );
+    }
+    if (activeRole === 'rider') return <RiderDashboard user={user} onSignOut={onSignOut} phoneNav={phoneNav} onGoToWallet={toWallet} />;
+    if (activeRole === 'chairperson') return <ChairpersonDashboard user={user} onSignOut={onSignOut} phoneNav={phoneNav} onGoToWallet={toWallet} />;
+    return <CustomerDashboard user={user} onSignOut={onSignOut} phoneNav={phoneNav} onGoToWallet={toWallet} />;
   }
 
   // User has multiple roles - show tabs
@@ -301,7 +337,7 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
             {userRoles.map((role) => (
               <button
                 key={role}
-                onClick={() => setActiveRole(role as RoleType)}
+                onClick={() => goToRole(role as RoleType)}
                 className={`px-3 xs:px-4 py-1.5 xs:py-2 text-xs xs:text-sm font-medium transition-all whitespace-nowrap ${
                   activeRole === role
                     ? 'text-white border-b-2 border-white'
@@ -313,7 +349,7 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
             ))}
             {/* ICAN Wallet — always visible for all roles */}
             <button
-              onClick={() => setActiveRole('ican-wallet')}
+              onClick={() => goToRole('ican-wallet')}
               className={`flex items-center gap-1 px-3 xs:px-4 py-1.5 xs:py-2 text-xs xs:text-sm font-medium transition-all whitespace-nowrap ml-auto ${
                 activeRole === 'ican-wallet'
                   ? 'text-white border-b-2 border-white'
@@ -329,10 +365,10 @@ export default function UnifiedDashboard({ user, onSignOut }: UnifiedDashboardPr
 
       {/* Dashboard Content - Render active role's dashboard WITHOUT its own header */}
       <div className="dashboard-content">
-        {activeRole === 'developer' && <DeveloperDashboard user={user} onSignOut={onSignOut} embedded onGoToWallet={() => setActiveRole('ican-wallet')} />}
-        {activeRole === 'chairperson' && <ChairpersonDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />}
-        {activeRole === 'rider' && <RiderDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => setActiveRole('ican-wallet')} />}
-        {activeRole === 'customer' && <CustomerDashboard user={user} onSignOut={onSignOut} embedded onGoToWallet={() => setActiveRole('ican-wallet')} />}
+        {activeRole === 'developer' && <DeveloperDashboard user={user} onSignOut={onSignOut} embedded onGoToWallet={() => goToRole('ican-wallet')} />}
+        {activeRole === 'chairperson' && <ChairpersonDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => goToRole('ican-wallet')} />}
+        {activeRole === 'rider' && <RiderDashboard user={user} onSignOut={onSignOut} onGoToWallet={() => goToRole('ican-wallet')} />}
+        {activeRole === 'customer' && <CustomerDashboard user={user} onSignOut={onSignOut} embedded onGoToWallet={() => goToRole('ican-wallet')} />}
         {activeRole === 'ican-wallet' && <ICANWalletPage user={user} />}
       </div>
       <ProfileModal

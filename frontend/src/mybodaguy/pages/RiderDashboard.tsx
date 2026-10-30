@@ -10,6 +10,7 @@ import { useRiderSmartAssist, WorkModeCard, MyAreasCard } from '../components/Ri
 import type { WorkMode } from '../utils/riderSmarts';
 import SupermarketPartnership from '../components/SupermarketPartnership';
 import { useNewMarketAlerts } from '../hooks/useNewMarketAlerts';
+import { PhoneBackButton, PhoneRoleSection, type PhoneNav } from '../components/common/PhoneRoleNav';
 import ProfileModal from '../components/ProfileModal';
 import MobileBottomTabs from '../components/common/MobileBottomTabs';
 import RiderICANEarnings from '../components/RiderICANEarnings';
@@ -37,6 +38,8 @@ interface RiderDashboardProps {
   // router, so the wallet is a role tab, not a URL). Without it the ICAN Coins
   // card on Overview still shows the balance but isn't tappable.
   onGoToWallet?: () => void;
+  // Phone only: UnifiedDashboard gives this view the whole screen (see PhoneRoleNav.tsx).
+  phoneNav?: PhoneNav;
 }
 
 type TabType = 'overview' | 'requests' | 'card' | 'gates' | 'insurance' | 'mode' | 'locations' | 'partnerships' | 'deliveries' | 'rewards' | 'vote';
@@ -360,7 +363,7 @@ function RatingStars({ rating }: { rating: number }) {
   );
 }
 
-export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardProps) {
+export default function RiderDashboard({ user, onGoToWallet, phoneNav }: RiderDashboardProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -614,7 +617,7 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
       {/* Content without brand header - that lives in UnifiedDashboard. This
           bar mirrors the customer dashboard's embedded navigation, sticking
           just below it. */}
-      <header className="sticky top-12 z-40 shadow-md xs:top-14 sm:top-16">
+      <header className={`sticky z-40 shadow-md ${phoneNav ? 'top-0' : 'top-12 xs:top-14 sm:top-16'}`}>
         {/* Desktop / tablet tab strip */}
         <div className="hidden border-b border-[#c4a052]/25 bg-white dark:border-slate-700 sm:block">
           <div className="container mx-auto px-2">
@@ -643,9 +646,10 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
 
         {/* Phone section bar — current section in serif + the one menu
             trigger (opens the bottom sheet at the end of this component). */}
-        <div className="border-b border-[#c4a052]/25 bg-white dark:border-slate-700 sm:hidden">
+        <div className={`border-b border-[#c4a052]/25 bg-white dark:border-slate-700 sm:hidden ${phoneNav ? 'safe-top' : ''}`}>
           <div className="flex h-12 items-center justify-between gap-3 px-4">
             <div className="flex min-w-0 items-center gap-2">
+              <PhoneBackButton nav={phoneNav} atHome={activeTab === 'overview'} onHome={() => setActiveTab('overview')} />
               <ActiveTabIcon size={17} className="flex-shrink-0 text-orange-500" />
               <h1 className="truncate font-classic-display text-[18px] font-semibold leading-none text-slate-800">
                 {activeTabMeta.label}
@@ -1028,6 +1032,8 @@ export default function RiderDashboard({ user, onGoToWallet }: RiderDashboardPro
                 <span className="text-[11px] font-medium leading-tight text-slate-700">My Profile</span>
               </button>
             </div>
+
+            <PhoneRoleSection nav={phoneNav} onDone={() => setShowMobileMenu(false)} />
           </div>
         </div>
       )}
