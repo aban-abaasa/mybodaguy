@@ -1,4 +1,12 @@
-import { supabase } from './supabaseClient';
+import { supabase, createIsolatedAuthClient } from './supabaseClient';
+
+export type IcaneraSignInResult =
+  | { status: 'signed_in' }
+  | {
+      status: 'mfa_required';
+      verify: (code: string) => Promise<void>;
+      cancel: () => Promise<void>;
+    };
 
 export const authService = {
   // Sign in with email and password
@@ -87,33 +95,67 @@ export const authService = {
     return data;
   },
 
-  // Sign in with an ICANera wallet account number (or phone) + PIN. Verified
-  // server-side by the same wallet-login edge function ICAN uses (shared
-  // Supabase project, shared auth.users), which hands back a magic-link
-  // token_hash redeemed into a real session here — so one wallet account
-  // works across ICAN, digital-city-era and mybodaguy. userService.getUserRole
-  // auto-provisions the mbg_users row (via sync_user_from_auth) on first use.
-  async signInWithWallet(identifier: string, pin: string) {
-    const { data, error } = await supabase.functions.invoke('wallet-login', {
-      body: { identifier: String(identifier || '').trim(), pin: String(pin || '').trim() },
-    });
+  // Sign in with ICANera credentials: the email + password of the ICANera
+  // account (shared Supabase project, shared auth.users, so the same account
+  // works across ICAN, digital-city-era and mybodaguy). This replaces the old
+  // wallet account number + PIN sign-in, whose 4-6 digit PIN could be guessed.
+  //
+  // The password is checked on an isolated client. If the account has
+  // two-step verification (authenticator app) switched on in ICAN, the
+  // session is only handed to the app-wide client once the 6-digit code has
+  // been accepted, so a stolen password alone never gets anyone in.
+  // userService.getUserRole auto-provisions the mbg_users row (via
+  // sync_user_from_auth) on first use.
+  async signInWithIcanera(email: string, password: string): Promise<IcaneraSignInResult> {
+    const isolated = createIsolatedAuthClient();
 
-    if (error) {
-      // supabase-js only gives a generic "Edge Function returned a non-2xx
-      // status code" here — the real { success: false, error } body lives on
-      // error.context (the raw Response object).
-      const detail = await (error as any).context?.json?.().catch(() => null);
-      throw new Error(detail?.error || error.message);
+    const { error } = await isolated.auth.signInWithPassword({
+      email: String(email || '').trim().toLowerCase(),
+      password,
+    });
+    if (error) throw error;
+
+    const adoptSession = async () => {
+      const { data: { session } } = await isolated.auth.getSession();
+      if (!session) throw new Error('Sign-in failed. Please try again.');
+
+      const { error: adoptError } = await supabase.auth.setSession({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      });
+      if (adoptError) throw adoptError;
+      // Not signOut(): that would revoke the very session just handed over.
+      isolated.auth.stopAutoRefresh();
+    };
+
+    // Fail closed: if the assurance level can't be read, don't sign in.
+    const { data: aal, error: aalError } = await isolated.auth.mfa.getAuthenticatorAssuranceLevel();
+    if (aalError || !aal) {
+      await isolated.auth.signOut();
+      throw new Error('Could not check your two-step verification. Please try again.');
     }
-    if (!data?.success) throw new Error(data?.error || 'Wallet sign-in failed');
 
-    const { data: otpData, error: otpError } = await supabase.auth.verifyOtp({
-      token_hash: data.token_hash,
-      type: 'email',
-    });
+    if (aal.currentLevel === 'aal1' && aal.nextLevel === 'aal2') {
+      return {
+        status: 'mfa_required',
+        verify: async (code: string) => {
+          const { data: factors, error: factorsError } = await isolated.auth.mfa.listFactors();
+          if (factorsError) throw factorsError;
+          const factor = factors?.totp?.find((f) => f.status === 'verified');
+          if (!factor) throw new Error('Could not find your authenticator app. Sign in to ICAN to review two-step verification.');
 
-    if (otpError) throw otpError;
-    return otpData;
+          const { error: verifyError } = await isolated.auth.mfa.challengeAndVerify({ factorId: factor.id, code });
+          if (verifyError) throw verifyError;
+          await adoptSession();
+        },
+        cancel: async () => {
+          await isolated.auth.signOut().catch(() => undefined);
+        },
+      };
+    }
+
+    await adoptSession();
+    return { status: 'signed_in' };
   },
 
   // Sign in with Google
