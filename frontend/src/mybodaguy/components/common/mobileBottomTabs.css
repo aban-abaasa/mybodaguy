@@ -42,6 +42,9 @@
   --mn-c1: #f97316;
   --mn-c2: #f59e0b;
   --mn-c3: #f43f5e;
+  /* The page colour at the bottom edge, which the fade below blends into
+     (the bottom of the .classic-page gradient). */
+  --mn-fade: #f3e9d2;
   background: none;
   border: 0;
   gap: 0.5rem;
@@ -82,6 +85,33 @@ html[data-theme="dark"] .mbg-nav {
   --mn-c1: #fb923c;
   --mn-c2: #fbbf24;
   --mn-c3: #fb7185;
+  --mn-fade: #0f172a;
+}
+
+/* Pages on a plain light-slate background (the Developer console) -- light in
+   both themes, so the fade stays light too. */
+.mbg-nav.mbg-nav-slate,
+html[data-theme="dark"] .mbg-nav.mbg-nav-slate { --mn-fade: #f8fafc; }
+
+/* ── The fade: page colour behind the bare icons ──────────────────────── */
+/* Nothing is painted behind the icons, so cards scrolling underneath would
+   show through and sit under the labels. This strip of the page colour,
+   solid at the screen edge and clearing to nothing above the icons, keeps both
+   readable. `fixed` takes it out of the (clipping, scrolling) row so it spans
+   the whole screen width; as a child of the bar it hides and themes with it,
+   and it paints beneath the tabs. It never takes a tap. */
+.mbg-nav-fade {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 0;
+  height: calc(5rem + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    var(--mn-fade) 0%,
+    color-mix(in srgb, var(--mn-fade) 90%, transparent) 50%,
+    transparent 100%
+  );
 }
 
 /* ── One tab: icon over label, no box, no background ──────────────────── */

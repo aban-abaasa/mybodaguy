@@ -17,6 +17,8 @@ interface MobileBottomTabsProps<Id extends string> {
   onSelect: (id: Id) => void;
   /** Viewport width from which the bar is hidden — match where the page's own top tab strip appears. */
   hideFrom?: 'sm' | 'md';
+  /** The page colour the fade blends into: 'classic' (the cream/navy dashboards) or 'slate' (light slate pages). */
+  tone?: 'classic' | 'slate';
 }
 
 // Phone-only bottom tab bar: the vital destinations of a dashboard, in reach
@@ -29,6 +31,11 @@ interface MobileBottomTabsProps<Id extends string> {
 // tabs than fit (see mobileBottomTabs.css). Hidden from `sm` (or `md`) up, where
 // each dashboard already has its full top tab strip.
 //
+// With no bar behind the icons, cards scrolling underneath would show through
+// (labels sitting on top of card text). So the bar carries its own page-coloured
+// fade (.mbg-nav-fade) -- every page that mounts it gets the same soft fade-out
+// at the bottom edge, and it hides and themes together with the bar.
+//
 // Pages that render this need ~5rem of bottom padding so their last card isn't
 // hidden under it (the dashboards already carry pb-28).
 export default function MobileBottomTabs<Id extends string>({
@@ -36,6 +43,7 @@ export default function MobileBottomTabs<Id extends string>({
   activeTab,
   onSelect,
   hideFrom = 'sm',
+  tone = 'classic',
 }: MobileBottomTabsProps<Id>) {
   const visible = tabs.slice(0, MAX_TABS);
   if (visible.length === 0) return null;
@@ -43,8 +51,9 @@ export default function MobileBottomTabs<Id extends string>({
   return (
     <nav
       aria-label="Primary"
-      className={`mbg-nav fixed inset-x-0 bottom-0 z-[60] mx-auto flex max-w-md ${hideFrom === 'md' ? 'md:hidden' : 'sm:hidden'}`}
+      className={`mbg-nav ${tone === 'slate' ? 'mbg-nav-slate' : ''} fixed inset-x-0 bottom-0 z-[60] mx-auto flex max-w-md ${hideFrom === 'md' ? 'md:hidden' : 'sm:hidden'}`}
     >
+      <span aria-hidden="true" className="mbg-nav-fade" />
       <NavGlowDefs />
       {visible.map((tab) => {
         const active = activeTab === tab.id;

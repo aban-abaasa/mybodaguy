@@ -349,6 +349,7 @@ export default function DeveloperDashboard({ user, onSignOut, embedded = false, 
           .filter((t): t is NonNullable<typeof t> => !!t)}
         activeTab={activeTab}
         onSelect={setActiveTab}
+        tone="slate"
       />
     </div>
   );
