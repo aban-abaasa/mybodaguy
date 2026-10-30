@@ -7,6 +7,8 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { ICAN_TO_UGX, formatICAN, requestIcanPayout } from '../services/icanWalletService';
+import { showPayoutError } from '../utils/payoutErrors';
+import PayoutDestinationFields, { usePayoutDestination } from './PayoutDestinationFields';
 
 interface SendIcanOutProps {
   userId: string;
@@ -16,12 +18,7 @@ interface SendIcanOutProps {
 
 export default function SendIcanOut({ userId, balance, onSuccess }: SendIcanOutProps) {
   const [icanAmount, setIcanAmount] = useState('');
-  const [channel, setChannel] = useState<'mobilemoneyuganda' | 'bank'>('mobilemoneyuganda');
-  const [network, setNetwork] = useState<'MTN' | 'AIRTEL'>('MTN');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [bankCode, setBankCode] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [beneficiaryName, setBeneficiaryName] = useState('');
+  const payout = usePayoutDestination();
   const [processing, setProcessing] = useState(false);
 
   const amount = parseFloat(icanAmount) || 0;
@@ -29,30 +26,20 @@ export default function SendIcanOut({ userId, balance, onSuccess }: SendIcanOutP
   const feePercent = 3; // flat 3% cash-out fee, same as any ICAN sell — applied server-side in sell_ican_coins()
   const ugxNet = ugxGross - Math.round((ugxGross * feePercent) / 100);
 
-  const canSubmit =
-    amount > 0 &&
-    amount <= balance &&
-    (channel === 'mobilemoneyuganda' ? !!phoneNumber : !!accountNumber && !!bankCode && !!beneficiaryName);
+  const canSubmit = amount > 0 && amount <= balance && payout.ready;
 
   const handleSendOut = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
     setProcessing(true);
     try {
-      const data = await requestIcanPayout({
-        icanAmount: amount,
-        channel,
-        phoneNumber: channel === 'mobilemoneyuganda' ? phoneNumber : undefined,
-        network: channel === 'mobilemoneyuganda' ? network : undefined,
-        accountNumber: channel === 'bank' ? accountNumber : undefined,
-        bankCode: channel === 'bank' ? bankCode : undefined,
-        beneficiaryName: channel === 'bank' ? beneficiaryName : undefined,
-      });
+      const data = await requestIcanPayout({ icanAmount: amount, ...payout.payload });
       toast.success(`${data.message} You'll receive UGX ${Number(data.ugx_net).toLocaleString()}.`);
       setIcanAmount('');
+      payout.setAccount('');
       if (onSuccess) onSuccess();
     } catch (error: any) {
-      toast.error(error.message || 'Payout failed');
+      showPayoutError(error);
     } finally {
       setProcessing(false);
     }
@@ -77,81 +64,7 @@ export default function SendIcanOut({ userId, balance, onSuccess }: SendIcanOutP
           <p className="text-xs text-slate-400 mt-1">Balance: {formatICAN(balance)} IcanEra</p>
         </div>
 
-        <div className="flex gap-2">
-          {(['mobilemoneyuganda', 'bank'] as const).map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setChannel(c)}
-              disabled={processing}
-              className={`flex-1 py-2 rounded-lg text-sm font-medium border ${
-                channel === c ? 'bg-rose-500 border-rose-500 text-white' : 'bg-white border-slate-200 text-slate-600'
-              }`}
-            >
-              {c === 'mobilemoneyuganda' ? 'Mobile Money' : 'Bank Account'}
-            </button>
-          ))}
-        </div>
-
-        {channel === 'mobilemoneyuganda' ? (
-          <>
-            <div className="flex gap-2">
-              {(['MTN', 'AIRTEL'] as const).map((n) => (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => setNetwork(n)}
-                  disabled={processing}
-                  className={`flex-1 py-2 rounded-lg text-sm font-medium border ${
-                    network === n ? 'bg-rose-500 border-rose-500 text-white' : 'bg-white border-slate-200 text-slate-600'
-                  }`}
-                >
-                  {n}
-                </button>
-              ))}
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 mb-2">Mobile Money Number</label>
-              <input
-                value={phoneNumber}
-                onChange={(e) => setPhoneNumber(e.target.value)}
-                placeholder="e.g. 0770123456"
-                disabled={processing}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-rose-400"
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 mb-2">Bank Code</label>
-              <input
-                value={bankCode}
-                onChange={(e) => setBankCode(e.target.value)}
-                disabled={processing}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-rose-400"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 mb-2">Account Number</label>
-              <input
-                value={accountNumber}
-                onChange={(e) => setAccountNumber(e.target.value)}
-                disabled={processing}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-rose-400"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-600 mb-2">Account Holder Name</label>
-              <input
-                value={beneficiaryName}
-                onChange={(e) => setBeneficiaryName(e.target.value)}
-                disabled={processing}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-rose-400"
-              />
-            </div>
-          </>
-        )}
+        <PayoutDestinationFields state={payout} disabled={processing} variant="plain" />
 
         {amount > 0 && (
           <div className="bg-slate-50 rounded-xl p-4 text-sm space-y-1">

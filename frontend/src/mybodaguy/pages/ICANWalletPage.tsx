@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import {
-  ArrowDown, ArrowUp, Banknote, CheckCircle2, ChevronDown, Gem, IdCard, Landmark, Receipt, RotateCcw, Search, ShoppingCart,
+  ArrowDown, ArrowUp, Banknote, CheckCircle2, ChevronDown, Gem, IdCard, Receipt, RotateCcw, Search, ShoppingCart,
   Smartphone, Sparkles, Wallet, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -17,7 +17,6 @@ import {
   requestIcanPayout,
   resolveRecipient,
   sendICANToBusiness,
-  detectUgandaMobileNetwork,
   formatICAN,
   ICAN_TO_UGX,
   type ICANBalance,
@@ -27,6 +26,8 @@ import {
 import BuyIcan from '../components/BuyIcan';
 import SellIcan from '../components/SellIcan';
 import SendIcanOut from '../components/SendIcanOut';
+import PayoutDestinationFields, { usePayoutDestination } from '../components/PayoutDestinationFields';
+import { showPayoutError } from '../utils/payoutErrors';
 import SetPinPrompt from '../components/SetPinPrompt';
 import { useBackLayer } from '../hooks/useBackLayer';
 import PayMoneyModal from '../components/PayMoneyModal';
@@ -140,12 +141,11 @@ interface SendModalProps {
 
 const SEND_DESTINATIONS = [
   { key: 'wallet', label: 'IcanEra wallet', Icon: Gem },
-  { key: 'mobilemoneyuganda', label: 'Mobile Money', Icon: Smartphone },
-  { key: 'bank', label: 'Bank', Icon: Landmark },
+  { key: 'payout', label: 'Mobile Money / Bank', Icon: Smartphone },
 ] as const;
 
 function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
-  const [destination, setDestination] = useState<'wallet' | 'mobilemoneyuganda' | 'bank'>('wallet');
+  const [destination, setDestination] = useState<'wallet' | 'payout'>('wallet');
   const [step, setStep] = useState<'form' | 'confirm'>('form');
 
   // ICAN-to-ICAN fields — numbers only: the recipient's 16-digit account number
@@ -155,12 +155,8 @@ function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
   const [resolved, setResolved] = useState<ResolvedRecipient | null>(null);
   const [pin, setPin] = useState('');
 
-  // Real-money payout fields
-  const [network, setNetwork] = useState<'MTN' | 'AIRTEL'>('MTN');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [bankCode, setBankCode] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [beneficiaryName, setBeneficiaryName] = useState('');
+  // Real-money payout (mobile money or bank — one form, the channel is worked out from the number)
+  const payout = usePayoutDestination();
 
   const [amount, setAmount] = useState('');
   const [loading, setLoading] = useState(false);
@@ -171,14 +167,8 @@ function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
   const ugxGross = amountNum * ICAN_TO_UGX;
   const ugxNet = ugxGross - Math.round((ugxGross * feePercent) / 100);
 
-  // The network comes from the number's prefix; the MTN/Airtel picker only
-  // appears when the prefix isn't recognised (same as the ICAN app).
-  const detectedNetwork = destination === 'mobilemoneyuganda' ? detectUgandaMobileNetwork(phoneNumber) : null;
-  const payoutNetwork = detectedNetwork ?? network;
-
   const canSend = isPayout
-    ? amountNum > 0 && amountNum <= balance.ican &&
-      (destination === 'mobilemoneyuganda' ? !!phoneNumber : !!accountNumber && !!bankCode && !!beneficiaryName)
+    ? amountNum > 0 && amountNum <= balance.ican && payout.ready
     : !!recipient.trim() && amountNum > 0;
 
   // Step 1: check the form and (for a wallet) find out who is really being paid.
@@ -219,21 +209,13 @@ function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
         }
         toast.success(`Sent ${formatICAN(amountNum)} IcanEra to ${resolved.name}. No fee.`);
       } else {
-        const data = await requestIcanPayout({
-          icanAmount: amountNum,
-          channel: destination as 'mobilemoneyuganda' | 'bank',
-          phoneNumber: destination === 'mobilemoneyuganda' ? phoneNumber : undefined,
-          network: destination === 'mobilemoneyuganda' ? payoutNetwork : undefined,
-          accountNumber: destination === 'bank' ? accountNumber : undefined,
-          bankCode: destination === 'bank' ? bankCode : undefined,
-          beneficiaryName: destination === 'bank' ? beneficiaryName : undefined,
-        });
+        const data = await requestIcanPayout({ icanAmount: amountNum, ...payout.payload });
         toast.success(`${data.message} You'll receive UGX ${Number(data.ugx_net).toLocaleString()}.`);
       }
       onDone();
       onClose();
     } catch (e: any) {
-      toast.error(e.message);
+      showPayoutError(e, 'Transfer failed');
     } finally {
       setLoading(false);
     }
@@ -248,7 +230,7 @@ function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
           ['Fee', 'None'],
         ]
       : [
-          ['To', destination === 'mobilemoneyuganda' ? `${phoneNumber} (${payoutNetwork})` : `${beneficiaryName} · ${accountNumber}`],
+          ['To', payout.summary],
           ['Amount', `${formatICAN(amountNum)} IcanEra`],
           [`Fee (${feePercent}%)`, `−UGX ${(ugxGross - ugxNet).toLocaleString()}`],
           ['Recipient gets', `UGX ${ugxNet.toLocaleString()}`],
@@ -289,7 +271,7 @@ function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
       <div className="space-y-4">
         <div>
           <span className="classic-label">Send to</span>
-          <div className="grid grid-cols-3 gap-2" role="group" aria-label="Send to">
+          <div className="grid grid-cols-2 gap-2" role="group" aria-label="Send to">
             {SEND_DESTINATIONS.map(({ key, label, Icon }) => (
               <button
                 key={key}
@@ -324,45 +306,7 @@ function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
           </div>
         )}
 
-        {destination === 'mobilemoneyuganda' && (
-          <>
-            <div>
-              <label className="classic-label" htmlFor="w-send-phone">Mobile Money number</label>
-              <input id="w-send-phone" value={phoneNumber} onChange={(e) => setPhoneNumber(e.target.value)} placeholder="e.g. 0770123456" inputMode="tel" className="classic-input" />
-            </div>
-            {phoneNumber.trim() && (detectedNetwork ? (
-              <p className="-mt-2 text-[12px] text-slate-500">Network detected: <span className="font-semibold text-slate-800 dark:text-slate-100">{detectedNetwork === 'AIRTEL' ? 'Airtel' : 'MTN'}</span></p>
-            ) : (
-              <div>
-                <div className="grid grid-cols-2 gap-2" role="group" aria-label="Network">
-                  {(['MTN', 'AIRTEL'] as const).map((n) => (
-                    <button key={n} type="button" aria-pressed={network === n} onClick={() => setNetwork(n)} disabled={loading} className={`classic-tile p-2.5 text-center text-sm font-semibold ${network === n ? 'is-active' : ''}`}>
-                      {n === 'AIRTEL' ? 'Airtel' : n}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-1.5 text-[11px] text-slate-500">Couldn't tell the network from this number — pick which one it's on.</p>
-              </div>
-            ))}
-          </>
-        )}
-
-        {destination === 'bank' && (
-          <>
-            <div>
-              <label className="classic-label" htmlFor="w-send-bank">Bank code</label>
-              <input id="w-send-bank" value={bankCode} onChange={(e) => setBankCode(e.target.value)} className="classic-input" />
-            </div>
-            <div>
-              <label className="classic-label" htmlFor="w-send-acc">Account number</label>
-              <input id="w-send-acc" value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} inputMode="numeric" className="classic-input" />
-            </div>
-            <div>
-              <label className="classic-label" htmlFor="w-send-name">Account holder name</label>
-              <input id="w-send-name" value={beneficiaryName} onChange={(e) => setBeneficiaryName(e.target.value)} className="classic-input" />
-            </div>
-          </>
-        )}
+        {destination === 'payout' && <PayoutDestinationFields state={payout} disabled={loading} variant="classic" />}
 
         <div>
           <label className="classic-label" htmlFor="w-send-amount">Amount (IcanEra)</label>
