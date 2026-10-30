@@ -1042,15 +1042,7 @@ export default function RiderDashboard({ user, onGoToWallet, phoneNav }: RiderDa
         </div>
       )}
 
-      {/* The bottom tabs are bare icons with no bar behind them, so cards
-          scrolling underneath used to show through (labels sat on top of card
-          text). A page-coloured fade behind them keeps both readable. */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-[55] h-20 bg-gradient-to-t from-[#f3e9d2] via-[#f3e9d2]/90 to-transparent dark:from-[#0f172a] dark:via-[#0f172a]/90 sm:hidden"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
-      />
-
+      {/* The page-coloured fade behind the bare icons now lives in MobileBottomTabs itself. */}
       <MobileBottomTabs
         tabs={BOTTOM_TAB_IDS.map(id => ({ id, label: BOTTOM_TAB_LABELS[id] ?? TAB_META[id].label, icon: TAB_META[id].icon }))}
         activeTab={activeTab}
