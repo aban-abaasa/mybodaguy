@@ -136,6 +136,17 @@ if (typeof window !== 'undefined' && window.location.hash.includes('access_token
   } catch (_) { /* ignore hash-parsing failures */ }
 }
 
+function resolveSupabaseConfig(): { supabaseUrl?: string; supabaseAnonKey?: string } {
+  const runtimeConfig = typeof window !== 'undefined'
+    ? ((window as any).__APP_RUNTIME_CONFIG__ || {})
+    : {};
+  const hasRuntimeSupabaseConfig = Boolean(runtimeConfig.supabaseUrl || runtimeConfig.supabaseAnonKey);
+  return {
+    supabaseUrl: hasRuntimeSupabaseConfig ? runtimeConfig.supabaseUrl : import.meta.env.VITE_SUPABASE_URL,
+    supabaseAnonKey: hasRuntimeSupabaseConfig ? runtimeConfig.supabaseAnonKey : import.meta.env.VITE_SUPABASE_ANON_KEY,
+  };
+}
+
 /**
  * Initialize Supabase client as a singleton
  * Ensures only one GoTrueClient instance exists across the app
@@ -145,12 +156,7 @@ export function initSupabaseClient(): SupabaseClient {
     return supabaseInstance;
   }
 
-  const runtimeConfig = typeof window !== 'undefined'
-    ? ((window as any).__APP_RUNTIME_CONFIG__ || {})
-    : {};
-  const hasRuntimeSupabaseConfig = Boolean(runtimeConfig.supabaseUrl || runtimeConfig.supabaseAnonKey);
-  const supabaseUrl = hasRuntimeSupabaseConfig ? runtimeConfig.supabaseUrl : import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = hasRuntimeSupabaseConfig ? runtimeConfig.supabaseAnonKey : import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const { supabaseUrl, supabaseAnonKey } = resolveSupabaseConfig();
 
   // Validation
   if (!supabaseUrl || !supabaseAnonKey) {
@@ -208,6 +214,26 @@ export function getSupabaseClient(): SupabaseClient {
     return initSupabaseClient();
   }
   return supabaseInstance;
+}
+
+/**
+ * A throw-away client that never stores or refreshes a session. "Sign in with
+ * ICANera" checks the password and the two-step code on this one, and only
+ * hands the finished session to the app-wide client, so the app never sees a
+ * half-signed-in (password-only) session for an account that has two-step on.
+ */
+export function createIsolatedAuthClient(): SupabaseClient {
+  const { supabaseUrl, supabaseAnonKey } = resolveSupabaseConfig();
+  if (!supabaseUrl || !supabaseAnonKey) throw createSupabaseConfigError();
+
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false,
+      detectSessionInUrl: false,
+      storageKey: 'icanera-signin-isolated',
+    },
+  });
 }
 
 // Initialize on module load to catch configuration errors early
