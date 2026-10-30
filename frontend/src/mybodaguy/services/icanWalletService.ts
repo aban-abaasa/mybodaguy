@@ -481,8 +481,8 @@ export async function requestIcanPayout({
       source_app: SOURCE_APP,
     },
   });
-  if (error) throw new Error(friendlyPayoutError(await functionErrorMessage(error, 'Payout failed')));
-  if (!data?.success) throw new Error(friendlyPayoutError(data?.error ?? 'Payout failed'));
+  if (error) throw await payoutFailure(error, 'Payout failed');
+  if (!data?.success) throw icanEraFallbackError(friendlyPayoutError(data?.error ?? 'Payout failed'));
   return data as PayoutResult;
 }
 
@@ -500,22 +500,52 @@ export async function listUgandaBanks(): Promise<UgandaBank[]> {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+export const ICANERA_WALLET_URL = 'https://icanera.space/#wallet';
+export const ICANERA_FALLBACK_HINT = 'You can still send IcanEra to any IcanEra wallet instantly, with no fee.';
+// Problems the person fixes themselves (balance, PIN, a typo): another way of paying would not help.
+const NOT_A_PAYOUT_FAULT = /insufficient|not enough|own (registered )?phone number|\bpin\b|\bvalid\b|required|enter |choose |too small/i;
+
+export interface PayoutError extends Error {
+  /** The server's own wording, without our advice. */
+  rawMessage?: string;
+  /** The payout was refused (and refunded): sending to an IcanEra wallet is the way forward. */
+  suggestIcanEra?: boolean;
+  icanEraWalletUrl?: string;
+}
+
+/**
+ * An Error for a refused mobile-money / bank payout that recommends sending to an IcanEra wallet instead:
+ * wallet-to-wallet is instant, free and never touches the payment provider.
+ */
+export function icanEraFallbackError(message: string): PayoutError {
+  const text = String(message || '').trim();
+  if (!text || NOT_A_PAYOUT_FAULT.test(text)) return Object.assign(new Error(text || 'Transfer failed'), { rawMessage: text });
+  const sentence = /[.!?]$/.test(text) ? text : `${text}.`;
+  return Object.assign(new Error(`${sentence} ${ICANERA_FALLBACK_HINT}`), {
+    rawMessage: text,
+    suggestIcanEra: true,
+    icanEraWalletUrl: ICANERA_WALLET_URL,
+  });
+}
+
 /**
  * supabase.functions.invoke() only says "Edge Function returned a non-2xx status code" for an HTTP error;
- * the function's own {error: "..."} reply sits on error.context and has to be read out, or every failure
- * looks the same.
+ * the function's own {error: "..."} reply sits on error.context and has to be read out. When the function
+ * ANSWERED, its refusal is final (anything debited was refunded) and IcanEra is recommended. When nothing
+ * answered (connection lost) the payout may still have gone through, so nothing is recommended — sending
+ * again could pay twice.
  */
-async function functionErrorMessage(error: any, fallback: string): Promise<string> {
+async function payoutFailure(error: any, fallback: string): Promise<PayoutError> {
   const response = error?.context;
   if (response && typeof response.json === 'function') {
     try {
       const parsed = await (typeof response.clone === 'function' ? response.clone() : response).json();
-      if (parsed?.error) return String(parsed.error);
+      if (parsed?.error) return icanEraFallbackError(friendlyPayoutError(String(parsed.error)));
     } catch {
-      // The reply wasn't JSON (e.g. a gateway error page) — fall back to the generic message.
+      // The reply wasn't JSON (e.g. a gateway error page): nothing of ours answered.
     }
   }
-  return error?.message || fallback;
+  return new Error(`${error?.message || fallback}. If your connection dropped, check your balance and history before trying again — the payout may have gone through.`);
 }
 
 /** Turn the provider's raw refusal into something a rider or customer can act on. The wallet is refunded in every case. */

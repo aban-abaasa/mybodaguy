@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { ICAN_TO_UGX, formatICAN, requestIcanPayout } from '../services/icanWalletService';
+import { showPayoutError } from '../utils/payoutErrors';
 import PayoutDestinationFields, { usePayoutDestination } from './PayoutDestinationFields';
 
 interface SendIcanOutProps {
@@ -38,7 +39,7 @@ export default function SendIcanOut({ userId, balance, onSuccess }: SendIcanOutP
       payout.setAccount('');
       if (onSuccess) onSuccess();
     } catch (error: any) {
-      toast.error(error.message || 'Payout failed');
+      showPayoutError(error);
     } finally {
       setProcessing(false);
     }

@@ -27,6 +27,7 @@ import BuyIcan from '../components/BuyIcan';
 import SellIcan from '../components/SellIcan';
 import SendIcanOut from '../components/SendIcanOut';
 import PayoutDestinationFields, { usePayoutDestination } from '../components/PayoutDestinationFields';
+import { showPayoutError } from '../utils/payoutErrors';
 import SetPinPrompt from '../components/SetPinPrompt';
 import { useBackLayer } from '../hooks/useBackLayer';
 import PayMoneyModal from '../components/PayMoneyModal';
@@ -214,7 +215,7 @@ function SendModal({ userId, balance, onClose, onDone }: SendModalProps) {
       onDone();
       onClose();
     } catch (e: any) {
-      toast.error(e.message);
+      showPayoutError(e, 'Transfer failed');
     } finally {
       setLoading(false);
     }
